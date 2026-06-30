@@ -1,0 +1,3 @@
+sqlite-vec
+requests
+mcp[cli]
