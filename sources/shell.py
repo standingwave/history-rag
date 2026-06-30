@@ -9,7 +9,7 @@ timestamp, so a decade of history reduces to its unique set. Trivial commands
 are dropped, and any command that looks like it contains a secret is skipped so
 it never gets embedded or surfaced back into a session.
 """
-import os, re, hashlib
+import os, re, glob, hashlib
 from datetime import datetime, timezone
 
 MAX_CHARS = 2000
@@ -39,6 +39,9 @@ def _iso(epoch: int) -> str:
 
 def _history_files():
     candidates = ["~/.zsh_history", "~/.zhistory", "~/.bash_history"]
+    # macOS keeps per-session history snapshots in these dirs.
+    for pat in ("~/.zsh_sessions/*.history*", "~/.bash_sessions/*.history*"):
+        candidates += sorted(glob.glob(os.path.expanduser(pat)))
     extra = os.environ.get("CLAUDE_RAG_HISTFILES", "")
     if extra:
         candidates += extra.split(":")

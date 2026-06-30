@@ -32,9 +32,11 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 Every source feeds one shared index; pass `source="claude"` or `source="shell"`
 to `search_history` to restrict a query.
 
-**Shell history** reads `~/.zsh_history` and `~/.bash_history` by default. Live
-history files are capped by your shell's `SAVEHIST`/`HISTSIZE`, so for older
-archived history point `CLAUDE_RAG_HISTFILES` at the extra files (colon-separated):
+**Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
+snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
+files are capped by your shell's `SAVEHIST`/`HISTSIZE`, but the session snapshots
+reach further back. For history archived elsewhere (old machines, backups), point
+`CLAUDE_RAG_HISTFILES` at the extra files (colon-separated):
 ```bash
 CLAUDE_RAG_HISTFILES="$HOME/backups/zsh_history.2019:$HOME/backups/bash_history.old" \
   ~/.claude/rag-venv/bin/python index.py
