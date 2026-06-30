@@ -30,8 +30,12 @@ are called out inline, e.g. reconnecting the MCP server in Phase 5.
 
 ## Phase 0 — Locate the code & scope the work
 Work from the repo root (the directory containing `server.py`, `config.py`,
-`index.py`, and `sources/`). Confirm with `ls`. If you only have a URL, clone it
-first and `cd` in. All paths below are relative to this root.
+`index.py`, and `sources/`). Confirm with `ls`. If you don't have the code yet,
+clone it first and `cd` in:
+```bash
+git clone https://github.com/standingwave/history-rag.git && cd history-rag
+```
+All paths below are relative to this root.
 
 Note the platform: `uname` (`Darwin` = macOS, `Linux` = Linux). It changes only
 the Ollama install command and whether shell session-snapshot dirs exist.

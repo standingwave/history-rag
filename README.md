@@ -12,6 +12,7 @@ commands together. Runs entirely on your machine; nothing leaves it.
 ## Quickstart
 For the impatient (full detail in the numbered sections below):
 ```bash
+git clone https://github.com/standingwave/history-rag.git && cd history-rag
 brew install ollama && brew services start ollama
 ollama pull nomic-embed-text
 uv venv ~/.claude/rag-venv
