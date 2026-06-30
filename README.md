@@ -5,6 +5,10 @@ history — exposed to Claude Code as an MCP `search_history` tool. Everything i
 indexed into one vector space, so a single query ranks chat turns and terminal
 commands together. Runs entirely on your machine; nothing leaves it.
 
+> Setting this up by handing it to your coding agent? Point it at
+> [`AGENT_SETUP.md`](AGENT_SETUP.md) instead — that's the agent runbook. This
+> README is the human walkthrough.
+
 ## Quickstart
 For the impatient (full detail in the numbered sections below):
 ```bash
