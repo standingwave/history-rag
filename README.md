@@ -35,6 +35,7 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `server.py` — the MCP server exposing `search_history`.
 - `inspect_sessions.py` — one-off: dumps the JSONL shape so you can confirm the
   Claude parser matches your session files.
+- [`TESTING.md`](TESTING.md) — recommended plan for adding a test suite.
 
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
