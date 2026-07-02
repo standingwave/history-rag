@@ -29,13 +29,16 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `sources/` — one module per content source, each yielding `(id, text, record)`:
   - `claude.py` — Claude Code session prompts + assistant text.
   - `shell.py` — bash + zsh command history, deduped.
+  - `appusage.py` — daily per-app time from the tracker (macOS, optional).
+- `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
+  how long you spend in each app. See "App usage" below.
 - `server.py` — the MCP server exposing `search_history`.
 - `inspect_sessions.py` — one-off: dumps the JSONL shape so you can confirm the
   Claude parser matches your session files.
 
 ## Sources
-Every source feeds one shared index; pass `source="claude"` or `source="shell"`
-to `search_history` to restrict a query.
+Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
+or `source="appusage"` to `search_history` to restrict a query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -51,6 +54,38 @@ Identical commands collapse to one entry (with a run count); trivial commands
 (passwords, tokens, API keys, `user:pass@host` URLs) is skipped so it's never
 embedded. Command timestamps only appear if zsh recorded them (`setopt
 EXTENDED_HISTORY`); bash needs `HISTTIMEFORMAT` set.
+
+**App usage (macOS, optional).** A small tracker records how long you spend in
+each app so you can later ask "what was I doing the week I built X?". It's off
+until you install the daemon; the `appusage` source yields nothing without it.
+
+The daemon samples the frontmost app and idle time every 20s (via `lsappinfo`
+and `ioreg` — no extra deps, no permissions), coalesces same-app stretches into
+segments in `~/.claude/appusage.db`, and doesn't count idle (>2 min) or sleep
+time. `sources/appusage.py` feeds daily per-app totals (≥1 min) into the index,
+today included: the indexer re-embeds any chunk whose text changed, so today's
+growing total stays current while finished days settle once.
+
+Install it as a `launchd` agent (fills the plist's absolute-path placeholders,
+then loads it):
+```bash
+PY=~/.claude/rag-venv/bin/python
+DAEMON="$(pwd)/appusage/daemon.py"
+sed -e "s#__PYTHON__#$PY#" -e "s#__DAEMON__#$DAEMON#" \
+  appusage/com.user.appusage.plist > ~/Library/LaunchAgents/com.user.appusage.plist
+launchctl load ~/Library/LaunchAgents/com.user.appusage.plist
+```
+See what it's captured any time (independent of the index):
+```bash
+~/.claude/rag-venv/bin/python appusage/report.py        # today + last 7 days
+```
+To stop and remove it:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.user.appusage.plist
+rm ~/Library/LaunchAgents/com.user.appusage.plist
+```
+Tuning: `APPUSAGE_INTERVAL` (sample seconds) and `APPUSAGE_IDLE` (idle cutoff)
+as env vars in the plist. Data is local, like everything else here.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,
@@ -186,7 +221,9 @@ After registering (step 4) and indexing (step 3):
    ```
    /mcp
    ```
-   You should see `history` listed as connected with a `search_history` tool.
+   You should see `history` listed as connected, with `search_history` and
+   `history_stats` tools. (`history_stats` reports per-source counts and date
+   coverage — a quick way for Claude to see what's indexed before searching.)
 
 2. **Ask Claude something that needs your history.** Natural-language prompts
    that force a lookup work best — Claude will call the tool on its own:
@@ -225,8 +262,11 @@ After registering (step 4) and indexing (step 3):
 - Tool returns nothing → the index is empty or stale; re-run index.py.
 
 ## Notes
-- One chunk per Claude message and per unique shell command. For long assistant
-  turns you may later want sliding-window chunking; per-message is fine to start.
+- One chunk per Claude message, per unique shell command, and per day-per-app.
+  For long assistant turns you may later want sliding-window chunking;
+  per-message is fine to start.
+- Indexing is incremental and self-healing: a chunk is re-embedded only when its
+  text changed, so growing app-usage totals stay current without a rebuild.
 - `nomic-embed-text` is the speed pick. For higher quality, set the env vars
   (in both your indexing shell and the MCP registration) and re-index:
   ```bash
@@ -234,4 +274,6 @@ After registering (step 4) and indexing (step 3):
   CLAUDE_RAG_MODEL=mxbai-embed-large CLAUDE_RAG_DIM=1024 ~/.claude/rag-venv/bin/python index.py --rebuild
   ```
   Other overrides: `CLAUDE_RAG_DB`, `CLAUDE_RAG_OLLAMA`. See `config.py`.
-- Distance is cosine-ish; lower = closer.
+- `search_history` returns `{query, count, results[]}`, ranked best-first, with
+  a `distance` (L2; lower = closer) on each hit. `history_stats` reports the
+  corpus. Filter a search with `source=` and trim noise with `max_distance=`.

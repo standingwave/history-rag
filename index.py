@@ -13,9 +13,9 @@ import json, sqlite3, sys
 import sqlite_vec
 import requests
 from config import EMBED_MODEL, DIM, DB_PATH, OLLAMA
-from sources import claude, shell
+from sources import claude, shell, appusage
 
-SOURCES = [claude, shell]
+SOURCES = [claude, shell, appusage]
 BATCH_SIZE = 64          # inputs per Ollama call
 
 def all_chunks():
@@ -61,14 +61,17 @@ def main():
         db.execute("DROP TABLE IF EXISTS vec_chunks")
     setup(db)
 
-    existing = {r[0] for r in db.execute("SELECT id FROM chunks")}
+    # id -> current text, so a chunk is skipped only when unchanged. Chunks whose
+    # text changed (e.g. today's still-growing app-usage total) get re-embedded.
+    existing = {r[0]: r[1] for r in db.execute("SELECT id, text FROM chunks")}
     new = failed = 0
 
     def store(cid, text, rec, vec):
         db.execute("INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?,?)",
                    (cid, text, rec["source"], rec.get("timestamp", ""),
                     rec.get("location", ""), json.dumps(rec.get("meta", {}))))
-        db.execute("INSERT OR REPLACE INTO vec_chunks(id, embedding) VALUES (?, ?)",
+        db.execute("DELETE FROM vec_chunks WHERE id = ?", (cid,))
+        db.execute("INSERT INTO vec_chunks(id, embedding) VALUES (?, ?)",
                    (cid, sqlite_vec.serialize_float32(vec)))
 
     def flush(batch):
@@ -101,7 +104,7 @@ def main():
     batch = []
     try:
         for cid, text, rec in all_chunks():
-            if cid in existing:
+            if existing.get(cid) == text:
                 continue
             batch.append((cid, text, rec))
             if len(batch) >= BATCH_SIZE:
@@ -113,7 +116,7 @@ def main():
 
     db.commit()
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    print(f"done. +{new} new chunks, {failed} skipped, {total} total in {DB_PATH}")
+    print(f"done. {new} embedded (new or changed), {failed} skipped, {total} total in {DB_PATH}")
 
 if __name__ == "__main__":
     main()

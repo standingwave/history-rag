@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd agent for the app-usage tracker. Placeholders __PYTHON__ and
+     __DAEMON__ are filled in at install time (see README "App usage" section) —
+     they must be absolute paths. Install to ~/Library/LaunchAgents/ and load
+     with: launchctl load ~/Library/LaunchAgents/com.user.appusage.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.appusage</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__DAEMON__</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/appusage-daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/appusage-daemon.log</string>
+</dict>
+</plist>

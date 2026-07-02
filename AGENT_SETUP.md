@@ -24,6 +24,7 @@ not on this list, decide yourself with sensible defaults.
 | Q6 | Rebuild confirmation IF an index already exists with data (rebuild wipes it). | 3 | Don't rebuild; do an incremental run |
 | Q7 | MCP registration scope — `user` (all your projects) or `project` (just this repo)? | 5 | `user` |
 | Q8 | Set up automatic refresh (cron), and at what interval? | 6 | Don't install one; mention manual refresh |
+| Q9 | (macOS only) Install the app-usage tracker? It's a persistent `launchd` daemon that logs how long they spend in each app. | 7 | Don't install — mention it's available |
 
 STOP points (notify, don't ask — these need a human action you can't perform)
 are called out inline, e.g. reconnecting the MCP server in Phase 5.
@@ -134,6 +135,23 @@ paths (cron has no `~` and a minimal PATH) and note it needs Ollama running:
 */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
 ```
 If they declined, tell them the manual refresh command (`index.py`) and move on.
+
+## Phase 7 — Optional: app-usage tracker (macOS only)
+Skip on Linux. This is a persistent background daemon that logs the frontmost
+app over time — privacy-relevant — so **ASK → Q9** and install ONLY on a clear
+yes. It's independent of the rest; the `appusage` source is a no-op without it.
+1. Fill the plist placeholders with absolute paths and load it:
+   ```bash
+   PY=~/.claude/rag-venv/bin/python
+   sed -e "s#__PYTHON__#$PY#" -e "s#__DAEMON__#$(pwd)/appusage/daemon.py#" \
+     appusage/com.user.appusage.plist > ~/Library/LaunchAgents/com.user.appusage.plist
+   launchctl load ~/Library/LaunchAgents/com.user.appusage.plist
+   ```
+2. Verify it's running: `launchctl list | grep com.user.appusage` (a PID in the
+   first column means it's up), and `/tmp/appusage-daemon.log` has no errors.
+3. Tell them: data lands in `~/.claude/appusage.db`; `appusage/report.py` shows
+   totals; finished days flow into the index on the next `index.py` run. To
+   remove: `launchctl unload …` then delete the plist.
 
 ## Guardrails — do not violate
 - **Never disable the secret redaction** in `sources/shell.py`. It drops
