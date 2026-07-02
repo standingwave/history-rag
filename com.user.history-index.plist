@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- launchd agent that refreshes the history index on an interval. Placeholders
+     __PYTHON__ and __INDEX__ are filled in at install time (see README "Keep it
+     fresh") — they must be absolute paths. Install to ~/Library/LaunchAgents/
+     and load with: launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
+
+     Periodic job (not KeepAlive): runs once at load/login, then every
+     StartInterval seconds, and catches up on wake if a run was missed while
+     asleep. Needs Ollama running; index.py no-ops safely if it isn't. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.history-index</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>__INDEX__</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/history-index.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/history-index.log</string>
+</dict>
+</plist>

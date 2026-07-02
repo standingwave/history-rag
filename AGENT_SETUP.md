@@ -129,12 +129,23 @@ session. They must do this; you cannot. After they do, `search_history("…", k=
 works, with optional `source="claude"|"shell"`.
 
 ## Phase 6 — Keep it fresh
-**ASK → Q8.** If they want automatic refresh, install a cron job with absolute
-paths (cron has no `~` and a minimal PATH) and note it needs Ollama running:
-```cron
-*/30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
-```
-If they declined, tell them the manual refresh command (`index.py`) and move on.
+**ASK → Q8.** If they want automatic refresh:
+- **macOS — prefer launchd** (survives sleep, no Full Disk Access hassle). Fill
+  the plist placeholders and load it:
+  ```bash
+  PY=~/.claude/rag-venv/bin/python
+  sed -e "s#__PYTHON__#$PY#" -e "s#__INDEX__#$(pwd)/index.py#" \
+    com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
+  launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
+  ```
+  Adjust cadence via `StartInterval` in the plist. Verify with
+  `launchctl list | grep history-index` and `tail /tmp/history-index.log`.
+- **Linux — cron** (absolute paths; cron has no `~` and a minimal PATH):
+  ```cron
+  */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
+  ```
+Either way it needs Ollama running. If they declined, tell them the manual
+refresh command (`index.py`) and move on.
 
 ## Phase 7 — Optional: app-usage tracker (macOS only)
 Skip on Linux. This is a persistent background daemon that logs the frontmost

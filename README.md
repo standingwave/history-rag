@@ -35,6 +35,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `server.py` — the MCP server exposing `search_history`.
 - `inspect_sessions.py` — one-off: dumps the JSONL shape so you can confirm the
   Claude parser matches your session files.
+- `com.user.history-index.plist` — launchd template to re-index on an interval
+  (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — recommended plan for adding a test suite.
 
 ## Sources
@@ -192,28 +194,37 @@ Then in a session, Claude can call `search_history("that proxy bug we hit", k=5)
 ## 5. Keep it fresh
 The index only reflects sessions present at last run. Pick one:
 
-**cron** — edit your crontab with `crontab -e`, then add a line. cron has a
-minimal PATH and no `~` expansion, so use absolute paths. Get yours with
-`echo "$HOME/.claude/rag-venv/bin/python $(pwd)/index.py"` and paste the result:
-```cron
-# refresh the history index every 30 min; log output for debugging
-*/30 * * * * /ABS/PATH/rag-venv/bin/python /ABS/PATH/index.py >> $HOME/.claude/rag-index.log 2>&1
-```
-Note: cron needs the Ollama server running to embed new chunks. After saving,
-check it fired by tailing the log:
+**launchd (recommended, macOS)** — a periodic agent that re-indexes every 30 min,
+runs once at login, and catches up after sleep (cron just skips missed runs).
+Fill the plist's absolute-path placeholders and load it:
 ```bash
-tail -f ~/.claude/rag-index.log
+PY=~/.claude/rag-venv/bin/python
+sed -e "s#__PYTHON__#$PY#" -e "s#__INDEX__#$(pwd)/index.py#" \
+  com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
+launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
 ```
-On macOS, cron may need Full Disk Access (System Settings → Privacy & Security →
-Full Disk Access → add `/usr/sbin/cron`) to read `~/.claude`.
+It needs Ollama running (index.py no-ops safely if it isn't). Check it fired:
+```bash
+tail -f /tmp/history-index.log
+```
+Change the cadence via `StartInterval` (seconds) in the plist; if you use a
+non-default embedding model, add an `EnvironmentVariables` dict with
+`CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM`. To stop: `launchctl unload …` then remove
+the plist.
 
 **manual** — run when you want it current:
 ```bash
 ~/.claude/rag-venv/bin/python index.py
 ```
 
-**file-watcher** — watch `~/.claude/projects/**/*.jsonl` and trigger index.py
-on change (e.g. with `fswatch` or a launchd WatchPaths agent).
+**cron (portable / Linux)** — `crontab -e`, then (absolute paths; cron has a
+minimal PATH and no `~` expansion):
+```cron
+*/30 * * * * /ABS/PATH/rag-venv/bin/python /ABS/PATH/index.py >> $HOME/.claude/rag-index.log 2>&1
+```
+On macOS, cron may also need Full Disk Access (System Settings → Privacy &
+Security → Full Disk Access → add `/usr/sbin/cron`) to read `~/.claude` — which
+is a good reason to prefer the launchd agent above.
 
 ## 6. Verify it works inside a Claude Code session
 After registering (step 4) and indexing (step 3):
