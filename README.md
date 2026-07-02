@@ -178,6 +178,21 @@ Writes `~/.claude/history-rag.db`. Use `--rebuild` after changing the embedding
 model or the chunk schema (e.g. adding a source) — the table layout changes, so
 an incremental run against an old DB won't work.
 
+Each run prints one stats line per source (`shell: 905 chunks, 3 embedded,
+0 skipped, 0.4s`), and a source that throws is logged and skipped without
+blocking the others. Two more flags for maintenance:
+```bash
+~/.claude/rag-venv/bin/python index.py --source shell          # run one source (any mode)
+~/.claude/rag-venv/bin/python index.py --prune --source shell  # drop its stale chunks
+```
+`--prune` removes stored chunks whose id the source stopped yielding (edited
+notes, rewritten git history). Two safety rails: it requires `--source`,
+because the index is an archive — it keeps chunks whose backing data has aged
+out (Claude Code deletes old session transcripts, histfiles rotate), and a
+blanket prune would delete that outlived history. And it only prunes a source
+that completed cleanly and yielded at least one chunk, so a broken or absent
+source never wipes its own rows.
+
 ## 4. Register the MCP server with Claude Code
 Run this from the repo directory, using the venv interpreter (bare `python`
 won't find the deps). `$(pwd)` fills in the absolute path to server.py (the
