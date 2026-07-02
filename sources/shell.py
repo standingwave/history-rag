@@ -11,6 +11,7 @@ it never gets embedded or surfaced back into a session.
 """
 import os, re, glob, hashlib
 from datetime import datetime, timezone
+from sources.common import SECRET_RE
 
 MAX_CHARS = 2000
 MIN_CHARS = 4
@@ -23,11 +24,9 @@ _STOP = {
     "exit", "q", "k", "gst", "gs", "gd", "h", "history", "top", "htop",
 }
 
-# Commands that likely contain a credential -> drop entirely (never embed).
-_SECRET_RE = re.compile(
-    r"(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key"
-    r"|bearer|authorization|AKIA[0-9A-Z]{16}|-p\S{6,}|://[^/\s:]+:[^/\s@]+@)"
-)
+# Shell-only credential shape (mysql -pPassword style); too URL-hostile to
+# live in the shared regex, where it would drop paths like /my-project-x.
+_FLAG_SECRET_RE = re.compile(r"-p\S{6,}")
 
 def _iso(epoch: int) -> str:
     if not epoch:
@@ -93,7 +92,8 @@ def _parse_bash(path):
             pending = 0
 
 def _keep(cmd: str) -> bool:
-    return len(cmd) >= MIN_CHARS and cmd not in _STOP and not _SECRET_RE.search(cmd)
+    return (len(cmd) >= MIN_CHARS and cmd not in _STOP
+            and not SECRET_RE.search(cmd) and not _FLAG_SECRET_RE.search(cmd))
 
 def iter_chunks():
     # command -> [count, latest_epoch, history_filename]

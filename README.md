@@ -30,6 +30,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `claude.py` — Claude Code session prompts + assistant text.
   - `shell.py` — bash + zsh command history, deduped.
   - `appusage.py` — daily per-app time from the tracker (macOS, optional).
+  - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
+  - `common.py` — helpers shared across sources (secret redaction).
 - `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
   how long you spend in each app. See "App usage" below.
 - `server.py` — the MCP server exposing `search_history`.
@@ -41,7 +43,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
-or `source="appusage"` to `search_history` to restrict a query.
+`source="appusage"`, or `source="browser"` to `search_history` to restrict a
+query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -89,6 +92,26 @@ rm ~/Library/LaunchAgents/com.user.appusage.plist
 ```
 Tuning: `APPUSAGE_INTERVAL` (sample seconds) and `APPUSAGE_IDLE` (idle cutoff)
 as env vars in the plist. Data is local, like everything else here.
+
+**Browser history** reads Safari plus every Chrome and Helium profile found in
+their standard locations (Guest/System profiles skipped) and emits one chunk
+per URL: `<title> — <url>`, deduped across visits, profiles, and browsers, with
+visit counts summed and the last visit as the timestamp. Query strings and
+fragments are stripped (they carry tokens and churn), localhost and non-http(s)
+URLs are skipped, and the shared secret regex drops anything that still looks
+credential-bearing. Other Chromium-family browsers work via
+`CLAUDE_RAG_BROWSERS` (colon-separated `name=path` entries; the Safari-vs-
+Chromium schema is sniffed from the DB, not the name):
+```bash
+CLAUDE_RAG_BROWSERS="arc=$HOME/Library/Application Support/Arc/User Data/Default/History" \
+  ~/.claude/rag-venv/bin/python index.py --source browser
+```
+Reading Safari's `History.db` requires Full Disk Access for whatever process
+runs the indexer (System Settings → Privacy & Security → Full Disk Access →
+add your terminal). Without it, Safari is skipped with a note and the other
+browsers still index. Note Chromium browsers expire history (~90 days), so the
+index outlives the browser's own record — don't routinely `--prune` this
+source.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,
