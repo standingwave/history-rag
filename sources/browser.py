@@ -27,6 +27,7 @@ MAX_CHARS = 500
 # synthetic and skipped.
 _DEFAULTS = [
     ("safari", "~/Library/Safari/History.db"),
+    ("safari", "~/Library/Safari/Profiles/*/History.db"),
     ("chrome", "~/Library/Application Support/Google/Chrome/*/History"),
     ("helium", "~/Library/Application Support/net.imput.helium/*/History"),
 ]

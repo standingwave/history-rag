@@ -95,8 +95,9 @@ rm ~/Library/LaunchAgents/com.user.appusage.plist
 Tuning: `APPUSAGE_INTERVAL` (sample seconds) and `APPUSAGE_IDLE` (idle cutoff)
 as env vars in the plist. Data is local, like everything else here.
 
-**Browser history** reads Safari plus every Chrome and Helium profile found in
-their standard locations (Guest/System profiles skipped) and emits one chunk
+**Browser history** reads Safari (default store plus any Safari 17+ profiles
+under `~/Library/Safari/Profiles/`) and every Chrome and Helium profile found
+in their standard locations (Guest/System profiles skipped) and emits one chunk
 per URL: `<title> — <url>`, deduped across visits, profiles, and browsers, with
 visit counts summed and the last visit as the timestamp. Query strings and
 fragments are stripped (they carry tokens and churn), localhost and non-http(s)
