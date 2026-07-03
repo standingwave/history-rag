@@ -36,7 +36,13 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `common.py` — helpers shared across sources (secret redaction).
 - `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
   how long you spend in each app. See "App usage" below.
-- `server.py` — the MCP server exposing `search_history`.
+- `server.py` — the MCP server. Four tools forming a disclosure ladder:
+  `history_stats` (orient; `locations=true` reveals filterable prefixes) →
+  `search_history` / `list_window` (relevance-ranked vs exhaustive
+  chronological pointers, both returning chunk ids) → `expand` (the reading
+  view: full chunk + source-aware context, live from the backing store when
+  it still exists — surrounding conversation turns, `git show --stat`, the
+  whole note, the profile's same-day visits).
 - `inspect_sessions.py` — one-off: dumps the JSONL shape so you can confirm the
   Claude parser matches your session files.
 - `com.user.history-index.plist` — launchd template to re-index on an interval
