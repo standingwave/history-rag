@@ -71,3 +71,33 @@ APPUSAGE_DB = os.path.expanduser(get("appusage", "db", "CLAUDE_RAG_APPUSAGE_DB",
 
 # Which sources run; None means all (file-less installs unchanged).
 ENABLED_SOURCES = _FILE.get("sources", {}).get("enabled")
+
+class StampMismatch(RuntimeError):
+    """The index was built with a different embedding model than configured."""
+
+def check_stamp(db, stamp_if_missing: bool = False):
+    """Refuse to use an index built with a different embedding model/dim —
+    mixed-model vectors are silent corruption (a same-dim swap produces no
+    error anywhere else). Legacy DBs without a stamp: the indexer stamps them
+    with the current config (the running system is definitionally consistent);
+    read-only opens tolerate the absence. Returns the stamp dict or None."""
+    has = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                     "AND name='index_meta'").fetchone()
+    stamp = dict(db.execute("SELECT key, value FROM index_meta")) if has else {}
+    if not stamp.get("model"):
+        if stamp_if_missing:
+            from datetime import datetime, timezone
+            db.execute("CREATE TABLE IF NOT EXISTS index_meta("
+                       "key TEXT PRIMARY KEY, value TEXT)")
+            db.executemany("INSERT OR REPLACE INTO index_meta VALUES (?, ?)",
+                           [("model", EMBED_MODEL), ("dim", str(DIM)),
+                            ("created", datetime.now(timezone.utc).isoformat())])
+            db.commit()
+        return None
+    if stamp["model"] != EMBED_MODEL or stamp.get("dim") != str(DIM):
+        raise StampMismatch(
+            f"index built with {stamp['model']}/{stamp.get('dim')} but config "
+            f"says {EMBED_MODEL}/{DIM} — refusing to mix embedding models. "
+            f"Evaluate candidates with tools/eval-model.py; switch models "
+            f"with tools/migrate-model.py.")
+    return stamp

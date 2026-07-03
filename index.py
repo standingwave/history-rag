@@ -128,7 +128,13 @@ def main():
     if args.rebuild:
         db.execute("DROP TABLE IF EXISTS chunks")
         db.execute("DROP TABLE IF EXISTS vec_chunks")
+        db.execute("DROP TABLE IF EXISTS index_meta")
     setup(db)
+    try:
+        # Refuse to write wrong-model vectors; stamp fresh/legacy DBs.
+        config.check_stamp(db, stamp_if_missing=True)
+    except config.StampMismatch as e:
+        sys.exit(str(e))
 
     # id -> (text, timestamp). Changed text re-embeds (e.g. today's still-
     # growing app-usage total); same text with a changed timestamp gets a

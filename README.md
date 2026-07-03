@@ -287,9 +287,15 @@ If that looks right, build:
 ~/.claude/rag-venv/bin/python index.py            # incremental (safe to re-run)
 ~/.claude/rag-venv/bin/python index.py --rebuild  # wipe + reindex from scratch
 ```
-Writes `~/.claude/history-rag.db`. Use `--rebuild` after changing the embedding
-model or the chunk schema (e.g. adding a source) — the table layout changes, so
-an incremental run against an old DB won't work.
+Writes `~/.claude/history-rag.db`. The DB records which embedding model built
+it (`index_meta`); both the indexer and the server refuse to touch an index
+whose stamp doesn't match the configured model/dim — a same-dimension model
+swap would otherwise corrupt search silently. Adding a source needs no
+rebuild (sources are additive). `--rebuild` is the deliberate escape hatch
+for a model/schema change, but note it reindexes from *sources*: chunks whose
+backing data has aged out (old session transcripts, expired browser history)
+are lost. For a model switch that preserves them, see the migration plan in
+`TESTING.md`.
 
 Each run prints one stats line per source (`shell: 905 chunks, 3 embedded,
 0 skipped, 0.4s`), and a source that throws is logged and skipped without

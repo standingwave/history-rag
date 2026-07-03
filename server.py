@@ -31,6 +31,9 @@ def _db():
     db.enable_load_extension(True)
     sqlite_vec.load(db)
     db.enable_load_extension(False)
+    # Querying with a different model than built the vectors returns quietly
+    # broken rankings — refuse instead (raises; surfaces as a tool error).
+    config.check_stamp(db)
     return db
 
 def _embed(text: str):
@@ -353,8 +356,8 @@ def history_stats(locations: bool = False) -> str:
     Pass locations=true to also get each source's top location prefixes with
     counts (browser profiles, git repos, obsidian folders, claude project
     dirs) — these are valid values for the search/list `location` filter.
-    Returns JSON {total_chunks, sources: {name: {chunks, earliest, latest
-    [, locations]}}}."""
+    Returns JSON {total_chunks, embedding: {model, dim}, sources: {name:
+    {chunks, earliest, latest [, locations]}}}."""
     db = _db()
     sources = {}
     for src, cnt, mn, mx in db.execute(
@@ -370,7 +373,11 @@ def history_stats(locations: bool = False) -> str:
         for src, c in counts.items():
             sources[src]["locations"] = dict(c.most_common(20))
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    return json.dumps({"total_chunks": total, "sources": sources})
+    out = {"total_chunks": total, "sources": sources}
+    stamp = config.check_stamp(db)
+    if stamp:
+        out["embedding"] = {"model": stamp["model"], "dim": int(stamp["dim"])}
+    return json.dumps(out)
 
 @mcp.tool()
 def list_window(since: str = "", until: str = "", source: str = "",
