@@ -49,6 +49,15 @@ def test_exact_vs_pool_branch(seeded, monkeypatch):
     assert "exact" not in r
     assert "note" in r                                   # short of k, sampled
 
+def test_source_only_filter_ranks_exhaustively(seeded):
+    """A small source must be fully ranked even without a time window —
+    the git-scoped zero-results regression."""
+    import server
+    r = json.loads(server.search_history("question about indexing", k=2,
+                                         source="claude"))
+    assert r.get("exact") is True and "window" not in r
+    assert r["count"] == 1 and r["results"][0]["id"] == "cl1"
+
 def test_undated_rows_and_window(seeded):
     import server
     r = json.loads(server.search_history("git log", k=5, source="shell",

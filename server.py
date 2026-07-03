@@ -279,12 +279,12 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     db = _db()
     qblob = sqlite_vec.serialize_float32(vec)
 
-    # A time window can select a slice too small for KNN sampling to reach
-    # (147 chunks of one day in a 30k index won't crack a global top-400 for
-    # most queries). When the windowed subset is small, rank ALL of it by true
-    # distance instead — exhaustive, no sampling loss.
+    # Any filter can select a slice too small for KNN sampling to reach (147
+    # chunks of one day, or git's ~500 among 34k, won't crack a global
+    # top-pool for most queries). When the filtered subset is small, rank ALL
+    # of it by true distance instead — exhaustive, no sampling loss.
     rows, exact = None, False
-    if since or until:
+    if since or until or source or location:
         where, params = _window_where(since, until, source, location,
                                       include_undated)
         n_window = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
@@ -302,7 +302,7 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         # Over-fetch, then filter in Python. Location and time filters can
         # match a small slice, so they widen the candidate pool a lot.
         pool = max(k * (8 if source else 4), 30)
-        if location or since or until:
+        if source or location or since or until:
             pool = max(pool, k * 64, 400)
         rows = db.execute("""
             SELECT v.distance, c.id, c.text, c.source, c.timestamp, c.location, c.meta
@@ -339,13 +339,13 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         if len(results) >= k:
             break
     out = {"query": query, "count": len(results), "results": results}
+    if exact:
+        out["exact"] = True       # every chunk matching the filters was ranked
     if since or until:
         out["window"] = {"since": since or None, "until": until or None}
-        if exact:
-            out["exact"] = True   # every chunk in the window was ranked
-        elif len(results) < k:
-            out["note"] = (f"only {len(results)} of k={k} in window from a "
-                           f"sampled candidate pool; raise k to search deeper")
+    if (since or until or source or location) and not exact and len(results) < k:
+        out["note"] = (f"only {len(results)} of k={k} matched from a sampled "
+                       f"candidate pool; raise k to search deeper")
     return json.dumps(out)
 
 @mcp.tool()
