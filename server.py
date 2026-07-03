@@ -29,6 +29,8 @@ def _embed(text: str):
 
 @mcp.tool()
 def search_history(query: str, k: int = 5, source: str = "", location: str = "",
+                   since: str = "", until: str = "",
+                   include_undated: bool = False,
                    max_distance: float = 0.0) -> str:
     """Semantic search over the user's own local history. Prefer this over
     guessing when a question refers to something they did, decided, ran, or used
@@ -51,6 +53,12 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         'chrome:First user' or 'chrome:' (browser profile), 'littlebird@'
         (git repo), 'projects/' (obsidian folder). Combine with source to
         disambiguate.
+      since / until: ISO date or datetime bounds on the chunk timestamp, e.g.
+        since='2026-07-02' for "today" (resolve relative phrases like "last
+        week" to concrete dates yourself; history_stats shows each source's
+        range). A date-only until covers that whole day. When either bound is
+        set, undated rows (common for shell) are excluded unless
+        include_undated=true.
       max_distance: drop results whose distance exceeds this. Distance is L2 over
         embeddings — LOWER = more relevant; strong matches run ~0.5-0.9. Leave 0
         to disable. If results come back empty, raise k or drop this/source.
@@ -60,11 +68,17 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     timestamp, location, and meta (e.g. shell run count, app + seconds). A
     missing timestamp just means that row isn't dated (common for shell).
     """
+    # Timestamps are ISO-8601, so bounds are lexicographic string compares.
+    # A bare end date sorts before that day's datetimes; expand to end-of-day.
+    if until and len(until) == 10:
+        until += "T23:59:59~"   # '~' sorts after any digit/offset suffix
     vec = _embed(query)
     db = _db()
-    # Over-fetch, then filter in Python. A location filter can match a tiny
-    # slice of the index, so it widens the candidate pool a lot.
-    pool = max(k * 64, 400) if location else max(k * (8 if source else 4), 30)
+    # Over-fetch, then filter in Python. Location and time filters can match a
+    # tiny slice of the index, so they widen the candidate pool a lot.
+    pool = max(k * (8 if source else 4), 30)
+    if location or since or until:
+        pool = max(pool, k * 64, 400)
     rows = db.execute("""
         SELECT v.distance, c.text, c.source, c.timestamp, c.location, c.meta
         FROM vec_chunks v JOIN chunks c ON c.id = v.id
@@ -78,6 +92,12 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
             continue
         if location and not (loc or "").startswith(location):
             continue
+        if since or until:
+            if not ts:
+                if not include_undated:
+                    continue
+            elif (since and ts < since) or (until and ts > until):
+                continue
         if max_distance and dist > max_distance:
             continue
         item = {"rank": len(results) + 1, "source": src,
@@ -92,7 +112,13 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         results.append(item)
         if len(results) >= k:
             break
-    return json.dumps({"query": query, "count": len(results), "results": results})
+    out = {"query": query, "count": len(results), "results": results}
+    if since or until:
+        out["window"] = {"since": since or None, "until": until or None}
+        if len(results) < k:
+            out["note"] = (f"only {len(results)} of k={k} in window from a "
+                           f"{pool}-candidate pool; raise k to search deeper")
+    return json.dumps(out)
 
 @mcp.tool()
 def history_stats() -> str:
