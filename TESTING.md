@@ -12,17 +12,13 @@ so each step pays for itself; stop anywhere and still be better off.
    tick extended the open segment's `end_ts` across the whole sleep. The loop
    body is now `daemon.tick(db, app, now, max_gap)` (testable), closing the
    segment on gaps > 3×INTERVAL; pinned in `test_pinned_bugs.py`.
-3. Related to #1, a design gap rather than a bug: `--rebuild` reindexes from
-   *sources*, but the index is an archive — `chunks` holds text whose backing
-   data is gone (aged-out session transcripts, expired browser history).
-   Any embedding-model switch must therefore re-embed from the existing
-   `chunks` table's text (drop + recreate `vec_chunks` at the new dim), NOT
-   rebuild from sources. Write `tools/migrate-model.py` for this before any
-   model change; its test: migrate a fixture DB containing a chunk with no
-   backing source and assert the chunk and its new-dim vector survive.
-   Until then, evaluate candidate models side-by-side via env overrides
-   (`CLAUDE_RAG_DB=… CLAUDE_RAG_MODEL=… CLAUDE_RAG_DIM=…`) — chunk ids are
-   embedder-independent, so rankings compare directly across DBs.
+3. ✅ RESOLVED — `--rebuild` reindexes from *sources* while the index is an
+   archive, so model switches must re-embed from stored `chunks` text.
+   Shipped as `tools/migrate-model.py` (copy-and-swap, eval-vector reuse on
+   (id, text) match) with `tools/eval-model.py` for safe side-by-side
+   evaluation first; the archive-survival case is pinned in
+   `test_migrate_tool.py`. The stamp check (`config.check_stamp`) enforces
+   model/dim consistency at every DB open.
 
 ## Tier 0 — enabling refactor ✅ DONE (no behavior change)
 - `server._db`/`_embed` and `index` read config by attribute (`import
