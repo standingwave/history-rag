@@ -12,7 +12,7 @@ they defer. Everything else, decide yourself with sensible defaults.
 | # | Ask | Phase | Default if they defer |
 |---|-----|-------|-----------------------|
 | Q1 | Which sources? claude sessions, shell, browser history, git commits, Obsidian notes, app usage (macOS daemon, see Q12) | 0 | claude + shell + browser (the zero-config ones) |
-| Q2 | OK to index shell history? Can contain sensitive commands (redaction is on, but confirm) | 0 | Index it |
+| Q2 | OK to index shell history? Can contain sensitive commands (redaction is on, but confirm). Mention atuin if `~/.local/share/atuin/history.db` exists — it adds timestamps, cwd, and exit codes | 0 | Index it (atuin included when present) |
 | Q3 | OK to index browser history? Privacy-relevant; covers all profiles of Safari/Chrome/Helium found | 0 | Index it |
 | Q4 | Archived shell history to include (`[shell] histfiles`)? | 0 | Live + macOS session dirs only |
 | Q5 | If git chosen: which roots to scan (`[git] roots`)? | 0 | Skip the git source |

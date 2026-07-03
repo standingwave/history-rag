@@ -78,7 +78,8 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     guessing when a question refers to something they did, decided, ran, or used
     before. One shared index spans these sources:
       - claude:   past Claude Code conversation turns (their prompts + replies)
-      - shell:    bash/zsh commands they've run (deduped; often undated)
+      - shell:    bash/zsh commands they've run (deduped; dated + cwd-located
+                  where atuin or EXTENDED_HISTORY recorded the run)
       - appusage: daily per-app time on their Mac ("spent 2h 14m in Figma")
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
                   deduped per browser profile — location is "browser:profile"
@@ -379,8 +380,9 @@ def expand(id: str, context: int = 5) -> str:
     index ("index"). Per source: claude -> the ±context conversation turns
     around the hit; git -> the full commit message + file stats; browser ->
     that profile's other visits the same local day; obsidian -> the whole
-    note; appusage -> the day's full per-app seconds; shell -> no context
-    (dedup discards ordering). context caps at 25."""
+    note; appusage -> the day's full per-app seconds; shell -> the commands
+    around its latest run when atuin recorded it (with cwd + exit codes),
+    else no context. context caps at 25."""
     db = _db()
     row = db.execute("SELECT id, source, timestamp, location, text, meta "
                      "FROM chunks WHERE id = ?", (id,)).fetchone()
@@ -400,6 +402,10 @@ def expand(id: str, context: int = 5) -> str:
         ctx, ctx_src = _expand_obsidian(db, meta)
     elif source == "appusage":
         ctx, ctx_src = _expand_appusage(meta)
+    elif source == "shell":
+        from sources.shell import atuin_context
+        ctx = atuin_context(text, n)
+        ctx_src = "live" if ctx else None
     return json.dumps({
         "chunk": {"id": cid, "source": source, "timestamp": ts,
                   "location": loc, "text": text, "meta": meta},

@@ -17,7 +17,7 @@ _CONFIG_PATH = os.path.expanduser(
 _KNOWN = {
     "core": {"model", "dim", "db", "ollama"},
     "sources": {"enabled"},
-    "shell": {"histfiles"},
+    "shell": {"histfiles", "atuin_db"},
     "browser": {"extra", "keep_params"},
     "git": {"roots", "author"},
     "obsidian": {"vaults"},

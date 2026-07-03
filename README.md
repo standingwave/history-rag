@@ -102,8 +102,17 @@ CLAUDE_RAG_HISTFILES="$HOME/backups/zsh_history.2019:$HOME/backups/bash_history.
 Identical commands collapse to one entry (with a run count); trivial commands
 (`ls`, `cd`, …) are dropped, and anything that looks like it contains a secret
 (passwords, tokens, API keys, `user:pass@host` URLs) is skipped so it's never
-embedded. Command timestamps only appear if zsh recorded them (`setopt
-EXTENDED_HISTORY`); bash needs `HISTTIMEFORMAT` set.
+embedded.
+
+If [atuin](https://atuin.sh) is installed, its store is read too (default
+`~/.local/share/atuin/history.db`; override with `[shell] atuin_db`, empty
+string disables) — every atuin-recorded run is dated, `location` becomes the
+latest run's cwd (so `location="~/dev/myrepo"` filtering works for shell),
+meta gains cwd + exit code, and `expand` can show the commands around a run.
+Commands atuin knows are skipped when read from live histfiles to avoid
+double counting; archived `histfiles` always count. Without atuin, command
+timestamps only appear if zsh recorded them (`setopt EXTENDED_HISTORY`);
+bash needs `HISTTIMEFORMAT` set.
 
 **App usage (macOS, optional).** A small tracker records how long you spend in
 each app so you can later ask "what was I doing the week I built X?". It's off
