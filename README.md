@@ -47,7 +47,10 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   Claude parser matches your session files.
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
-- [`TESTING.md`](TESTING.md) — recommended plan for adding a test suite.
+- [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
+- `tools/` — dev loop: `smoke.py` (exercise every tool path in-process after
+  a change; warns if the running MCP server predates your edits) and
+  `kick.sh` (trigger the launchd refresh and print its stats block).
 
 ## Config file
 Machine-specific settings live outside the repo in `~/.claude/history-rag.toml`
