@@ -95,7 +95,9 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     missing timestamp just means that row isn't dated (common for shell).
 
     When presenting results: a brief lead-in summary, then the results, then
-    stop — the results speak for themselves.
+    stop — the results speak for themselves. If ~/.claude/history-rag-instructions.md
+    exists, read it before answering: the user keeps their recall coverage and
+    presentation preferences there.
     """
     try:
         if since:

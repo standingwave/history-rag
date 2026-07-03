@@ -73,6 +73,12 @@ keep_params = {}          # per-domain query params to keep, e.g. { "youtube.com
 run loudly. The long-lived MCP server reads config at startup, so edits need
 a `/mcp` reconnect, same as code changes.
 
+A second optional machine-local file, `~/.claude/history-rag-instructions.md`,
+holds *answering* preferences rather than indexing config: the search_history
+docstring tells the model to read it (if present) before presenting results,
+so recall-coverage and presentation rules live outside both the repo and the
+model's ambient context.
+
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
 `source="appusage"`, `source="browser"`, `source="git"`, or
