@@ -59,7 +59,10 @@ so each step pays for itself; stop anywhere and still be better off.
   unknown-key warning.
 - **`server._loc_prefix`** collapsing (repo@, folder/).
 
-## Tier 2 — integration (real sqlite-vec + fake embedder, temp DB)
+## Tier 2 — integration (real sqlite-vec + fake embedder, temp DB) ✅ DONE
+Implemented in `tests/test_driver.py` (driver) and `tests/test_server_tools.py`
+(tool envelopes + expand shapes, incl. the claude live path via monkeypatched
+`claude.ROOT` and the git live path via a throwaway repo).
 Real sqlite-vec matters: a mock would not have caught the vec0 update bug.
 Each driver case below reproduces something that actually happened this week:
 - incremental skip / text-change re-embed / timestamp-only metadata refresh

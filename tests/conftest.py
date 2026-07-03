@@ -30,7 +30,9 @@ def _reset_hidden_globals():
 def fake_embed(monkeypatch):
     """Deterministic hash->vector embedder; patches index and server so no
     Ollama is needed. Same text always embeds identically, different text
-    differently — enough to exercise storage, KNN, and re-embed plumbing."""
+    differently — enough to exercise storage, KNN, and re-embed plumbing.
+    `.calls` records every text embedded, so tests can assert re-embed
+    behavior (e.g. metadata refresh must embed nothing)."""
     import config, index, server
 
     def one(text: str):
@@ -38,6 +40,19 @@ def fake_embed(monkeypatch):
         vec = [(b - 128) / 128.0 for b in h] * (config.DIM // 32 + 1)
         return vec[:config.DIM]
 
-    monkeypatch.setattr(index, "embed_batch", lambda texts: [one(t) for t in texts])
+    one.calls = []
+    def batch(texts):
+        one.calls.extend(texts)
+        return [one(t) for t in texts]
+
+    monkeypatch.setattr(index, "embed_batch", batch)
     monkeypatch.setattr(server, "_embed", one)
     return one
+
+@pytest.fixture
+def scratch_db(monkeypatch, tmp_path):
+    """Point index AND server (attribute-access config) at a fresh temp DB."""
+    import config
+    path = str(tmp_path / "ix.db")
+    monkeypatch.setattr(config, "DB_PATH", path)
+    return path

@@ -1,0 +1,97 @@
+"""Tier 2: index.py driver behaviors against real sqlite-vec + fake embedder.
+Each case reproduces something that actually happened during development."""
+import sqlite3, types
+import sqlite_vec
+import pytest
+
+def mk_source(name, chunks, explode=False):
+    mod = types.SimpleNamespace()
+    mod.__name__ = f"sources.{name}"
+    def iter_chunks():
+        yield from chunks
+        if explode:
+            raise RuntimeError("boom")
+    mod.iter_chunks = iter_chunks
+    return mod
+
+def rec(src, ts="", loc="x", meta=None):
+    return {"source": src, "timestamp": ts, "location": loc, "meta": meta or {}}
+
+def run_index(monkeypatch, sources, argv=()):
+    import index
+    monkeypatch.setattr(index, "SOURCES", sources)
+    monkeypatch.setattr(index, "ALL_SOURCES", sources)
+    monkeypatch.setattr("sys.argv", ["index.py", *argv])
+    index.main()
+
+def open_db(path):
+    db = sqlite3.connect(path)
+    db.enable_load_extension(True)
+    sqlite_vec.load(db)
+    return db
+
+def test_incremental_reembed_and_consistency(scratch_db, fake_embed, monkeypatch):
+    src = [mk_source("alpha", [("a1", "first text", rec("alpha"))])]
+    run_index(monkeypatch, src)
+    assert fake_embed.calls == ["first text"]
+
+    run_index(monkeypatch, src)                      # unchanged -> skipped
+    assert fake_embed.calls == ["first text"]
+
+    db = open_db(scratch_db)
+    vec_before = db.execute("SELECT embedding FROM vec_chunks WHERE id='a1'").fetchone()[0]
+    run_index(monkeypatch, [mk_source("alpha", [("a1", "changed text", rec("alpha"))])])
+    assert fake_embed.calls == ["first text", "changed text"]
+    db = open_db(scratch_db)
+    vec_after = db.execute("SELECT embedding FROM vec_chunks WHERE id='a1'").fetchone()[0]
+    assert vec_before != vec_after                   # the vec0 update bug's test
+    assert db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == \
+           db.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == 1
+
+def test_metadata_refresh_does_not_reembed(scratch_db, fake_embed, monkeypatch):
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-07-01T00:00:00+00:00"))])])
+    n_embeds = len(fake_embed.calls)
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-07-02T00:00:00+00:00", loc="new"))])])
+    assert len(fake_embed.calls) == n_embeds         # zero re-embeds
+    db = open_db(scratch_db)
+    ts, loc = db.execute("SELECT timestamp, location FROM chunks WHERE id='a1'").fetchone()
+    assert ts == "2026-07-02T00:00:00+00:00" and loc == "new"
+
+def test_source_isolation_and_partial_batch_dropped(scratch_db, fake_embed,
+                                                    monkeypatch, capsys):
+    sources = [
+        mk_source("alpha", [("a1", "alpha one", rec("alpha"))]),
+        mk_source("beta", [("b1", "beta pending", rec("beta"))], explode=True),
+        mk_source("gamma", [("c1", "gamma one", rec("gamma"))]),
+    ]
+    run_index(monkeypatch, sources)
+    err = capsys.readouterr().err
+    assert "beta: source failed" in err
+    db = open_db(scratch_db)
+    ids = {r[0] for r in db.execute("SELECT id FROM chunks")}
+    assert ids == {"a1", "c1"}                       # b1's partial batch dropped
+
+def test_prune_deletes_stale_and_guards_hold(scratch_db, fake_embed, monkeypatch):
+    a = mk_source("alpha", [("a1", "one", rec("alpha")), ("a2", "two", rec("alpha"))])
+    run_index(monkeypatch, [a])
+
+    # stale: alpha stops yielding a2 -> prune removes it from both tables
+    a_now = mk_source("alpha", [("a1", "one", rec("alpha"))])
+    run_index(monkeypatch, [a_now], argv=["--prune", "--source", "alpha"])
+    db = open_db(scratch_db)
+    assert {r[0] for r in db.execute("SELECT id FROM chunks")} == {"a1"}
+    assert db.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == 1
+
+    # a failed source must never prune its own rows
+    a_boom = mk_source("alpha", [], explode=True)
+    run_index(monkeypatch, [a_boom], argv=["--prune", "--source", "alpha"])
+    db = open_db(scratch_db)
+    assert db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1
+
+    # an empty (no-op) source must never prune its own rows either
+    a_empty = mk_source("alpha", [])
+    run_index(monkeypatch, [a_empty], argv=["--prune", "--source", "alpha"])
+    db = open_db(scratch_db)
+    assert db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 1

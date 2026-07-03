@@ -99,14 +99,14 @@ def _loc_prefix(source: str, loc: str) -> str:
 # the dict expand() returns to the caller. Register new sources in _EXPANDERS.
 
 def _expand_claude(db, chunk, n):
+    from sources import claude as claude_src
     meta = chunk["meta"]
     sid, lineno = meta.get("session_id", ""), meta.get("lineno", -1)
-    fp = os.path.join(os.path.expanduser("~/.claude/projects"),
-                      meta.get("project_hash", ""), f"{sid}.jsonl")
+    fp = os.path.join(claude_src.ROOT, meta.get("project_hash", ""),
+                      f"{sid}.jsonl")
     if os.path.isfile(fp):
-        from sources.claude import iter_turns
         before, target, after = deque(maxlen=n), None, []
-        for ln, role, text, ts, _cwd in iter_turns(fp):
+        for ln, role, text, ts, _cwd in claude_src.iter_turns(fp):
             turn = {"lineno": ln, "role": role, "timestamp": ts,
                     "text": text[:2000]}
             if ln < lineno:
