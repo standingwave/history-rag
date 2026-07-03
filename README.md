@@ -64,6 +64,7 @@ histfiles = []            # archived history files
 
 [browser]
 extra = {}                # name = path, added to the built-in defaults
+keep_params = {}          # per-domain query params to keep, e.g. { "youtube.com" = ["v"] }
 
 [core]                    # model/dim/db/ollama — same keys as the env vars
 ```
@@ -133,9 +134,13 @@ URL within a profile merged (counts summed, last visit as the timestamp).
 Chromium's Preferences (plain `safari` for Safari's profile-less default
 store), so searches can tell work from personal browsing; ids hash the stable
 profile directory, so renaming a profile re-labels chunks without orphaning
-them. Query strings and fragments are stripped (they carry tokens and churn),
-localhost and non-http(s) URLs are skipped, and the shared secret regex drops
-anything that still looks credential-bearing. Other Chromium-family browsers work via
+them. Query strings and fragments are stripped (they carry tokens and churn)
+— except params that *are* the page's identity, kept per domain:
+`youtube.com`'s `v` by default (else every watch page collapses into one
+chunk), extensible or disableable via `[browser] keep_params` in the config
+file (`{ "youtube.com" = ["v"], "example.com" = ["id"] }`; an empty list turns
+a default off). Localhost and non-http(s) URLs are skipped, and the shared
+secret regex runs on the final URL, kept params included. Other Chromium-family browsers work via
 `CLAUDE_RAG_BROWSERS` (colon-separated `name=path` entries; the Safari-vs-
 Chromium schema is sniffed from the DB, not the name):
 ```bash

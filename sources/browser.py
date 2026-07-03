@@ -25,7 +25,7 @@ The schema (Safari vs Chromium) is sniffed from the tables, not the name.
 """
 import os, glob, hashlib, json, shutil, sqlite3, sys, tempfile
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from sources.common import SECRET_RE
 
 MAX_CHARS = 500
@@ -103,8 +103,32 @@ def _reader(db):
         return _read_safari
     return None
 
+# Query params that ARE the page's identity, kept per domain suffix; every
+# other param is stripped (tokens, tracking, churn). Without the "v" here all
+# youtube.com/watch pages collapse into a single chunk. Extend or override
+# per-domain via [browser].keep_params in the config file (an empty list
+# disables a default). The secret regex still runs on the result.
+_DEFAULT_KEEP_PARAMS = {"youtube.com": ["v"]}
+_keep_table = None
+
+def _keep_for(host: str):
+    global _keep_table
+    if _keep_table is None:
+        import config
+        table = {k: list(v) for k, v in _DEFAULT_KEEP_PARAMS.items()}
+        cfg = config.get("browser", "keep_params", "", {})
+        if isinstance(cfg, dict):
+            for dom, params in cfg.items():
+                table[dom.lower()] = [str(p) for p in params]
+        _keep_table = table
+    for dom, params in _keep_table.items():
+        if host == dom or host.endswith("." + dom):
+            return params
+    return None
+
 def _clean_url(url: str):
-    """Strip query+fragment; reject non-web schemes and local hosts."""
+    """Strip query+fragment (minus per-domain keep_params); reject non-web
+    schemes and local hosts."""
     try:
         parts = urlsplit(url)
         host = parts.hostname
@@ -114,7 +138,12 @@ def _clean_url(url: str):
         return None
     if host in _SKIP_HOSTS or host.endswith(".local"):
         return None
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")).rstrip("/")
+    query = ""
+    keep = _keep_for(host)
+    if keep and parts.query:
+        kept = sorted((k, v) for k, v in parse_qsl(parts.query) if k in keep)
+        query = urlencode(kept)   # sorted + re-encoded -> stable ids
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, "")).rstrip("/")
 
 def _iso(ts: float) -> str:
     if ts <= 0:
