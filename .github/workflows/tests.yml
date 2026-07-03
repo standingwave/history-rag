@@ -1,0 +1,18 @@
+# Tier 1 + Tier 2 on every push/PR. No Ollama needed: the suite uses the
+# deterministic fake embedder; anything machine-specific (real browser DBs,
+# atuin, launchd) is covered by tools/smoke.py locally, not here.
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -q

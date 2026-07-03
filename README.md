@@ -1,5 +1,7 @@
 # Claude Code history RAG
 
+![tests](https://github.com/standingwave/history-rag/actions/workflows/tests.yml/badge.svg)
+
 Local semantic search over your history — Claude Code sessions and shell command
 history — exposed to Claude Code as an MCP `search_history` tool. Everything is
 indexed into one vector space, so a single query ranks chat turns and terminal
