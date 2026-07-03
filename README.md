@@ -97,12 +97,16 @@ as env vars in the plist. Data is local, like everything else here.
 
 **Browser history** reads Safari (default store plus any Safari 17+ profiles
 under `~/Library/Safari/Profiles/`) and every Chrome and Helium profile found
-in their standard locations (Guest/System profiles skipped) and emits one chunk
-per URL: `<title> — <url>`, deduped across visits, profiles, and browsers, with
-visit counts summed and the last visit as the timestamp. Query strings and
-fragments are stripped (they carry tokens and churn), localhost and non-http(s)
-URLs are skipped, and the shared secret regex drops anything that still looks
-credential-bearing. Other Chromium-family browsers work via
+in their standard locations (Guest/System profiles skipped) and emits one
+chunk per (browser, profile, URL): `<title> — <url>`, with visits of the same
+URL within a profile merged (counts summed, last visit as the timestamp).
+`location` is `browser:profile` using the human-readable profile name from
+Chromium's Preferences (plain `safari` for Safari's profile-less default
+store), so searches can tell work from personal browsing; ids hash the stable
+profile directory, so renaming a profile re-labels chunks without orphaning
+them. Query strings and fragments are stripped (they carry tokens and churn),
+localhost and non-http(s) URLs are skipped, and the shared secret regex drops
+anything that still looks credential-bearing. Other Chromium-family browsers work via
 `CLAUDE_RAG_BROWSERS` (colon-separated `name=path` entries; the Safari-vs-
 Chromium schema is sniffed from the DB, not the name):
 ```bash

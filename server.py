@@ -36,7 +36,8 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
       - shell:    bash/zsh commands they've run (deduped; often undated)
       - appusage: daily per-app time on their Mac ("spent 2h 14m in Figma")
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
-                  deduped, timestamped by last visit)
+                  deduped per browser profile — location is "browser:profile"
+                  — timestamped by last visit)
       - git:      commit messages they've authored across local repos
       - obsidian: their Obsidian vault notes, chunked by heading
 

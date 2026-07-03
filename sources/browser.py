@@ -1,7 +1,14 @@
 """Browser-history source: Safari + Chromium-family (Chrome, Helium) URLs.
 
-One chunk per URL — "<title> — <url>" — deduped across visits, profiles, and
-browsers (visit counts summed, latest visit wins the timestamp and location).
+One chunk per (browser, profile, URL) — "<title> — <url>" — so each profile
+keeps its own record and searches can tell work from personal browsing. Visits
+of the same URL within one profile merge (visit counts summed, latest wins the
+timestamp). Ids hash the browser + profile *directory* + URL, so renaming a
+profile doesn't orphan chunks; the human-readable profile name (Chromium's
+Preferences profile.name, else the dir name) only decorates location and meta.
+Safari's default store has no profile: location stays plain "safari", and
+Safari 17+ profiles appear under their UUID dirs.
+
 Query strings and fragments are stripped before anything else: they carry
 tokens and churn. URLs or titles that still look credential-bearing are
 dropped via the shared secret regex, as are localhost and non-http(s) schemes.
@@ -16,7 +23,7 @@ CLAUDE_RAG_BROWSERS overrides the default locations: colon-separated
 name=path entries, e.g. "arc=~/Library/.../Arc/User Data/Default/History".
 The schema (Safari vs Chromium) is sniffed from the tables, not the name.
 """
-import os, glob, hashlib, shutil, sqlite3, sys, tempfile
+import os, glob, hashlib, json, shutil, sqlite3, sys, tempfile
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 from sources.common import SECRET_RE
@@ -52,6 +59,20 @@ def _dbs():
             if not any(skip in p for skip in _SKIP_PROFILES):
                 out.append((name, p))
     return out
+
+def _profile(path: str) -> str:
+    """Profile directory name; '' for Safari's default (profile-less) store."""
+    parent = os.path.basename(os.path.dirname(path))
+    return "" if parent == "Safari" else parent
+
+def _display_name(path: str, profile: str) -> str:
+    """Human-readable profile name (Chromium Preferences), else the dir name."""
+    pref = os.path.join(os.path.dirname(path), "Preferences")
+    try:
+        with open(pref) as f:
+            return json.load(f).get("profile", {}).get("name", "") or profile
+    except (OSError, ValueError):
+        return profile
 
 def _read_chromium(db):
     for url, title, count, ts in db.execute(
@@ -98,10 +119,12 @@ def _iso(ts: float) -> str:
         return ""
 
 def iter_chunks():
-    best: dict[str, list] = {}   # url -> [title, count, ts, browser]
+    best: dict[tuple, list] = {}   # (browser, profile, url) -> [title, count, ts, display]
     for browser, path in _dbs():
         if not os.path.exists(path):
             continue
+        profile = _profile(path)
+        display = _display_name(path, profile) if profile else ""
         tmp = None
         try:
             # Copy first: browsers hold their DB locked while running.
@@ -117,13 +140,14 @@ def iter_chunks():
                 cleaned = _clean_url(url) if url else None
                 if not cleaned or SECRET_RE.search(cleaned) or SECRET_RE.search(title):
                     continue
-                rec = best.get(cleaned)
+                key = (browser, profile, cleaned)
+                rec = best.get(key)
                 if rec is None:
-                    best[cleaned] = [title, count, ts, browser]
+                    best[key] = [title, count, ts, display]
                     continue
                 rec[1] += count
                 if ts > rec[2]:
-                    rec[2], rec[3] = ts, browser
+                    rec[2] = ts
                     if title:
                         rec[0] = title
                 elif not rec[0]:
@@ -135,12 +159,16 @@ def iter_chunks():
             if tmp:
                 os.unlink(tmp)
 
-    for url, (title, count, ts, browser) in best.items():
-        cid = "browser:" + hashlib.sha256(url.encode()).hexdigest()[:26]
+    for (browser, profile, url), (title, count, ts, display) in best.items():
+        cid = "browser:" + hashlib.sha256(
+            f"{browser}\0{profile}\0{url}".encode()).hexdigest()[:26]
         text = (f"{title} — {url}" if title else url)[:MAX_CHARS]
+        meta = {"url": url, "title": title[:200], "visit_count": int(count)}
+        if display:
+            meta["profile"] = display
         yield cid, text, {
             "source": "browser",
             "timestamp": _iso(ts),
-            "location": browser,
-            "meta": {"url": url, "title": title[:200], "visit_count": int(count)},
+            "location": f"{browser}:{display}" if display else browser,
+            "meta": meta,
         }
