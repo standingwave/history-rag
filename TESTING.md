@@ -34,7 +34,10 @@ so each step pays for itself; stop anywhere and still be better off.
 - Still to do when Tier 2 needs it: monkeypatch `claude.ROOT` at a fixture
   session dir for the live expand path.
 
-## Tier 1 — pure unit (most value per line; no DB, no network)
+## Tier 1 — pure unit (most value per line; no DB, no network) ✅ DONE
+Implemented across `test_redaction.py`, `test_time_bounds.py`,
+`test_parsers.py`, `test_git_source.py`, `test_shell_dedup.py`,
+`test_config.py`, `test_aggregation.py`.
 - **Redaction** (`common.SECRET_RE` + shell's `_FLAG_SECRET_RE`): table of
   must-drop (passwords, tokens, AKIA keys, `user:pass@host`, `-pSecret`) and
   must-keep (`/my-project-x` paths, "Add token refresh" prose). Highest
@@ -100,8 +103,10 @@ The manual steps repeated constantly during this week's development, scripted:
   `index.py --dry-run --source <name>`.
 
 ## Order of work
-1. Tier 0 refactor + fix the two pinned bugs with their tests.
-2. Tier 1 redaction + time bounds + parsers (the incident-prone trio).
-3. Tier 2 driver behaviors, then server envelopes.
-4. Remaining Tier 1; CI (GitHub Actions, Tier 1+2, mac-only bits skipped)
-   once the repo has outside users.
+1. ✅ Tier 0 refactor + fix the two pinned bugs with their tests.
+2. ✅ Tier 1 redaction + time bounds + parsers (the incident-prone trio).
+3. ✅ Tier 2 driver behaviors, then server envelopes.
+4. ✅ Remaining Tier 1 (git ids, shell dedup, config precedence, aggregation).
+   Suite: 52 tests, <1s, no Ollama needed. Still open: `tools/migrate-model.py`
+   before any embedding-model switch (pinned item 3 above), and CI (GitHub
+   Actions, Tier 1+2, mac-only bits skipped) once the repo has outside users.
