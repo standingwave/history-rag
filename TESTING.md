@@ -11,6 +11,17 @@ so each step pays for itself; stop anywhere and still be better off.
 2. `appusage/daemon.py` sleep-gap overcount: after wake, a same-app tick
    extends the open segment's `end_ts` across the whole sleep. Guard: close
    the segment when `now - end_ts` exceeds a few INTERVALs.
+3. Related to #1, a design gap rather than a bug: `--rebuild` reindexes from
+   *sources*, but the index is an archive — `chunks` holds text whose backing
+   data is gone (aged-out session transcripts, expired browser history).
+   Any embedding-model switch must therefore re-embed from the existing
+   `chunks` table's text (drop + recreate `vec_chunks` at the new dim), NOT
+   rebuild from sources. Write `tools/migrate-model.py` for this before any
+   model change; its test: migrate a fixture DB containing a chunk with no
+   backing source and assert the chunk and its new-dim vector survive.
+   Until then, evaluate candidate models side-by-side via env overrides
+   (`CLAUDE_RAG_DB=… CLAUDE_RAG_MODEL=… CLAUDE_RAG_DIM=…`) — chunk ids are
+   embedder-independent, so rankings compare directly across DBs.
 
 ## Tier 0 — enabling refactor (~30 min, no behavior change)
 - `server._db`/`_embed` and `index.main` read `config.DB_PATH` etc. by
