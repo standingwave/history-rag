@@ -37,11 +37,12 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
       - appusage: daily per-app time on their Mac ("spent 2h 14m in Figma")
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
                   deduped, timestamped by last visit)
+      - git:      commit messages they've authored across local repos
 
     Args:
       query: natural-language description of what to recall.
       k: max results (default 5).
-      source: restrict to 'claude' | 'shell' | 'appusage' | 'browser'
+      source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
         (default: all).
       max_distance: drop results whose distance exceeds this. Distance is L2 over
         embeddings — LOWER = more relevant; strong matches run ~0.5-0.9. Leave 0

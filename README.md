@@ -31,6 +31,7 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `shell.py` — bash + zsh command history, deduped.
   - `appusage.py` — daily per-app time from the tracker (macOS, optional).
   - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
+  - `git.py` — your own commits across local repos (opt-in via env var).
   - `common.py` — helpers shared across sources (secret redaction).
 - `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
   how long you spend in each app. See "App usage" below.
@@ -43,8 +44,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
-`source="appusage"`, or `source="browser"` to `search_history` to restrict a
-query.
+`source="appusage"`, `source="browser"`, or `source="git"` to `search_history`
+to restrict a query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -112,6 +113,32 @@ add your terminal). Without it, Safari is skipped with a note and the other
 browsers still index. Note Chromium browsers expire history (~90 days), so the
 index outlives the browser's own record — don't routinely `--prune` this
 source.
+
+**Git commits** indexes your own commit messages (subject + body, no diffs)
+across local repos. Off until you point it somewhere — set
+`CLAUDE_RAG_GIT_ROOTS` to colon-separated paths, each either a repo or a
+directory scanned a few levels deep for repos:
+```bash
+CLAUDE_RAG_GIT_ROOTS="$HOME/dev" ~/.claude/rag-venv/bin/python index.py --source git
+```
+"Your own" means each repo's `git config user.email` (set
+`CLAUDE_RAG_GIT_AUTHOR` to force one email everywhere). All refs are read, so
+branch-only work is captured; stash refs and merge commits are excluded.
+Rebase/cherry-pick copies of the same message collapse to one chunk (run
+count in meta, latest copy wins), and ids hash repo+message so a rebase
+doesn't orphan chunks — only rewording a message does (`--prune --source git`
+cleans those up).
+
+For the scheduled launchd runs to see the env var, add it to the installed
+plist (`~/Library/LaunchAgents/com.user.history-index.plist`):
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+    <key>CLAUDE_RAG_GIT_ROOTS</key>
+    <string>/Users/you/dev</string>
+</dict>
+```
+then `launchctl unload` + `load` it again.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,

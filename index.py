@@ -15,9 +15,9 @@ import argparse, json, sqlite3, sys, time
 import sqlite_vec
 import requests
 from config import EMBED_MODEL, DIM, DB_PATH, OLLAMA
-from sources import claude, shell, appusage, browser
+from sources import claude, shell, appusage, browser, git
 
-SOURCES = [claude, shell, appusage, browser]
+SOURCES = [claude, shell, appusage, browser, git]
 BATCH_SIZE = 64          # inputs per Ollama call
 
 def source_name(mod) -> str:
