@@ -18,6 +18,7 @@ the id hashes repo+message rather than the sha — rebase-stable. Only a
 reworded message orphans its old chunk (a --prune --source git case).
 """
 import os, subprocess, sys, hashlib
+from datetime import datetime, timezone
 
 MAX_CHARS = 2000
 SCAN_DEPTH = 3
@@ -90,6 +91,13 @@ def iter_chunks():
                 text = (subject + "\n" + body).strip()[:MAX_CHARS]
                 if not text or sha in seen_shas:
                     continue
+                # %aI carries the author's local offset; the index stores UTC
+                # so time-window bounds compare lexicographically.
+                try:
+                    date = datetime.fromisoformat(date).astimezone(
+                        timezone.utc).isoformat()
+                except ValueError:
+                    pass
                 seen_shas.add(sha)
                 rec = entries.get((repo, text))
                 if rec is None:

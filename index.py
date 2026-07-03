@@ -110,10 +110,12 @@ def main():
         db.execute("DROP TABLE IF EXISTS vec_chunks")
     setup(db)
 
-    # id -> current text, so a chunk is skipped only when unchanged. Chunks whose
-    # text changed (e.g. today's still-growing app-usage total) get re-embedded.
-    existing = {r[0]: r[1] for r in db.execute("SELECT id, text FROM chunks")}
-    new = failed = pruned = 0
+    # id -> (text, timestamp). Changed text re-embeds (e.g. today's still-
+    # growing app-usage total); same text with a changed timestamp gets a
+    # metadata-only update — the embedding is of the text, so no re-embed.
+    existing = {r[0]: (r[1], r[2])
+                for r in db.execute("SELECT id, text, timestamp FROM chunks")}
+    new = failed = pruned = refreshed = 0
 
     def store(cid, text, rec, vec):
         db.execute("INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?,?)",
@@ -155,14 +157,21 @@ def main():
         for src in sources:
             name, t0 = source_name(src), time.monotonic()
             seen_ids, src_cols = set(), set()
-            yielded, new0, failed0 = 0, new, failed
+            yielded, new0, failed0, refreshed0 = 0, new, failed, refreshed
             ok, batch = True, []
             try:
                 for cid, text, rec in src.iter_chunks():
                     seen_ids.add(cid)
                     src_cols.add(rec["source"])
                     yielded += 1
-                    if existing.get(cid) == text:
+                    prev = existing.get(cid)
+                    if prev and prev[0] == text:
+                        if prev[1] != rec.get("timestamp", ""):
+                            db.execute(
+                                "UPDATE chunks SET timestamp=?, location=?, meta=? WHERE id=?",
+                                (rec.get("timestamp", ""), rec.get("location", ""),
+                                 json.dumps(rec.get("meta", {})), cid))
+                            refreshed += 1
                         continue
                     batch.append((cid, text, rec))
                     if len(batch) >= BATCH_SIZE:
@@ -181,6 +190,8 @@ def main():
                 pruned += n_pruned
             status = "" if ok else "  [FAILED, partial]"
             extra = f", {n_pruned} pruned" if n_pruned else ""
+            if refreshed - refreshed0:
+                extra += f", {refreshed - refreshed0} refreshed"
             print(f"{name}: {yielded} chunks, {new - new0} embedded, "
                   f"{failed - failed0} skipped{extra}, "
                   f"{time.monotonic() - t0:.1f}s{status}")

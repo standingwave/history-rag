@@ -12,6 +12,12 @@ from config import APPUSAGE_DB
 
 MIN_SECONDS = 60         # skip apps you barely touched on a given day
 
+def _day_utc(day: str) -> str:
+    """A chunk summarizes a *local* day; stamp it at local midnight in UTC so
+    local-day query windows (converted to UTC by the server) contain it."""
+    return datetime.datetime.fromisoformat(day).astimezone(
+        datetime.timezone.utc).isoformat()
+
 def iter_chunks():
     if not os.path.exists(APPUSAGE_DB):
         return
@@ -28,7 +34,7 @@ def iter_chunks():
             text = f"On {day} ({weekday}), spent {store.fmt_duration(secs)} in {app}."
             yield cid, text, {
                 "source": "appusage",
-                "timestamp": f"{day}T00:00:00",
+                "timestamp": _day_utc(day),
                 "location": "appusage",
                 "meta": {"app": app, "date": day, "seconds": int(secs)},
             }
