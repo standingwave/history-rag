@@ -1,0 +1,13 @@
+# Default query set for tools/eval-model.py — one per line, # comments
+# ignored. These are deliberately generic; point --queries at a personal
+# set kept outside the repo (e.g. in ~/.claude/) for real evaluations.
+Searched the web for a product name
+a commit message about fixing a bug
+an article I read about artificial intelligence
+what I was working on last week
+time spent in applications on a weekday
+a command I ran to install a package
+a conversation about designing a new feature
+a video I watched about cooking
+notes I wrote about ongoing work
+a page I visited about a game

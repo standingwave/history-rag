@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Dev smoke test: exercise every MCP tool path in-process after a change.
 
 Read-only against the real index. Search calls embed via Ollama, so it must
