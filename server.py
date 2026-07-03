@@ -28,7 +28,8 @@ def _embed(text: str):
     return r.json()["embeddings"][0]
 
 @mcp.tool()
-def search_history(query: str, k: int = 5, source: str = "", max_distance: float = 0.0) -> str:
+def search_history(query: str, k: int = 5, source: str = "", location: str = "",
+                   max_distance: float = 0.0) -> str:
     """Semantic search over the user's own local history. Prefer this over
     guessing when a question refers to something they did, decided, ran, or used
     before. One shared index spans these sources:
@@ -46,6 +47,10 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
       k: max results (default 5).
       source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
         | 'obsidian' (default: all).
+      location: case-sensitive prefix filter on each chunk's location, e.g.
+        'chrome:First user' or 'chrome:' (browser profile), 'littlebird@'
+        (git repo), 'projects/' (obsidian folder). Combine with source to
+        disambiguate.
       max_distance: drop results whose distance exceeds this. Distance is L2 over
         embeddings — LOWER = more relevant; strong matches run ~0.5-0.9. Leave 0
         to disable. If results come back empty, raise k or drop this/source.
@@ -57,7 +62,9 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
     """
     vec = _embed(query)
     db = _db()
-    pool = max(k * (8 if source else 4), 30)   # over-fetch, then filter in Python
+    # Over-fetch, then filter in Python. A location filter can match a tiny
+    # slice of the index, so it widens the candidate pool a lot.
+    pool = max(k * 64, 400) if location else max(k * (8 if source else 4), 30)
     rows = db.execute("""
         SELECT v.distance, c.text, c.source, c.timestamp, c.location, c.meta
         FROM vec_chunks v JOIN chunks c ON c.id = v.id
@@ -68,6 +75,8 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
     results = []
     for dist, text, src, ts, loc, meta_json in rows:
         if source and src != source:
+            continue
+        if location and not (loc or "").startswith(location):
             continue
         if max_distance and dist > max_distance:
             continue
