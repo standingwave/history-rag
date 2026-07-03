@@ -14,9 +14,9 @@ they defer. Everything else, decide yourself with sensible defaults.
 | Q1 | Which sources? claude sessions, shell, browser history, git commits, Obsidian notes, app usage (macOS daemon, see Q12) | 0 | claude + shell + browser (the zero-config ones) |
 | Q2 | OK to index shell history? Can contain sensitive commands (redaction is on, but confirm) | 0 | Index it |
 | Q3 | OK to index browser history? Privacy-relevant; covers all profiles of Safari/Chrome/Helium found | 0 | Index it |
-| Q4 | Archived shell history to include via `CLAUDE_RAG_HISTFILES`? | 0 | Live + macOS session dirs only |
-| Q5 | If git chosen: which roots to scan (`CLAUDE_RAG_GIT_ROOTS`)? | 0 | Skip the git source |
-| Q6 | If Obsidian chosen: which vault paths (`CLAUDE_RAG_OBSIDIAN_VAULTS`)? | 0 | Skip the obsidian source |
+| Q4 | Archived shell history to include (`[shell] histfiles`)? | 0 | Live + macOS session dirs only |
+| Q5 | If git chosen: which roots to scan (`[git] roots`)? | 0 | Skip the git source |
+| Q6 | If Obsidian chosen: which vault paths (`[obsidian] vaults`)? | 0 | Skip the obsidian source |
 | Q7 | Permission to install software (Ollama, brew packages) if missing? | 1 | Ask before any system install |
 | Q8 | Embedding model: fast (`nomic-embed-text`) or higher-quality (`mxbai-embed-large`, dim 1024)? | 1 | `nomic-embed-text` |
 | Q9 | Rebuild confirmation IF an index already exists with data (rebuild wipes it) | 3 | Incremental run, no rebuild |
@@ -51,10 +51,20 @@ uses an absolute interpreter path). If missing:
 Verify: `~/.claude/rag-venv/bin/python -c "import sqlite_vec, requests, mcp; print('deps ok')"`.
 
 ## Phase 3 — Build the index
-1. Apply choices. Declined claude/shell/browser ⇒ trim `SOURCES` in `index.py`.
-   git/obsidian are opt-in by env var and no-op without one — export
-   `CLAUDE_RAG_GIT_ROOTS` / `CLAUDE_RAG_OBSIDIAN_VAULTS` (and
-   `CLAUDE_RAG_HISTFILES` from Q4) for every index command.
+1. Apply choices by writing `~/.claude/history-rag.toml` (read by every entry
+   point — interactive, launchd, MCP server; precedence env > file > default):
+   ```toml
+   [sources]
+   enabled = ["claude", "shell", "browser"]   # only what they chose
+   [git]
+   roots = ["~/dev"]                          # Q5 answer, if git chosen
+   [obsidian]
+   vaults = ["~/path/to/Vault"]               # Q6 answer, if chosen
+   [shell]
+   histfiles = []                             # Q4 archived paths, if any
+   ```
+   Omit `[sources].enabled` entirely when all sources are wanted. Never edit
+   `SOURCES` in `index.py` — that fights git pulls.
 2. Optional, if claude is a source: `inspect_sessions.py` to confirm the JSONL
    shape matches `sources/claude.py`.
 3. Dry-run, per source is clearest: `index.py --dry-run --source <name>`.
@@ -112,18 +122,13 @@ first.) Confirm with `claude mcp list`.
     com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
   launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
   ```
-  If git/obsidian/archived-shell sources are on, add their env vars to the
-  installed plist (launchd doesn't inherit your shell):
-  ```xml
-  <key>EnvironmentVariables</key>
-  <dict><key>CLAUDE_RAG_GIT_ROOTS</key><string>/Users/USER/dev</string></dict>
-  ```
-  then `launchctl unload` + `load`. Cadence: `StartInterval` seconds.
+  No env plumbing needed — scheduled runs read `~/.claude/history-rag.toml`
+  like every other entry point. Cadence: `StartInterval` seconds.
   Verify: `launchctl list | grep history-index`, then the per-source stats
   lines in `/tmp/history-index.log`.
-- **Linux — cron** (absolute paths, env vars inline):
+- **Linux — cron** (absolute paths; config comes from the same file):
   ```cron
-  */30 * * * * CLAUDE_RAG_GIT_ROOTS=/home/USER/dev /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
+  */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
   ```
 
 **STOP — two macOS permission gotchas on the first scheduled run:**

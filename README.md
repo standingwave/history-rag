@@ -43,6 +43,35 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — recommended plan for adding a test suite.
 
+## Config file
+Machine-specific settings live outside the repo in `~/.claude/history-rag.toml`
+(path overridable via `CLAUDE_RAG_CONFIG`). Precedence is env var > config
+file > code default, and a missing file just means defaults — so env-only
+setups keep working, and the file is the recommended home for anything you'd
+otherwise export in your shell AND inject into the launchd plist:
+```toml
+[sources]
+enabled = ["claude", "shell", "browser", "git", "obsidian", "appusage"]
+
+[git]
+roots = ["~/dev"]
+
+[obsidian]
+vaults = ["~/Documents/Obsidian Vault"]
+
+[shell]
+histfiles = []            # archived history files
+
+[browser]
+extra = {}                # name = path, added to the built-in defaults
+
+[core]                    # model/dim/db/ollama — same keys as the env vars
+```
+`[sources].enabled` picks which sources run (absent = all) — no more editing
+`SOURCES` in `index.py`. Unknown sections/keys warn; malformed TOML stops the
+run loudly. The long-lived MCP server reads config at startup, so edits need
+a `/mcp` reconnect, same as code changes.
+
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
 `source="appusage"`, `source="browser"`, `source="git"`, or
@@ -121,47 +150,29 @@ index outlives the browser's own record — don't routinely `--prune` this
 source.
 
 **Git commits** indexes your own commit messages (subject + body, no diffs)
-across local repos. Off until you point it somewhere — set
-`CLAUDE_RAG_GIT_ROOTS` to colon-separated paths, each either a repo or a
-directory scanned a few levels deep for repos:
-```bash
-CLAUDE_RAG_GIT_ROOTS="$HOME/dev" ~/.claude/rag-venv/bin/python index.py --source git
-```
-"Your own" means each repo's `git config user.email` (set
-`CLAUDE_RAG_GIT_AUTHOR` to force one email everywhere). All refs are read, so
+across local repos. Off until you point it somewhere — set `[git] roots` in
+the config file (or `CLAUDE_RAG_GIT_ROOTS`, colon-separated) to paths that are
+each either a repo or a directory scanned a few levels deep for repos. "Your
+own" means each repo's `git config user.email` (`[git] author` /
+`CLAUDE_RAG_GIT_AUTHOR` forces one email everywhere). All refs are read, so
 branch-only work is captured; stash refs and merge commits are excluded.
 Rebase/cherry-pick copies of the same message collapse to one chunk (run
 count in meta, latest copy wins), and ids hash repo+message so a rebase
 doesn't orphan chunks — only rewording a message does (`--prune --source git`
-cleans those up).
-
-For the scheduled launchd runs to see the env var, add it to the installed
-plist (`~/Library/LaunchAgents/com.user.history-index.plist`):
-```xml
-<key>EnvironmentVariables</key>
-<dict>
-    <key>CLAUDE_RAG_GIT_ROOTS</key>
-    <string>/Users/you/dev</string>
-</dict>
-```
-then `launchctl unload` + `load` it again.
+cleans those up). The config file is read by scheduled launchd runs too — no
+plist env plumbing needed.
 
 **Obsidian notes** indexes vault markdown, one chunk per `#`/`##`/`###`
 section (deeper headings stay inside their parent; short notes stay whole).
-Off until you point it at vaults:
-```bash
-CLAUDE_RAG_OBSIDIAN_VAULTS="$HOME/Documents/Obsidian Vault" \
-  ~/.claude/rag-venv/bin/python index.py --source obsidian
-```
+Off until you point it at vaults via `[obsidian] vaults` in the config file
+(or `CLAUDE_RAG_OBSIDIAN_VAULTS`, colon-separated).
 Chunk ids hash vault+path+heading+occurrence — not the text — so editing a
 section re-embeds it in place; only deleting or renaming a section leaves an
 orphan (`--prune --source obsidian` cleans those up, and unlike claude/shell/
 browser the vault is the durable record, so pruning here is safe). Timestamps
 come from `date:` frontmatter when present, else file mtime; frontmatter is
 stripped from the text. Hidden dirs (`.obsidian`, `.trash`), template folders,
-and credential-looking sections are skipped. As with the git source, add
-`CLAUDE_RAG_OBSIDIAN_VAULTS` to the installed plist's `EnvironmentVariables`
-so scheduled runs see it.
+and credential-looking sections are skipped.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,

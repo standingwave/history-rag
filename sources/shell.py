@@ -41,9 +41,8 @@ def _history_files():
     # macOS keeps per-session history snapshots in these dirs.
     for pat in ("~/.zsh_sessions/*.history*", "~/.bash_sessions/*.history*"):
         candidates += sorted(glob.glob(os.path.expanduser(pat)))
-    extra = os.environ.get("CLAUDE_RAG_HISTFILES", "")
-    if extra:
-        candidates += extra.split(":")
+    import config
+    candidates += config.get_paths("shell", "histfiles", "CLAUDE_RAG_HISTFILES")
     seen, out = set(), []
     for c in candidates:
         p = os.path.realpath(os.path.expanduser(c))

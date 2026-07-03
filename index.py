@@ -14,10 +14,22 @@ Run:   python index.py                  # incremental, all sources
 import argparse, json, sqlite3, sys, time
 import sqlite_vec
 import requests
-from config import EMBED_MODEL, DIM, DB_PATH, OLLAMA
+from config import EMBED_MODEL, DIM, DB_PATH, OLLAMA, ENABLED_SOURCES
 from sources import claude, shell, appusage, browser, git, obsidian
 
-SOURCES = [claude, shell, appusage, browser, git, obsidian]
+ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian]
+
+def _enabled():
+    if ENABLED_SOURCES is None:      # no [sources].enabled -> all
+        return ALL_SOURCES
+    by_name = {m.__name__.rsplit(".", 1)[-1]: m for m in ALL_SOURCES}
+    unknown = [n for n in ENABLED_SOURCES if n not in by_name]
+    if unknown:
+        sys.exit(f"config: unknown source(s) in [sources].enabled: "
+                 f"{', '.join(unknown)}; known: {', '.join(by_name)}")
+    return [by_name[n] for n in ENABLED_SOURCES]
+
+SOURCES = _enabled()
 BATCH_SIZE = 64          # inputs per Ollama call
 
 def source_name(mod) -> str:
@@ -38,6 +50,9 @@ def pick_sources(only: str | None):
         return SOURCES
     picked = [s for s in SOURCES if source_name(s) == only]
     if not picked:
+        if any(source_name(s) == only for s in ALL_SOURCES):
+            sys.exit(f"source {only!r} is disabled by [sources].enabled "
+                     f"in the config file")
         sys.exit(f"unknown source {only!r}; available: "
                  + ", ".join(source_name(s) for s in SOURCES))
     return picked

@@ -25,8 +25,8 @@ SCAN_DEPTH = 3
 _SKIP_DIRS = {"node_modules", "__pycache__"}
 
 def _roots():
-    env = os.environ.get("CLAUDE_RAG_GIT_ROOTS", "")
-    return [os.path.expanduser(p) for p in env.split(":") if p.strip()]
+    import config
+    return config.get_paths("git", "roots", "CLAUDE_RAG_GIT_ROOTS")
 
 def _find_repos(root: str):
     """Yield repo paths under root; a dir with .git is a repo and not descended
@@ -55,7 +55,8 @@ def _git(repo: str, *args) -> str:
     return out.stdout
 
 def _author(repo: str) -> str:
-    forced = os.environ.get("CLAUDE_RAG_GIT_AUTHOR", "")
+    import config
+    forced = config.get("git", "author", "CLAUDE_RAG_GIT_AUTHOR", "")
     if forced:
         return forced
     try:

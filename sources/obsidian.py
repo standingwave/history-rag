@@ -26,8 +26,8 @@ _DATE_RE = re.compile(r"^date:\s*(\d{4}-\d{2}-\d{2})", re.M)
 _SKIP_DIRS = {".trash", "templates", "template"}
 
 def _vaults():
-    env = os.environ.get("CLAUDE_RAG_OBSIDIAN_VAULTS", "")
-    return [os.path.expanduser(p) for p in env.split(":") if p.strip()]
+    import config
+    return config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS")
 
 def _strip_frontmatter(raw: str):
     """Return (body, date-from-frontmatter-or-None)."""

@@ -45,6 +45,8 @@ _CFABSOLUTE_TO_UNIX = 978307200       # Safari epoch (2001-01-01) -> Unix
 _WEBKIT_TO_UNIX = 11644473600         # Chromium epoch (1601-01-01) -> Unix
 
 def _dbs():
+    # Env var REPLACES the defaults (full control); the config file's
+    # [browser].extra table ADDS to them.
     env = os.environ.get("CLAUDE_RAG_BROWSERS", "")
     if env:
         out = []
@@ -58,6 +60,10 @@ def _dbs():
         for p in sorted(glob.glob(os.path.expanduser(pat))):
             if not any(skip in p for skip in _SKIP_PROFILES):
                 out.append((name, p))
+    import config
+    extra = config.get("browser", "extra", "", {})
+    if isinstance(extra, dict):
+        out += [(n, os.path.expanduser(str(p))) for n, p in extra.items()]
     return out
 
 def _profile(path: str) -> str:
