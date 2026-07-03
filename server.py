@@ -13,7 +13,7 @@ from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 import sqlite_vec, requests
 from mcp.server.fastmcp import FastMCP
-from config import EMBED_MODEL, DB_PATH, OLLAMA
+import config
 
 mcp = FastMCP("claude-history")
 
@@ -25,15 +25,17 @@ EXACT_WINDOW_MAX = 4000
 
 def _db():
     # A fresh connection per tool call: ~1ms, and it always sees the
-    # indexer's latest commits with no thread-affinity questions.
-    db = sqlite3.connect(DB_PATH)
+    # indexer's latest commits with no thread-affinity questions. Config is
+    # read by attribute so tests can re-point it without reload gymnastics.
+    db = sqlite3.connect(config.DB_PATH)
     db.enable_load_extension(True)
     sqlite_vec.load(db)
     db.enable_load_extension(False)
     return db
 
 def _embed(text: str):
-    r = requests.post(OLLAMA, json={"model": EMBED_MODEL, "input": text}, timeout=60)
+    r = requests.post(config.OLLAMA, json={"model": config.EMBED_MODEL,
+                                           "input": text}, timeout=60)
     r.raise_for_status()
     return r.json()["embeddings"][0]
 

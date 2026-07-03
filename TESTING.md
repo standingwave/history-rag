@@ -5,12 +5,13 @@ build-out (six sources, time windows, disclosure tools, config file). Ordered
 so each step pays for itself; stop anywhere and still be better off.
 
 ## Bugs found in review that tests must pin (fix alongside their test)
-1. `index.py --rebuild --source X` drops BOTH tables then reindexes only X —
-   silently destroys the other sources, including archive rows whose backing
-   data no longer exists. Guard: forbid the combination.
-2. `appusage/daemon.py` sleep-gap overcount: after wake, a same-app tick
-   extends the open segment's `end_ts` across the whole sleep. Guard: close
-   the segment when `now - end_ts` exceeds a few INTERVALs.
+1. ✅ FIXED `index.py --rebuild --source X` drops BOTH tables then reindexes
+   only X — silently destroys the other sources, including archive rows whose
+   backing data no longer exists. Guarded; pinned in `test_pinned_bugs.py`.
+2. ✅ FIXED `appusage/daemon.py` sleep-gap overcount: after wake, a same-app
+   tick extended the open segment's `end_ts` across the whole sleep. The loop
+   body is now `daemon.tick(db, app, now, max_gap)` (testable), closing the
+   segment on gaps > 3×INTERVAL; pinned in `test_pinned_bugs.py`.
 3. Related to #1, a design gap rather than a bug: `--rebuild` reindexes from
    *sources*, but the index is an archive — `chunks` holds text whose backing
    data is gone (aged-out session transcripts, expired browser history).
@@ -23,15 +24,15 @@ so each step pays for itself; stop anywhere and still be better off.
    (`CLAUDE_RAG_DB=… CLAUDE_RAG_MODEL=… CLAUDE_RAG_DIM=…`) — chunk ids are
    embedder-independent, so rankings compare directly across DBs.
 
-## Tier 0 — enabling refactor (~30 min, no behavior change)
-- `server._db`/`_embed` and `index.main` read `config.DB_PATH` etc. by
-  attribute (`import config`), not frozen `from config import` values, so
-  `CLAUDE_RAG_CONFIG` + env re-point everything without reload gymnastics.
-- conftest fixture: tmp dir with a scratch TOML (`CLAUDE_RAG_CONFIG`), temp
-  `CLAUDE_RAG_DB`, and a deterministic hash→vector fake embedder patched over
-  `index.embed_batch` / `server._embed` (no Ollama in tests).
-- Reset hooks for the two hidden globals: `browser._keep_table = None`
-  between tests; monkeypatch `claude.ROOT` at a fixture session dir.
+## Tier 0 — enabling refactor ✅ DONE (no behavior change)
+- `server._db`/`_embed` and `index` read config by attribute (`import
+  config`), so `CLAUDE_RAG_CONFIG` + env re-point everything.
+- `tests/conftest.py`: env pinned into a tmp dir before any project import
+  (incl. `TZ=America/Los_Angeles` for deterministic time tests), autouse
+  reset of `browser._keep_table`, and the hash→vector `fake_embed` fixture
+  over `index.embed_batch` / `server._embed` (no Ollama in tests).
+- Still to do when Tier 2 needs it: monkeypatch `claude.ROOT` at a fixture
+  session dir for the live expand path.
 
 ## Tier 1 — pure unit (most value per line; no DB, no network)
 - **Redaction** (`common.SECRET_RE` + shell's `_FLAG_SECRET_RE`): table of

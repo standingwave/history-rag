@@ -14,20 +14,20 @@ Run:   python index.py                  # incremental, all sources
 import argparse, json, sqlite3, sys, time
 import sqlite_vec
 import requests
-from config import EMBED_MODEL, DIM, DB_PATH, OLLAMA, ENABLED_SOURCES
+import config
 from sources import claude, shell, appusage, browser, git, obsidian
 
 ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian]
 
 def _enabled():
-    if ENABLED_SOURCES is None:      # no [sources].enabled -> all
+    if config.ENABLED_SOURCES is None:   # no [sources].enabled -> all
         return ALL_SOURCES
     by_name = {m.__name__.rsplit(".", 1)[-1]: m for m in ALL_SOURCES}
-    unknown = [n for n in ENABLED_SOURCES if n not in by_name]
+    unknown = [n for n in config.ENABLED_SOURCES if n not in by_name]
     if unknown:
         sys.exit(f"config: unknown source(s) in [sources].enabled: "
                  f"{', '.join(unknown)}; known: {', '.join(by_name)}")
-    return [by_name[n] for n in ENABLED_SOURCES]
+    return [by_name[n] for n in config.ENABLED_SOURCES]
 
 SOURCES = _enabled()
 BATCH_SIZE = 64          # inputs per Ollama call
@@ -59,7 +59,7 @@ def pick_sources(only: str | None):
 
 def embed_batch(texts: list[str]) -> list[list[float]]:
     """Embed a list of texts in one call. Returns embeddings in input order."""
-    r = requests.post(OLLAMA, json={"model": EMBED_MODEL, "input": texts}, timeout=300)
+    r = requests.post(config.OLLAMA, json={"model": config.EMBED_MODEL, "input": texts}, timeout=300)
     r.raise_for_status()
     return r.json()["embeddings"]
 
@@ -68,7 +68,7 @@ def setup(db):
         id TEXT PRIMARY KEY, text TEXT, source TEXT,
         timestamp TEXT, location TEXT, meta TEXT)""")
     db.execute(f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
-        id TEXT PRIMARY KEY, embedding FLOAT[{DIM}])""")
+        id TEXT PRIMARY KEY, embedding FLOAT[{config.DIM}])""")
 
 def dry_run(sources):
     n = 0
@@ -111,12 +111,17 @@ def main():
                  "source no longer yields, which for sources whose backing data "
                  "expires (claude, shell) means losing history the index has "
                  "outlived. Prune one source at a time, deliberately.")
+    if args.rebuild and args.source:
+        sys.exit("--rebuild wipes the WHOLE index then reindexes; combined "
+                 "with --source it would destroy every other source's data, "
+                 "including archived chunks whose backing data is gone. "
+                 "Rebuild without --source, or run the source incrementally.")
     sources = pick_sources(args.source)
     if args.dry_run:
         dry_run(sources)
         return
 
-    db = sqlite3.connect(DB_PATH)
+    db = sqlite3.connect(config.DB_PATH)
     db.enable_load_extension(True)
     sqlite_vec.load(db)
     db.enable_load_extension(False)
@@ -218,7 +223,7 @@ def main():
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     extra = f", {pruned} pruned" if pruned else ""
     print(f"done. {new} embedded (new or changed), {failed} skipped{extra}, "
-          f"{total} total in {DB_PATH}")
+          f"{total} total in {config.DB_PATH}")
 
 if __name__ == "__main__":
     main()

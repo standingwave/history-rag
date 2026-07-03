@@ -46,8 +46,27 @@ def idle_seconds():
 
 def _open_segment(db):
     return db.execute(
-        "SELECT id, app FROM segments WHERE closed=0 ORDER BY id DESC LIMIT 1"
+        "SELECT id, app, end_ts FROM segments WHERE closed=0 ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
+def tick(db, app, now, max_gap=None):
+    """One sampling step: extend, close, or open segments for `app` at `now`.
+    A same-app gap longer than max_gap means the machine slept between ticks —
+    close the old segment instead of back-filling the sleep as usage."""
+    if max_gap is None:
+        max_gap = INTERVAL * 3
+    cur = _open_segment(db)
+    if app is None:                             # idle, asleep, or unknown
+        if cur:
+            db.execute("UPDATE segments SET closed=1 WHERE id=?", (cur[0],))
+    elif cur and cur[1] == app and now - cur[2] <= max_gap:
+        db.execute("UPDATE segments SET end_ts=? WHERE id=?", (now, cur[0]))
+    else:                                       # switched apps, or woke up
+        if cur:
+            db.execute("UPDATE segments SET closed=1 WHERE id=?", (cur[0],))
+        db.execute("INSERT INTO segments(app, start_ts, end_ts, closed) "
+                   "VALUES (?,?,?,0)", (app, now, now))
+    db.commit()
 
 def main():
     db = store.connect()
@@ -63,22 +82,8 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     while running["v"]:
-        now = time.time()
         active = idle_seconds() < IDLE_THRESHOLD
-        app = frontmost_app() if active else None
-        cur = _open_segment(db)
-
-        if app is None:                         # idle, asleep, or unknown
-            if cur:
-                db.execute("UPDATE segments SET closed=1 WHERE id=?", (cur[0],))
-        elif cur and cur[1] == app:             # still in the same app
-            db.execute("UPDATE segments SET end_ts=? WHERE id=?", (now, cur[0]))
-        else:                                   # switched apps
-            if cur:
-                db.execute("UPDATE segments SET closed=1 WHERE id=?", (cur[0],))
-            db.execute("INSERT INTO segments(app, start_ts, end_ts, closed) "
-                       "VALUES (?,?,?,0)", (app, now, now))
-        db.commit()
+        tick(db, frontmost_app() if active else None, time.time())
 
         # Sleep in short slices so SIGTERM is handled promptly.
         for _ in range(INTERVAL):
