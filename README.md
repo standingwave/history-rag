@@ -337,10 +337,17 @@ runs once at login, and catches up after sleep (cron just skips missed runs).
 Fill the plist's absolute-path placeholders and load it:
 ```bash
 PY=~/.claude/rag-venv/bin/python
-sed -e "s#__PYTHON__#$PY#" -e "s#__INDEX__#$(pwd)/index.py#" \
+sed -e "s#__PYTHON__#$PY#g" -e "s#__INDEX__#$(pwd)/index.py#" \
+    -e "s#__BACKUP__#$(pwd)/tools/backup.py#" \
   com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
 launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
 ```
+Each cycle chains `tools/backup.py` after the refresh: dated copies of the
+index and app-usage DBs land in `[backup] dir` (default `~/.claude/backups`)
+at most once per local day, pruned to the newest `[backup] keep` (default 7).
+The index is an *archive* — it holds history whose sources have expired — so
+back it up like it's the only copy, because it is.
+
 It needs Ollama running (index.py no-ops safely if it isn't). Check it fired:
 ```bash
 tail -f /tmp/history-index.log

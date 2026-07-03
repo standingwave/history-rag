@@ -15,8 +15,9 @@
     <string>com.user.history-index</string>
     <key>ProgramArguments</key>
     <array>
-        <string>__PYTHON__</string>
-        <string>__INDEX__</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>__PYTHON__ __INDEX__ &amp;&amp; __PYTHON__ __BACKUP__</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

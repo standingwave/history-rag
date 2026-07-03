@@ -118,10 +118,13 @@ first.) Confirm with `claude mcp list`.
 - **macOS — launchd.** Fill the plist and load it:
   ```bash
   PY=~/.claude/rag-venv/bin/python
-  sed -e "s#__PYTHON__#$PY#" -e "s#__INDEX__#$(pwd)/index.py#" \
+  sed -e "s#__PYTHON__#$PY#g" -e "s#__INDEX__#$(pwd)/index.py#" \
+      -e "s#__BACKUP__#$(pwd)/tools/backup.py#" \
     com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
   launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
   ```
+  Each cycle chains `tools/backup.py`: daily dated copies of the sole-copy
+  DBs in `~/.claude/backups`, pruned to `[backup] keep` (default 7).
   No env plumbing needed — scheduled runs read `~/.claude/history-rag.toml`
   like every other entry point. Cadence: `StartInterval` seconds.
   Verify: `launchctl list | grep history-index`, then the per-source stats
