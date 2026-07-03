@@ -103,28 +103,36 @@ def _reader(db):
         return _read_safari
     return None
 
-# Query params that ARE the page's identity, kept per domain suffix; every
-# other param is stripped (tokens, tracking, churn). Without the "v" here all
-# youtube.com/watch pages collapse into a single chunk. Extend or override
-# per-domain via [browser].keep_params in the config file (an empty list
-# disables a default). The secret regex still runs on the result.
-_DEFAULT_KEEP_PARAMS = {"youtube.com": ["v"]}
+# Query params that ARE the page's identity, kept per rule; every other
+# param is stripped (tokens, tracking, churn). Rule keys are
+# "domain[/path-prefix]" — path scoping matters: google.com's q is a search
+# on /search but a redirect target on /url, and keeping the latter indexes
+# tracking links as giant pseudo-searches. Extend or override via
+# [browser].keep_params in the config file (an empty list disables a rule).
+# The secret regex still runs on the result.
+_DEFAULT_KEEP_PARAMS = {
+    "youtube.com/watch": ["v"],
+    "youtube.com/results": ["search_query"],
+}
 _keep_table = None
 
-def _keep_for(host: str):
+def _keep_for(host: str, path: str):
     global _keep_table
     if _keep_table is None:
         import config
         table = {k: list(v) for k, v in _DEFAULT_KEEP_PARAMS.items()}
         cfg = config.get("browser", "keep_params", "", {})
         if isinstance(cfg, dict):
-            for dom, params in cfg.items():
-                table[dom.lower()] = [str(p) for p in params]
+            for key, params in cfg.items():
+                table[key.lower()] = [str(p) for p in params]
         _keep_table = table
-    for dom, params in _keep_table.items():
+    kept = []
+    for key, params in _keep_table.items():
+        dom, _, prefix = key.partition("/")
         if host == dom or host.endswith("." + dom):
-            return params
-    return None
+            if not prefix or path.startswith("/" + prefix):
+                kept += params
+    return kept or None
 
 def _clean_url(url: str):
     """Strip query+fragment (minus per-domain keep_params); reject non-web
@@ -139,7 +147,7 @@ def _clean_url(url: str):
     if host in _SKIP_HOSTS or host.endswith(".local"):
         return None
     query = ""
-    keep = _keep_for(host)
+    keep = _keep_for(host, parts.path)
     if keep and parts.query:
         kept = sorted((k, v) for k, v in parse_qsl(parts.query) if k in keep)
         query = urlencode(kept)   # sorted + re-encoded -> stable ids

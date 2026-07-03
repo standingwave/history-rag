@@ -159,12 +159,16 @@ Chromium's Preferences (plain `safari` for Safari's profile-less default
 store), so searches can tell work from personal browsing; ids hash the stable
 profile directory, so renaming a profile re-labels chunks without orphaning
 them. Query strings and fragments are stripped (they carry tokens and churn)
-— except params that *are* the page's identity, kept per domain:
-`youtube.com`'s `v` by default (else every watch page collapses into one
-chunk), extensible or disableable via `[browser] keep_params` in the config
-file (`{ "youtube.com" = ["v"], "example.com" = ["id"] }`; an empty list turns
-a default off). Localhost and non-http(s) URLs are skipped, and the shared
-secret regex runs on the final URL, kept params included. Other Chromium-family browsers work via
+— except params that *are* the page's identity, kept per
+`domain[/path-prefix]` rule: `youtube.com/watch`'s `v` and
+`youtube.com/results`' `search_query` by default (else every watch page
+collapses into one chunk). Extend or disable via `[browser] keep_params`
+(`{ "google.com/search" = ["q"], "example.com" = ["id"] }`; an empty list
+turns a rule off). Path scoping matters — google.com's `q` is a search on
+`/search` but a redirect target on `/url`, and keeping the latter would index
+tracking links as pseudo-searches. Localhost and non-http(s) URLs are
+skipped, and the shared secret regex runs on the final URL, kept params
+included. Other Chromium-family browsers work via
 `CLAUDE_RAG_BROWSERS` (colon-separated `name=path` entries; the Safari-vs-
 Chromium schema is sniffed from the DB, not the name):
 ```bash

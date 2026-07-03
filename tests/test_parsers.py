@@ -40,10 +40,23 @@ def test_clean_url_strips_and_keeps():
         "https://www.youtube.com/watch?v=abc"                 # default keep_params
     assert c("https://music.youtube.com/watch?v=x&list=l") == \
         "https://music.youtube.com/watch?v=x"                 # subdomain match
+    assert c("https://www.youtube.com/results?search_query=a+b") == \
+        "https://www.youtube.com/results?search_query=a+b"
+    assert c("https://www.youtube.com/embed?v=abc") == \
+        "https://www.youtube.com/embed"                       # v is /watch-scoped
     assert c("http://localhost:3000/x") is None
     assert c("file:///etc/passwd") is None
     assert c("chrome://settings") is None
     assert c("https://box.local/admin") is None
+
+def test_keep_params_path_scoping():
+    browser._keep_table = {"google.com/search": ["q"]}
+    c = browser._clean_url
+    assert c("https://www.google.com/search?q=cintas&sca=1") == \
+        "https://www.google.com/search?q=cintas"
+    # the redirect endpoint must NOT keep q — tracking links aren't searches
+    assert c("https://www.google.com/url?q=https%3A%2F%2Fx.com%2Fabc") == \
+        "https://www.google.com/url"
 
 def test_search_text_announces_engines():
     s = browser._search_text
