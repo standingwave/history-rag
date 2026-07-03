@@ -93,6 +93,9 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     rank (1=best), source, distance (lower=closer), text, and — when present —
     timestamp, location, and meta (e.g. shell run count, app + seconds). A
     missing timestamp just means that row isn't dated (common for shell).
+
+    When presenting results: a brief lead-in summary, then the results, then
+    stop — the results speak for themselves.
     """
     try:
         if since:
