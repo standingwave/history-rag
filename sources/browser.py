@@ -145,6 +145,22 @@ def _clean_url(url: str):
         query = urlencode(kept)   # sorted + re-encoded -> stable ids
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, "")).rstrip("/")
 
+# Kept params that mean "this page is a search" (vs identity params like
+# youtube's v). Search chunks announce themselves so "what did I search"
+# queries retrieve every engine equally — a YouTube results page titled
+# "<query> - YouTube" would otherwise embed like a video, not a search.
+_SEARCH_PARAMS = ("q", "search_query")
+
+def _search_text(url: str):
+    parts = urlsplit(url)
+    if not parts.query:
+        return None
+    for k, v in parse_qsl(parts.query):
+        if k in _SEARCH_PARAMS and v:
+            host = (parts.hostname or "").removeprefix("www.")
+            return f'Searched {host} for "{v}" — {url}'
+    return None
+
 def _iso(ts: float) -> str:
     if ts <= 0:
         return ""
@@ -197,7 +213,8 @@ def iter_chunks():
     for (browser, profile, url), (title, count, ts, display) in best.items():
         cid = "browser:" + hashlib.sha256(
             f"{browser}\0{profile}\0{url}".encode()).hexdigest()[:26]
-        text = (f"{title} — {url}" if title else url)[:MAX_CHARS]
+        text = (_search_text(url)
+                or (f"{title} — {url}" if title else url))[:MAX_CHARS]
         meta = {"url": url, "title": title[:200], "visit_count": int(count)}
         if display:
             meta["profile"] = display

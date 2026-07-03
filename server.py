@@ -62,7 +62,10 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
       - appusage: daily per-app time on their Mac ("spent 2h 14m in Figma")
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
                   deduped per browser profile — location is "browser:profile"
-                  — timestamped by last visit)
+                  — timestamped by last visit). Search-engine queries (Google,
+                  DuckDuckGo, YouTube search) are indexed as chunks reading
+                  `Searched <site> for "<terms>"` — for "what did I search"
+                  questions, query with that phrasing to catch every engine.
       - git:      commit messages they've authored across local repos
       - obsidian: their Obsidian vault notes, chunked by heading
 
