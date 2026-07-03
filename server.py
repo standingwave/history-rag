@@ -17,11 +17,15 @@ from config import EMBED_MODEL, DB_PATH, OLLAMA
 
 mcp = FastMCP("claude-history")
 
-# Windowed subsets up to this size are ranked exhaustively by true distance
-# (bounded by SQLite's ~32k bind-variable limit, generous for latency).
+# Windowed subsets up to this size are ranked exhaustively by true distance;
+# beyond it we fall back to KNN-pool sampling. Purely a latency knob.
 EXACT_WINDOW_MAX = 4000
 
+# ── connection, embedding, and query helpers ────────────────────────────────
+
 def _db():
+    # A fresh connection per tool call: ~1ms, and it always sees the
+    # indexer's latest commits with no thread-affinity questions.
     db = sqlite3.connect(DB_PATH)
     db.enable_load_extension(True)
     sqlite_vec.load(db)
@@ -50,6 +54,16 @@ def _bound_to_utc(bound: str, end_of_day: bool = False) -> str:
         dt = dt.astimezone()                   # attach local zone
     return dt.astimezone(timezone.utc).isoformat()
 
+def _parse_bounds(since: str, until: str):
+    """UTC-normalize a since/until pair -> (since, until, error-JSON-or-None)."""
+    try:
+        return (_bound_to_utc(since) if since else "",
+                _bound_to_utc(until, end_of_day=True) if until else "", None)
+    except ValueError:
+        return "", "", json.dumps(
+            {"error": f"bad since/until (want ISO date or datetime): "
+                      f"since={since!r} until={until!r}"})
+
 def _window_where(since, until, source, location, include_undated):
     """WHERE clause + params for a time/source/location slice of chunks.
     Bounds must already be UTC-normalized."""
@@ -68,6 +82,136 @@ def _window_where(since, until, source, location, include_undated):
         sql += " AND substr(location, 1, ?) = ?"
         params += [len(location), location]
     return sql, params
+
+def _loc_prefix(source: str, loc: str) -> str:
+    """Collapse a chunk location to a reusable location-filter prefix."""
+    if source == "git":                       # repo@sha -> repo@
+        return loc.split("@")[0] + "@"
+    if source == "obsidian":                  # dir/note.md#H -> dir/
+        head = loc.split("#")[0]
+        return head.split("/")[0] + "/" if "/" in head else head
+    return loc
+
+# ── per-source expanders ─────────────────────────────────────────────────────
+# Uniform signature: (db, chunk, n) -> (context, context_source). `chunk` is
+# the dict expand() returns to the caller. Register new sources in _EXPANDERS.
+
+def _expand_claude(db, chunk, n):
+    meta = chunk["meta"]
+    sid, lineno = meta.get("session_id", ""), meta.get("lineno", -1)
+    fp = os.path.join(os.path.expanduser("~/.claude/projects"),
+                      meta.get("project_hash", ""), f"{sid}.jsonl")
+    if os.path.isfile(fp):
+        from sources.claude import iter_turns
+        before, target, after = deque(maxlen=n), None, []
+        for ln, role, text, ts, _cwd in iter_turns(fp):
+            turn = {"lineno": ln, "role": role, "timestamp": ts,
+                    "text": text[:2000]}
+            if ln < lineno:
+                before.append(turn)
+            elif ln == lineno:
+                target = {**turn, "target": True}
+            else:
+                after.append(turn)
+                if len(after) >= n:
+                    break
+        return {"turns": [*before, *([target] if target else []), *after]}, "live"
+    # session transcript aged out -> neighbors from the index
+    rows = db.execute(
+        """SELECT text, timestamp, meta FROM chunks WHERE source = 'claude'
+           AND json_extract(meta, '$.session_id') = ?
+           ORDER BY json_extract(meta, '$.lineno')""", (sid,)).fetchall()
+    turns = []
+    for text, ts, mj in rows:
+        m = json.loads(mj) if mj else {}
+        turns.append({"lineno": m.get("lineno"), "role": m.get("role"),
+                      "timestamp": ts, "text": text})
+    idx = next((i for i, t in enumerate(turns) if t["lineno"] == lineno), None)
+    if idx is not None:
+        turns[idx]["target"] = True
+        turns = turns[max(0, idx - n):idx + n + 1]
+    return {"turns": turns}, "index"
+
+def _expand_git(db, chunk, n):
+    meta = chunk["meta"]
+    repo, sha = meta.get("repo", ""), meta.get("sha", "")
+    if repo and sha and os.path.isdir(repo):
+        try:
+            out = subprocess.run(["git", "-C", repo, "show", "--stat", sha],
+                                 capture_output=True, text=True, timeout=30)
+            if out.returncode == 0:
+                return {"show": out.stdout[:4000]}, "live"
+            return {"note": "git show failed: "
+                    + out.stderr.strip()[:200]}, "index"
+        except subprocess.SubprocessError as e:
+            return {"note": f"git show failed: {e}"}, "index"
+    return {"note": "repo or commit no longer available"}, "index"
+
+def _expand_browser(db, chunk, n):
+    cid, loc, ts = chunk["id"], chunk["location"], chunk["timestamp"]
+    if not ts:
+        return None, None
+    local = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
+    day0 = datetime(local.year, local.month, local.day)
+    lo = day0.astimezone(timezone.utc).isoformat()
+    hi = ((day0 + timedelta(days=1)).astimezone(timezone.utc)
+          - timedelta(microseconds=1)).isoformat()
+    rows = db.execute(
+        """SELECT id, timestamp, text FROM chunks WHERE source = 'browser'
+           AND location = ? AND timestamp >= ? AND timestamp <= ?
+           ORDER BY timestamp""", (loc, lo, hi)).fetchall()
+    idx = next((i for i, r in enumerate(rows) if r[0] == cid), 0)
+    visits = [{"id": i, "timestamp": t, "text": x[:160], **({"target": True}
+               if i == cid else {})}
+              for i, t, x in rows[max(0, idx - n):idx + n + 1]]
+    return {"day": day0.date().isoformat(), "profile": loc,
+            "visits": visits}, "index"
+
+def _expand_obsidian(db, chunk, n):
+    meta = chunk["meta"]
+    import config
+    for v in config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS"):
+        if os.path.basename(v.rstrip("/")) == meta.get("vault", ""):
+            p = os.path.join(v, meta.get("path", ""))
+            if os.path.isfile(p):
+                with open(p, errors="replace") as f:
+                    return {"note_text": f.read()[:8000]}, "live"
+    rows = db.execute(
+        """SELECT id, location, text FROM chunks WHERE source = 'obsidian'
+           AND json_extract(meta, '$.vault') = ?
+           AND json_extract(meta, '$.path') = ? ORDER BY location""",
+        (meta.get("vault", ""), meta.get("path", ""))).fetchall()
+    return {"sections": [{"id": i, "location": l, "text": t}
+                         for i, l, t in rows]}, "index"
+
+def _expand_appusage(db, chunk, n):
+    try:
+        from appusage import store
+        db2 = store.connect()
+        store.setup(db2)
+        day = store.daily_durations(db2).get(chunk["meta"].get("date", ""), {})
+        apps = {a: int(s) for a, s in
+                sorted(day.items(), key=lambda kv: -kv[1])}
+        return {"date": chunk["meta"].get("date"),
+                "seconds_by_app": apps}, "live"
+    except Exception:
+        return None, None
+
+def _expand_shell(db, chunk, n):
+    from sources.shell import atuin_context
+    ctx = atuin_context(chunk["text"], n)
+    return (ctx, "live") if ctx else (None, None)
+
+_EXPANDERS = {
+    "claude": _expand_claude,
+    "git": _expand_git,
+    "browser": _expand_browser,
+    "obsidian": _expand_obsidian,
+    "appusage": _expand_appusage,
+    "shell": _expand_shell,
+}
+
+# ── tools ────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 def search_history(query: str, k: int = 5, source: str = "", location: str = "",
@@ -123,14 +267,9 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     exists, read it before answering: the user keeps their recall coverage and
     presentation preferences there.
     """
-    try:
-        if since:
-            since = _bound_to_utc(since)
-        if until:
-            until = _bound_to_utc(until, end_of_day=True)
-    except ValueError:
-        return json.dumps({"error": f"bad since/until (want ISO date or "
-                           f"datetime): since={since!r} until={until!r}"})
+    since, until, err = _parse_bounds(since, until)
+    if err:
+        return err
     vec = _embed(query)
     db = _db()
     qblob = sqlite_vec.serialize_float32(vec)
@@ -143,19 +282,16 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     if since or until:
         where, params = _window_where(since, until, source, location,
                                       include_undated)
-        ids = [r[0] for r in db.execute(
-            f"SELECT id FROM chunks WHERE {where}", params)]
-        if len(ids) <= EXACT_WINDOW_MAX:
+        n_window = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
+                              params).fetchone()[0]
+        if n_window <= EXACT_WINDOW_MAX:
             exact = True
-            rows = []
-            if ids:
-                qm = ",".join("?" * len(ids))
-                rows = db.execute(f"""
-                    SELECT vec_distance_l2(v.embedding, ?) AS distance, c.id,
-                           c.text, c.source, c.timestamp, c.location, c.meta
-                    FROM vec_chunks v JOIN chunks c ON c.id = v.id
-                    WHERE c.id IN ({qm}) ORDER BY distance
-                """, (qblob, *ids)).fetchall()
+            rows = db.execute(f"""
+                SELECT vec_distance_l2(v.embedding, ?) AS distance, c.id,
+                       c.text, c.source, c.timestamp, c.location, c.meta
+                FROM vec_chunks v JOIN chunks c ON c.id = v.id
+                WHERE {where} ORDER BY distance
+            """, (qblob, *params)).fetchall()
 
     if rows is None:
         # Over-fetch, then filter in Python. Location and time filters can
@@ -172,16 +308,17 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
 
     results = []
     for dist, cid, text, src, ts, loc, meta_json in rows:
-        if source and src != source:
-            continue
-        if location and not (loc or "").startswith(location):
-            continue
-        if since or until:
-            if not ts:
-                if not include_undated:
-                    continue
-            elif (since and ts < since) or (until and ts > until):
+        if not exact:                 # the exact path already filtered in SQL
+            if source and src != source:
                 continue
+            if location and not (loc or "").startswith(location):
+                continue
+            if since or until:
+                if not ts:
+                    if not include_undated:
+                        continue
+                elif (since and ts < since) or (until and ts > until):
+                    continue
         if max_distance and dist > max_distance:
             continue
         item = {"rank": len(results) + 1, "id": cid, "source": src,
@@ -224,21 +361,14 @@ def history_stats(locations: bool = False) -> str:
         sources[src] = {"chunks": cnt, "earliest": mn, "latest": mx}
     if locations:
         counts = {src: Counter() for src in sources}
-        for src, loc in db.execute("SELECT source, location FROM chunks"):
-            counts[src][_loc_prefix(src, loc or "")] += 1
+        for src, loc, cnt in db.execute(
+                "SELECT source, location, COUNT(*) FROM chunks "
+                "GROUP BY source, location"):
+            counts[src][_loc_prefix(src, loc or "")] += cnt
         for src, c in counts.items():
             sources[src]["locations"] = dict(c.most_common(20))
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     return json.dumps({"total_chunks": total, "sources": sources})
-
-def _loc_prefix(source: str, loc: str) -> str:
-    """Collapse a chunk location to a reusable location-filter prefix."""
-    if source == "git":                       # repo@sha -> repo@
-        return loc.split("@")[0] + "@"
-    if source == "obsidian":                  # dir/note.md#H -> dir/
-        head = loc.split("#")[0]
-        return head.split("/")[0] + "/" if "/" in head else head
-    return loc
 
 @mcp.tool()
 def list_window(since: str = "", until: str = "", source: str = "",
@@ -254,15 +384,13 @@ def list_window(since: str = "", until: str = "", source: str = "",
     with offset (limit caps at 200)."""
     if not since and not until:
         return json.dumps({"error": "list_window requires since and/or until"})
-    try:
-        s = _bound_to_utc(since) if since else ""
-        u = _bound_to_utc(until, end_of_day=True) if until else ""
-    except ValueError:
-        return json.dumps({"error": f"bad since/until (want ISO date or "
-                           f"datetime): since={since!r} until={until!r}"})
+    since, until, err = _parse_bounds(since, until)
+    if err:
+        return err
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
-    where, params = _window_where(s, u, source, location, include_undated)
+    where, params = _window_where(since, until, source, location,
+                                  include_undated)
     db = _db()
     total = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
                        params).fetchone()[0]
@@ -273,104 +401,8 @@ def list_window(since: str = "", until: str = "", source: str = "",
     results = [{"id": i, "source": src, "timestamp": ts, "location": loc,
                 "text": text[:160]} for i, src, ts, loc, text in rows]
     return json.dumps({"count": len(results), "total": total,
-                       "window": {"since": s or None, "until": u or None},
+                       "window": {"since": since or None, "until": until or None},
                        "results": results})
-
-def _expand_claude(db, cid, meta, n):
-    sid, lineno = meta.get("session_id", ""), meta.get("lineno", -1)
-    fp = os.path.join(os.path.expanduser("~/.claude/projects"),
-                      meta.get("project_hash", ""), f"{sid}.jsonl")
-    if os.path.isfile(fp):
-        from sources.claude import iter_turns
-        before, target, after = deque(maxlen=n), None, []
-        for ln, role, text, ts, _cwd in iter_turns(fp):
-            turn = {"lineno": ln, "role": role, "timestamp": ts,
-                    "text": text[:2000]}
-            if ln < lineno:
-                before.append(turn)
-            elif ln == lineno:
-                target = {**turn, "target": True}
-            else:
-                after.append(turn)
-                if len(after) >= n:
-                    break
-        return {"turns": [*before, *([target] if target else []), *after]}, "live"
-    # session transcript aged out -> neighbors from the index
-    rows = db.execute(
-        """SELECT text, timestamp, meta FROM chunks WHERE source = 'claude'
-           AND json_extract(meta, '$.session_id') = ?
-           ORDER BY json_extract(meta, '$.lineno')""", (sid,)).fetchall()
-    turns = []
-    for text, ts, mj in rows:
-        m = json.loads(mj) if mj else {}
-        turns.append({"lineno": m.get("lineno"), "role": m.get("role"),
-                      "timestamp": ts, "text": text})
-    idx = next((i for i, t in enumerate(turns) if t["lineno"] == lineno), None)
-    if idx is not None:
-        turns[idx]["target"] = True
-        turns = turns[max(0, idx - n):idx + n + 1]
-    return {"turns": turns}, "index"
-
-def _expand_git(meta):
-    repo, sha = meta.get("repo", ""), meta.get("sha", "")
-    if repo and sha and os.path.isdir(repo):
-        try:
-            out = subprocess.run(["git", "-C", repo, "show", "--stat", sha],
-                                 capture_output=True, text=True, timeout=30)
-            if out.returncode == 0:
-                return {"show": out.stdout[:4000]}, "live"
-            return {"note": "git show failed: "
-                    + out.stderr.strip()[:200]}, "index"
-        except subprocess.SubprocessError as e:
-            return {"note": f"git show failed: {e}"}, "index"
-    return {"note": "repo or commit no longer available"}, "index"
-
-def _expand_browser(db, cid, loc, ts, n):
-    if not ts:
-        return None, None
-    local = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
-    day0 = datetime(local.year, local.month, local.day)
-    lo = day0.astimezone(timezone.utc).isoformat()
-    hi = ((day0 + timedelta(days=1)).astimezone(timezone.utc)
-          - timedelta(microseconds=1)).isoformat()
-    rows = db.execute(
-        """SELECT id, timestamp, text FROM chunks WHERE source = 'browser'
-           AND location = ? AND timestamp >= ? AND timestamp <= ?
-           ORDER BY timestamp""", (loc, lo, hi)).fetchall()
-    idx = next((i for i, r in enumerate(rows) if r[0] == cid), 0)
-    visits = [{"id": i, "timestamp": t, "text": x[:160], **({"target": True}
-               if i == cid else {})}
-              for i, t, x in rows[max(0, idx - n):idx + n + 1]]
-    return {"day": day0.date().isoformat(), "profile": loc,
-            "visits": visits}, "index"
-
-def _expand_obsidian(db, meta):
-    import config
-    for v in config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS"):
-        if os.path.basename(v.rstrip("/")) == meta.get("vault", ""):
-            p = os.path.join(v, meta.get("path", ""))
-            if os.path.isfile(p):
-                with open(p, errors="replace") as f:
-                    return {"note_text": f.read()[:8000]}, "live"
-    rows = db.execute(
-        """SELECT id, location, text FROM chunks WHERE source = 'obsidian'
-           AND json_extract(meta, '$.vault') = ?
-           AND json_extract(meta, '$.path') = ? ORDER BY location""",
-        (meta.get("vault", ""), meta.get("path", ""))).fetchall()
-    return {"sections": [{"id": i, "location": l, "text": t}
-                         for i, l, t in rows]}, "index"
-
-def _expand_appusage(meta):
-    try:
-        from appusage import store
-        db2 = store.connect()
-        store.setup(db2)
-        day = store.daily_durations(db2).get(meta.get("date", ""), {})
-        apps = {a: int(s) for a, s in
-                sorted(day.items(), key=lambda kv: -kv[1])}
-        return {"date": meta.get("date"), "seconds_by_app": apps}, "live"
-    except Exception:
-        return None, None
 
 @mcp.tool()
 def expand(id: str, context: int = 5) -> str:
@@ -389,27 +421,13 @@ def expand(id: str, context: int = 5) -> str:
     if not row:
         return json.dumps({"error": f"no chunk with id {id!r}"})
     cid, source, ts, loc, text, meta_json = row
-    meta = json.loads(meta_json) if meta_json else {}
+    chunk = {"id": cid, "source": source, "timestamp": ts, "location": loc,
+             "text": text, "meta": json.loads(meta_json) if meta_json else {}}
     n = max(0, min(int(context), 25))
-    ctx, ctx_src = None, None
-    if source == "claude":
-        ctx, ctx_src = _expand_claude(db, cid, meta, n)
-    elif source == "git":
-        ctx, ctx_src = _expand_git(meta)
-    elif source == "browser":
-        ctx, ctx_src = _expand_browser(db, cid, loc, ts, n)
-    elif source == "obsidian":
-        ctx, ctx_src = _expand_obsidian(db, meta)
-    elif source == "appusage":
-        ctx, ctx_src = _expand_appusage(meta)
-    elif source == "shell":
-        from sources.shell import atuin_context
-        ctx = atuin_context(text, n)
-        ctx_src = "live" if ctx else None
-    return json.dumps({
-        "chunk": {"id": cid, "source": source, "timestamp": ts,
-                  "location": loc, "text": text, "meta": meta},
-        "context": ctx, "context_source": ctx_src})
+    handler = _EXPANDERS.get(source)
+    ctx, ctx_src = handler(db, chunk, n) if handler else (None, None)
+    return json.dumps({"chunk": chunk, "context": ctx,
+                       "context_source": ctx_src})
 
 if __name__ == "__main__":
     mcp.run()
