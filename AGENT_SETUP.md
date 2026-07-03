@@ -1,182 +1,169 @@
 # Agent runbook: install the history RAG
 
 **You are an AI coding agent setting this tool up on the user's machine.** Work
-through the phases in order. Each step is *detect → act → verify*: check current
-state first, act only if needed, and confirm before moving on. Do the work
-yourself rather than handing the user shell commands. Report a short summary at
-the end.
-
-This is the agent process. The human-facing version is `README.md` — don't make
-the user follow that; follow this instead.
+through the phases in order; each step is *detect → act → verify*. Do the work
+yourself rather than handing the user commands. Report a short summary at the
+end. (`README.md` is the human-facing version — follow this instead.)
 
 ## When to ask the user
-Pause and ask at these points (use the default if they defer). Ask each one when
-you reach the phase that needs it — don't dump all questions at once. Everything
-not on this list, decide yourself with sensible defaults.
+Ask each question when its phase needs it, not all at once; use the default if
+they defer. Everything else, decide yourself with sensible defaults.
 
 | # | Ask | Phase | Default if they defer |
 |---|-----|-------|-----------------------|
-| Q1 | Which sources to index — Claude sessions, shell history, or both? | 0 | Both |
-| Q2 | OK to index shell history? It can contain sensitive commands (secret redaction is on, but confirm). | 0 | Index it |
-| Q3 | Any archived history elsewhere (old machines, backups) to include via `CLAUDE_RAG_HISTFILES`? | 0 | Live + macOS session dirs only |
-| Q4 | Permission to install software (Ollama, Homebrew packages) if missing? | 1 | Ask before any system install — no silent installs |
-| Q5 | Embedding model: fast (`nomic-embed-text`) or higher-quality (`mxbai-embed-large`, slower, larger)? | 1 | `nomic-embed-text` |
-| Q6 | Rebuild confirmation IF an index already exists with data (rebuild wipes it). | 3 | Don't rebuild; do an incremental run |
-| Q7 | MCP registration scope — `user` (all your projects) or `project` (just this repo)? | 5 | `user` |
-| Q8 | Set up automatic refresh (cron), and at what interval? | 6 | Don't install one; mention manual refresh |
-| Q9 | (macOS only) Install the app-usage tracker? It's a persistent `launchd` daemon that logs how long they spend in each app. | 7 | Don't install — mention it's available |
+| Q1 | Which sources? claude sessions, shell, browser history, git commits, Obsidian notes, app usage (macOS daemon, see Q12) | 0 | claude + shell + browser (the zero-config ones) |
+| Q2 | OK to index shell history? Can contain sensitive commands (redaction is on, but confirm) | 0 | Index it |
+| Q3 | OK to index browser history? Privacy-relevant; covers all profiles of Safari/Chrome/Helium found | 0 | Index it |
+| Q4 | Archived shell history to include via `CLAUDE_RAG_HISTFILES`? | 0 | Live + macOS session dirs only |
+| Q5 | If git chosen: which roots to scan (`CLAUDE_RAG_GIT_ROOTS`)? | 0 | Skip the git source |
+| Q6 | If Obsidian chosen: which vault paths (`CLAUDE_RAG_OBSIDIAN_VAULTS`)? | 0 | Skip the obsidian source |
+| Q7 | Permission to install software (Ollama, brew packages) if missing? | 1 | Ask before any system install |
+| Q8 | Embedding model: fast (`nomic-embed-text`) or higher-quality (`mxbai-embed-large`, dim 1024)? | 1 | `nomic-embed-text` |
+| Q9 | Rebuild confirmation IF an index already exists with data (rebuild wipes it) | 3 | Incremental run, no rebuild |
+| Q10 | MCP scope — `user` (all projects) or `project` (this repo)? | 5 | `user` |
+| Q11 | Automatic refresh (launchd/cron), what interval? | 6 | Don't install; mention manual refresh |
+| Q12 | (macOS) Install the app-usage tracker? Persistent daemon logging the frontmost app | 7 | Don't install — mention it's available |
 
-STOP points (notify, don't ask — these need a human action you can't perform)
-are called out inline, e.g. reconnecting the MCP server in Phase 5.
+STOP points (notify, don't ask — human actions you can't perform) are called
+out inline: MCP reconnect (Phase 5), Full Disk Access and the Documents
+permission prompt (Phases 3/6).
 
 ## Phase 0 — Locate the code & scope the work
-Work from the repo root (the directory containing `server.py`, `config.py`,
-`index.py`, and `sources/`). Confirm with `ls`. If you don't have the code yet,
-clone it first and `cd` in:
-```bash
-git clone https://github.com/standingwave/history-rag.git && cd history-rag
-```
-All paths below are relative to this root.
-
-Note the platform: `uname` (`Darwin` = macOS, `Linux` = Linux). It changes only
-the Ollama install command and whether shell session-snapshot dirs exist.
-
-**ASK → Q1, Q2, Q3.** Settle sources, get explicit consent for shell history,
-and collect any archived history paths before indexing anything. If they decline
-a source, you'll trim `SOURCES` in `index.py` accordingly in Phase 3.
+Work from the repo root (has `server.py`, `config.py`, `index.py`, `sources/`).
+If you don't have it: `git clone https://github.com/standingwave/history-rag.git && cd history-rag`.
+Note the platform (`uname`); it changes the Ollama install and macOS-only bits.
+**ASK → Q1–Q6.** Collect source choices, consents, and paths before indexing.
 
 ## Phase 1 — Ollama + embedding model
-1. Detect: `ollama --version` and `curl -s http://localhost:11434/api/tags`.
-2. If not installed — **ASK → Q4 before installing**, then:
-   - macOS: `brew install ollama && brew services start ollama`
-   - Linux: `curl -fsSL https://ollama.com/install.sh | sh`
-3. If installed but the daemon is down: start it (`brew services start ollama`,
-   or `ollama serve &` on Linux), then re-check the `curl` returns JSON.
-4. **ASK → Q5** for the model. Pull it if absent: `ollama pull <model>`
-   (default `nomic-embed-text`). If they chose a non-default model, you'll set
-   `CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM` consistently in Phases 3 and 5 (see
-   guardrails) — `mxbai-embed-large` is dim 1024.
-
-Verify: the `curl` to `/api/tags` returns JSON listing the chosen model.
+1. Detect: `ollama --version`; `curl -s http://localhost:11434/api/tags`.
+2. Missing → **ASK Q7**, then macOS `brew install ollama && brew services start ollama`;
+   Linux `curl -fsSL https://ollama.com/install.sh | sh`.
+3. Daemon down → start it, re-check the curl returns JSON.
+4. **ASK Q8**; `ollama pull <model>` if absent. Non-default model ⇒ carry
+   `CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM` through Phases 3 and 5 (see guardrails).
 
 ## Phase 2 — venv + dependencies
-Canonical venv path is `~/.claude/rag-venv` (keep it here, not in the repo —
-the MCP server is registered with an absolute interpreter path, so the venv must
-not move when the repo moves).
-1. If `~/.claude/rag-venv/bin/python` is missing, create it. Prefer uv:
-   `uv venv ~/.claude/rag-venv` then
-   `uv pip install --python ~/.claude/rag-venv/bin/python -r requirements.txt`.
-   No uv: `python3 -m venv ~/.claude/rag-venv` then
-   `~/.claude/rag-venv/bin/pip install -r requirements.txt`.
-2. From here on, ALWAYS invoke `~/.claude/rag-venv/bin/python` — never bare
-   `python`/`python3`, which won't see the deps.
-
+Canonical venv: `~/.claude/rag-venv` (outside the repo — the MCP registration
+uses an absolute interpreter path). If missing:
+`uv venv ~/.claude/rag-venv && uv pip install --python ~/.claude/rag-venv/bin/python -r requirements.txt`
+(no uv: `python3 -m venv` + its `pip install`). From here on ALWAYS invoke
+`~/.claude/rag-venv/bin/python`, never bare `python`.
 Verify: `~/.claude/rag-venv/bin/python -c "import sqlite_vec, requests, mcp; print('deps ok')"`.
 
 ## Phase 3 — Build the index
-1. Apply the Q1 source choice: if they excluded a source, edit `SOURCES` in
-   `index.py` to list only the wanted modules. If they gave archived paths (Q3),
-   export `CLAUDE_RAG_HISTFILES="path1:path2"` for the index command.
-2. Optional, only if `~/.claude/projects` exists and Claude is a chosen source:
-   run `~/.claude/rag-venv/bin/python inspect_sessions.py` and confirm the JSONL
-   shape matches the parser. If keys differ, adjust `_text_from_content` /
-   `iter_chunks` in `sources/claude.py` before building.
-3. Dry-run: `~/.claude/rag-venv/bin/python index.py --dry-run`. Expect the
-   chosen sources' lines. Zero lines means the filters rejected everything —
-   investigate, don't proceed.
-4. **Check for an existing index** (`~/.claude/history-rag.db`). If it exists and
-   has rows, an incremental `index.py` is safe. Only `--rebuild` (which wipes it)
-   if the schema/model changed — and **ASK → Q6** first.
-5. Build: `~/.claude/rag-venv/bin/python index.py` (add `--rebuild` only per
-   step 4). Needs Ollama up. Prefix with the chosen model's env vars if non-default.
+1. Apply choices. Declined claude/shell/browser ⇒ trim `SOURCES` in `index.py`.
+   git/obsidian are opt-in by env var and no-op without one — export
+   `CLAUDE_RAG_GIT_ROOTS` / `CLAUDE_RAG_OBSIDIAN_VAULTS` (and
+   `CLAUDE_RAG_HISTFILES` from Q4) for every index command.
+2. Optional, if claude is a source: `inspect_sessions.py` to confirm the JSONL
+   shape matches `sources/claude.py`.
+3. Dry-run, per source is clearest: `index.py --dry-run --source <name>`.
+   Zero lines = filters rejected everything — investigate before proceeding.
+4. Existing `~/.claude/history-rag.db` with rows ⇒ incremental is safe and
+   adding sources is additive (no rebuild). `--rebuild` only for a model/dim or
+   column change — **ASK Q9** first.
+5. Build: `index.py` (Ollama must be up). Each source prints a stats line
+   (`git: 469 chunks, 12 embedded, 0 skipped, 0.8s`); a failing source is
+   logged and skipped, so scan stderr rather than assuming silence = success.
 
-Verify (raw DB, no MCP needed):
+**STOP if Safari was chosen and the log shows `browser: skipping safari`
+(Operation not permitted):** the human must grant Full Disk Access to their
+terminal app (interactive runs) — System Settings → Privacy & Security → Full
+Disk Access. Other browsers index fine without it; the next run picks Safari up.
+
+Verify (raw DB): per-source counts are non-zero for every chosen source:
 ```bash
-~/.claude/rag-venv/bin/python - <<'PY'
+~/.claude/rag-venv/bin/python -c "
 import sqlite3, os
-db = sqlite3.connect(os.path.expanduser("~/.claude/history-rag.db"))
-print("total:", db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
-for r in db.execute("SELECT source, COUNT(*) FROM chunks GROUP BY source"): print(r)
-PY
+db = sqlite3.connect(os.path.expanduser('~/.claude/history-rag.db'))
+for r in db.execute('SELECT source, COUNT(*) FROM chunks GROUP BY source'): print(r)"
 ```
-Expect a non-zero total covering the chosen sources.
 
 ## Phase 4 — Verify search works (in-process)
-Do NOT verify by calling the `search_history` MCP tool yet — a server you just
-registered is not callable in the session that registered it, and any already-
-running instance is stale. Instead exercise the server module directly:
+Do NOT verify via the MCP tool yet (a just-registered server isn't callable in
+the session that registered it; a running one is stale). Exercise the module:
 ```bash
 ~/.claude/rag-venv/bin/python -c "import server; print(server.search_history('test', k=2))"
 ```
-Expect a JSON array of hits, each with `source`/`location`/`distance`. An empty
-array on a non-empty DB, or a `no such column` error, means the DB and the code
-disagree → rebuild (Phase 3, with Q6 consent) and retry.
+Expect JSON `{query, count, results[...]}` with `source`/`location`/`distance`
+per hit. Also spot-check the filters: `source=`, `location=` (prefix, e.g.
+`'chrome:'`), `since=`/`until=` (ISO dates). Empty results on a non-empty DB or
+a `no such column` error ⇒ DB and code disagree — rebuild (Q9) and retry.
 
 ## Phase 5 — Register the MCP server
-**ASK → Q7** for scope, then run from the repo root so `$(pwd)` is absolute:
+**ASK Q10**, then from the repo root:
 ```bash
 claude mcp add history -s user -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 ```
-(Use `-s project` instead if they chose project scope. If a non-default model was
-chosen, add `--env CLAUDE_RAG_MODEL=… --env CLAUDE_RAG_DIM=…` so the server
-embeds queries with the same model the index was built with.) If `history` is
-already registered with the wrong path, `claude mcp remove history` first.
-Confirm with `claude mcp list`.
+(`-s project` for project scope; non-default model ⇒ add `--env CLAUDE_RAG_MODEL=…
+--env CLAUDE_RAG_DIM=…`. Wrong existing registration ⇒ `claude mcp remove history`
+first.) Confirm with `claude mcp list`.
 
-**STOP — tell the human (don't ask):** the tool is registered but won't be
-callable until they reconnect it (`/mcp` → reconnect `history`) or restart their
-session. They must do this; you cannot. After they do, `search_history("…", k=5)`
-works, with optional `source="claude"|"shell"`.
+**STOP — tell the human:** the tool isn't callable until they reconnect
+(`/mcp` → `history`) or restart the session. Same applies after any later
+`server.py` change — the running process doesn't pick up edits.
 
 ## Phase 6 — Keep it fresh
-**ASK → Q8.** If they want automatic refresh:
-- **macOS — prefer launchd** (survives sleep, no Full Disk Access hassle). Fill
-  the plist placeholders and load it:
+**ASK Q11.** If yes:
+- **macOS — launchd.** Fill the plist and load it:
   ```bash
   PY=~/.claude/rag-venv/bin/python
   sed -e "s#__PYTHON__#$PY#" -e "s#__INDEX__#$(pwd)/index.py#" \
     com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
   launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
   ```
-  Adjust cadence via `StartInterval` in the plist. Verify with
-  `launchctl list | grep history-index` and `tail /tmp/history-index.log`.
-- **Linux — cron** (absolute paths; cron has no `~` and a minimal PATH):
-  ```cron
-  */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
+  If git/obsidian/archived-shell sources are on, add their env vars to the
+  installed plist (launchd doesn't inherit your shell):
+  ```xml
+  <key>EnvironmentVariables</key>
+  <dict><key>CLAUDE_RAG_GIT_ROOTS</key><string>/Users/USER/dev</string></dict>
   ```
-Either way it needs Ollama running. If they declined, tell them the manual
-refresh command (`index.py`) and move on.
+  then `launchctl unload` + `load`. Cadence: `StartInterval` seconds.
+  Verify: `launchctl list | grep history-index`, then the per-source stats
+  lines in `/tmp/history-index.log`.
+- **Linux — cron** (absolute paths, env vars inline):
+  ```cron
+  */30 * * * * CLAUDE_RAG_GIT_ROOTS=/home/USER/dev /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
+  ```
+
+**STOP — two macOS permission gotchas on the first scheduled run:**
+- Safari under launchd needs Full Disk Access on the *resolved* python binary
+  (`readlink -f ~/.claude/rag-venv/bin/python`), not the terminal. Re-grant
+  after interpreter upgrades change that path; the tell is
+  `browser: skipping safari` returning to the log.
+- A vault or histfile under `~/Documents`/`~/Desktop` triggers a one-time
+  "python would like to access…" dialog the human must approve. The tell: that
+  source's stats line showing minutes, not milliseconds.
 
 ## Phase 7 — Optional: app-usage tracker (macOS only)
-Skip on Linux. This is a persistent background daemon that logs the frontmost
-app over time — privacy-relevant — so **ASK → Q9** and install ONLY on a clear
-yes. It's independent of the rest; the `appusage` source is a no-op without it.
-1. Fill the plist placeholders with absolute paths and load it:
-   ```bash
-   PY=~/.claude/rag-venv/bin/python
-   sed -e "s#__PYTHON__#$PY#" -e "s#__DAEMON__#$(pwd)/appusage/daemon.py#" \
-     appusage/com.user.appusage.plist > ~/Library/LaunchAgents/com.user.appusage.plist
-   launchctl load ~/Library/LaunchAgents/com.user.appusage.plist
-   ```
-2. Verify it's running: `launchctl list | grep com.user.appusage` (a PID in the
-   first column means it's up), and `/tmp/appusage-daemon.log` has no errors.
-3. Tell them: data lands in `~/.claude/appusage.db`; `appusage/report.py` shows
-   totals; finished days flow into the index on the next `index.py` run. To
-   remove: `launchctl unload …` then delete the plist.
+Persistent daemon logging the frontmost app — privacy-relevant, so **ASK Q12**
+and install only on a clear yes. Independent of the rest (`appusage` source
+no-ops without it).
+```bash
+PY=~/.claude/rag-venv/bin/python
+sed -e "s#__PYTHON__#$PY#" -e "s#__DAEMON__#$(pwd)/appusage/daemon.py#" \
+  appusage/com.user.appusage.plist > ~/Library/LaunchAgents/com.user.appusage.plist
+launchctl load ~/Library/LaunchAgents/com.user.appusage.plist
+```
+Verify: `launchctl list | grep com.user.appusage` shows a PID;
+`/tmp/appusage-daemon.log` clean. Data → `~/.claude/appusage.db`;
+`appusage/report.py` shows totals; days flow into the index on the next run.
 
 ## Guardrails — do not violate
-- **Never disable the secret redaction** in `sources/shell.py`. It drops
-  commands containing passwords/tokens/keys so they're never embedded.
-- **Never commit `~/.claude/history-rag.db`** or the venv. The DB lives outside
-  the repo by design; the venv and `*.db` are gitignored.
-- **Model/dim must match between index and queries.** Centralized in `config.py`.
-  To switch models you MUST `index.py --rebuild` AND register the server with the
-  same `CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM`. Mismatched dims = broken search.
-- **Schema change ⇒ `--rebuild`.** Adding a source or changing columns makes
-  incremental runs against an old DB fail; rebuild from scratch (with Q6 consent).
-- **Adding a new source:** create a module in `sources/` exposing
-  `iter_chunks()` that yields `(id, text, {"source","timestamp","location","meta"})`
-  with a run-stable `id`, then add it to `SOURCES` in `index.py`. Don't bolt new
-  source logic onto the existing modules.
-- **Don't read the user's raw history/session files** to answer questions unless
-  they ask you to — that's what `search_history` is for.
+- **Never disable secret redaction** — the shared regex in `sources/common.py`
+  plus shell's extra `-p` pattern keep credentials out of the index.
+- **Never commit `~/.claude/history-rag.db`** or the venv (both gitignored;
+  nothing machine-specific belongs in the repo).
+- **Model/dim must match between index and queries** (`config.py`). Switching
+  models ⇒ `--rebuild` AND re-register the server with matching env vars.
+- **Rebuild is for model/dim/column changes only.** Adding a source is additive
+  — plain incremental runs handle it.
+- **`--prune` requires `--source`, and is only routine-safe for git/obsidian**
+  (their backing stores are durable). The index is an *archive* for
+  claude/shell/browser — their raw data expires, and pruning them deletes
+  history the index has outlived.
+- **New sources:** a module in `sources/` exposing `iter_chunks()` yielding
+  `(id, text, {"source","timestamp","location","meta"})` with a run-stable id,
+  added to `SOURCES` in `index.py`. Don't bolt onto existing modules.
+- **Don't read the user's raw history/session files** to answer questions
+  unless asked — that's what `search_history` is for.
