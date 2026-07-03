@@ -32,6 +32,7 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `appusage.py` — daily per-app time from the tracker (macOS, optional).
   - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
   - `git.py` — your own commits across local repos (opt-in via env var).
+  - `obsidian.py` — vault notes chunked by heading (opt-in via env var).
   - `common.py` — helpers shared across sources (secret redaction).
 - `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
   how long you spend in each app. See "App usage" below.
@@ -44,8 +45,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
-`source="appusage"`, `source="browser"`, or `source="git"` to `search_history`
-to restrict a query.
+`source="appusage"`, `source="browser"`, `source="git"`, or
+`source="obsidian"` to `search_history` to restrict a query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -139,6 +140,23 @@ plist (`~/Library/LaunchAgents/com.user.history-index.plist`):
 </dict>
 ```
 then `launchctl unload` + `load` it again.
+
+**Obsidian notes** indexes vault markdown, one chunk per `#`/`##`/`###`
+section (deeper headings stay inside their parent; short notes stay whole).
+Off until you point it at vaults:
+```bash
+CLAUDE_RAG_OBSIDIAN_VAULTS="$HOME/Documents/Obsidian Vault" \
+  ~/.claude/rag-venv/bin/python index.py --source obsidian
+```
+Chunk ids hash vault+path+heading+occurrence — not the text — so editing a
+section re-embeds it in place; only deleting or renaming a section leaves an
+orphan (`--prune --source obsidian` cleans those up, and unlike claude/shell/
+browser the vault is the durable record, so pruning here is safe). Timestamps
+come from `date:` frontmatter when present, else file mtime; frontmatter is
+stripped from the text. Hidden dirs (`.obsidian`, `.trash`), template folders,
+and credential-looking sections are skipped. As with the git source, add
+`CLAUDE_RAG_OBSIDIAN_VAULTS` to the installed plist's `EnvironmentVariables`
+so scheduled runs see it.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,

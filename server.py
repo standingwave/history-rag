@@ -38,12 +38,13 @@ def search_history(query: str, k: int = 5, source: str = "", max_distance: float
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
                   deduped, timestamped by last visit)
       - git:      commit messages they've authored across local repos
+      - obsidian: their Obsidian vault notes, chunked by heading
 
     Args:
       query: natural-language description of what to recall.
       k: max results (default 5).
       source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
-        (default: all).
+        | 'obsidian' (default: all).
       max_distance: drop results whose distance exceeds this. Distance is L2 over
         embeddings — LOWER = more relevant; strong matches run ~0.5-0.9. Leave 0
         to disable. If results come back empty, raise k or drop this/source.
