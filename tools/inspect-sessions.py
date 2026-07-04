@@ -1,6 +1,12 @@
-#!/usr/bin/env python3
-"""Run locally first. Dumps the shape of your ~/.claude session JSONL so the
-indexer parser matches reality. Prints keys + a sample, redacts long text."""
+"""Format-drift diagnostic for the claude source. The Claude Code transcript
+schema is undocumented and version-dependent; if the claude source's chunk
+count collapses after a Claude Code update (watch the per-source stats line),
+run this to see what the format became: it dumps the raw JSONL shape —
+top-level keys, event types, one truncated sample per type — independent of
+any assumption sources/claude.py makes.
+
+Run:  ~/.claude/rag-venv/bin/python tools/inspect-sessions.py
+"""
 import json, glob, os, collections
 
 ROOT = os.path.expanduser("~/.claude/projects")

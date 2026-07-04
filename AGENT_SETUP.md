@@ -65,14 +65,14 @@ Verify: `~/.claude/rag-venv/bin/python -c "import sqlite_vec, requests, mcp; pri
    ```
    Omit `[sources].enabled` entirely when all sources are wanted. Never edit
    `SOURCES` in `index.py` — that fights git pulls.
-2. Optional, if claude is a source: `inspect_sessions.py` to confirm the JSONL
-   shape matches `sources/claude.py`.
-3. Dry-run, per source is clearest: `index.py --dry-run --source <name>`.
-   Zero lines = filters rejected everything — investigate before proceeding.
-4. Existing `~/.claude/history-rag.db` with rows ⇒ incremental is safe and
+2. Dry-run, per source is clearest: `index.py --dry-run --source <name>`.
+   Zero lines = filters rejected everything — investigate before proceeding
+   (`tools/inspect-sessions.py` dumps the raw session JSONL shape if the
+   claude source is the puzzle).
+3. Existing `~/.claude/history-rag.db` with rows ⇒ incremental is safe and
    adding sources is additive (no rebuild). `--rebuild` only for a model/dim or
    column change — **ASK Q9** first.
-5. Build: `index.py` (Ollama must be up). Each source prints a stats line
+4. Build: `index.py` (Ollama must be up). Each source prints a stats line
    (`git: 469 chunks, 12 embedded, 0 skipped, 0.8s`); a failing source is
    logged and skipped, so scan stderr rather than assuming silence = success.
 

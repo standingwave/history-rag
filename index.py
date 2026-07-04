@@ -84,7 +84,8 @@ def dry_run(sources):
         except Exception as e:
             print(f"{source_name(src)}: source failed -> {e}", file=sys.stderr)
     if n == 0:
-        print("No chunks survived the filter. Check field names vs inspect_sessions.py.")
+        print("No chunks survived the filter. If the claude source is the "
+              "surprise, tools/inspect-sessions.py shows the raw JSONL shape.")
     else:
         print(f"\n{n} kept so far. Looks right? Run without --dry-run.")
 

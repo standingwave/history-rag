@@ -45,14 +45,16 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   view: full chunk + source-aware context, live from the backing store when
   it still exists — surrounding conversation turns, `git show --stat`, the
   whole note, the profile's same-day visits).
-- `inspect_sessions.py` — one-off: dumps the JSONL shape so you can confirm the
-  Claude parser matches your session files.
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
-- `tools/` — dev loop: `smoke.py` (exercise every tool path in-process after
-  a change; warns if the running MCP server predates your edits) and
-  `kick.sh` (trigger the launchd refresh and print its stats block).
+- `tools/` — dev loop and maintenance: `smoke.py` (exercise every tool path
+  in-process after a change; warns if the running MCP server predates your
+  edits), `kick.sh` (trigger the launchd refresh and print its stats block),
+  `backup.py` (daily dated copies of the sole-copy DBs), `eval-model.py` /
+  `migrate-model.py` (embedding-model evaluation and archive-safe switching),
+  and `inspect-sessions.py` (format-drift diagnostic: dumps the raw session
+  JSONL shape if the claude source ever stops matching reality).
 
 ## Config file
 Machine-specific settings live outside the repo in `~/.claude/history-rag.toml`
@@ -271,15 +273,7 @@ pip install -r requirements.txt
 If you use a venv, run index.py and register server.py with that venv's
 python: `~/.claude/rag-venv/bin/python`.
 
-## 2. Inspect (do this first)
-Confirms the JSONL field names match the parser. If your output shows
-different keys (e.g. content not under `message.content`), tweak
-`_text_from_content` / `iter_chunks` in `sources/claude.py`.
-```bash
-~/.claude/rag-venv/bin/python inspect_sessions.py
-```
-
-## 3. Build the index
+## 2. Build the index
 Use the venv interpreter you installed deps into (bare `python` won't see them).
 
 First preview what survives the filter across all sources (Claude keeps real
@@ -318,7 +312,7 @@ blanket prune would delete that outlived history. And it only prunes a source
 that completed cleanly and yielded at least one chunk, so a broken or absent
 source never wipes its own rows.
 
-## 4. Register the MCP server with Claude Code
+## 3. Register the MCP server with Claude Code
 Run this from the repo directory, using the venv interpreter (bare `python`
 won't find the deps). `$(pwd)` fills in the absolute path to server.py (the
 registration needs an absolute path, not a relative one):
@@ -331,7 +325,7 @@ claude mcp list          # 'history' should appear
 ```
 Then in a session, Claude can call `search_history("that proxy bug we hit", k=5)`.
 
-## 5. Keep it fresh
+## 4. Keep it fresh
 The index only reflects sessions present at last run. Pick one:
 
 **launchd (recommended, macOS)** — a periodic agent that re-indexes every 30 min,
@@ -373,7 +367,7 @@ On macOS, cron may also need Full Disk Access (System Settings → Privacy &
 Security → Full Disk Access → add `/usr/sbin/cron`) to read `~/.claude` — which
 is a good reason to prefer the launchd agent above.
 
-## 6. Verify it works inside a Claude Code session
+## 5. Verify it works inside a Claude Code session
 After registering (step 4) and indexing (step 3):
 
 1. **Confirm the server is connected.** In a session, run the MCP status command:
