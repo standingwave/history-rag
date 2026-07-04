@@ -11,7 +11,7 @@ Run:   python index.py                  # incremental, all sources
        python index.py --source shell   # one source only (combines with any mode)
        python index.py --prune --source X  # drop chunks source X stopped yielding
 """
-import argparse, json, sqlite3, sys, time
+import argparse, json, sqlite3, subprocess, sys, time
 from datetime import datetime, timezone
 import sqlite_vec
 import requests
@@ -84,6 +84,37 @@ def setup(db):
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def _should_notify(statuses) -> bool:
+    """Fire exactly once per incident: on the SECOND consecutive aborted run
+    (newest first). One flaky tick doesn't ping; a third abort doesn't
+    re-ping."""
+    return (len(statuses) >= 2 and statuses[0] == "aborted"
+            and statuses[1] == "aborted"
+            and (len(statuses) < 3 or statuses[2] != "aborted"))
+
+def _notify(message: str):
+    if sys.platform != "darwin":
+        return
+    try:
+        safe = message.replace('"', "'")
+        subprocess.run(["osascript", "-e",
+                        f'display notification "{safe}" with title "history-rag"'],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass                      # failing to notify must never break a run
+
+def _maybe_notify(db, message: str):
+    """The push channel for silent-freeze failures ([health] notify,
+    default on). Debounced via the runs table."""
+    enabled = str(config.get("health", "notify", "CLAUDE_RAG_NOTIFY",
+                             True)).lower() not in ("false", "0", "")
+    if not enabled:
+        return
+    statuses = [r[0] for r in db.execute(
+        "SELECT status FROM runs ORDER BY id DESC LIMIT 3")]
+    if _should_notify(statuses):
+        _notify(message)
 
 def dry_run(sources):
     n = 0
@@ -158,6 +189,7 @@ def main():
                    (now, now, json.dumps({"_stamp": {"ok": False,
                                                      "error": str(e)}})))
         db.commit()
+        _maybe_notify(db, "embedding model/config mismatch — indexing is stopped")
         sys.exit(str(e))
 
     print(f"=== run {datetime.now().astimezone().isoformat(timespec='seconds')}")
@@ -275,6 +307,8 @@ def main():
     db.execute("DELETE FROM runs WHERE id NOT IN "
                "(SELECT id FROM runs ORDER BY id DESC LIMIT ?)", (RUNS_KEEP,))
     db.commit()
+    if run_status == "aborted":
+        _maybe_notify(db, "index refresh aborted twice — is Ollama running?")
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     extra = f", {pruned} pruned" if pruned else ""
     print(f"done. {new} embedded (new or changed), {failed} skipped{extra}, "

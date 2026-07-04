@@ -10,6 +10,7 @@ os.environ["CLAUDE_RAG_DB"] = os.path.join(_TMP, "index.db")
 os.environ["CLAUDE_RAG_APPUSAGE_DB"] = os.path.join(_TMP, "appusage.db")
 os.environ["CLAUDE_RAG_ATUIN_DB"] = os.path.join(_TMP, "atuin.db")   # absent -> no atuin
 os.environ["CLAUDE_RAG_HISTFILES"] = ""
+os.environ["CLAUDE_RAG_NOTIFY"] = "false"   # no real macOS notifications
 os.environ["TZ"] = "America/Los_Angeles"
 time.tzset()
 

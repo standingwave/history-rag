@@ -23,6 +23,7 @@ _KNOWN = {
     "obsidian": {"vaults"},
     "appusage": {"db"},
     "backup": {"dir", "keep"},
+    "health": {"notify"},
 }
 
 _FILE: dict = {}

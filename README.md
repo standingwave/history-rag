@@ -80,6 +80,11 @@ extra = {}                # name = path, added to the built-in defaults
 keep_params = {}          # per-domain query params to keep, e.g. { "youtube.com" = ["v"] }
 
 [core]                    # model/dim/db/ollama — same keys as the env vars
+
+[backup]                  # dir (default ~/.claude/backups), keep (default 7)
+
+[health]
+notify = true             # macOS notification when indexing stalls (default true)
 ```
 `[sources].enabled` picks which sources run (absent = all) — no more editing
 `SOURCES` in `index.py`. Unknown sections/keys warn; malformed TOML stops the
@@ -348,6 +353,14 @@ It needs Ollama running (index.py no-ops safely if it isn't). Check it fired:
 ```bash
 tail -f /tmp/history-index.log
 ```
+Every run is also recorded in a `runs` table inside the index itself, and
+`history_stats` surfaces the latest as a `health` field (last-run age,
+status, failing sources) — so a stalled or partially-failing refresh is
+reported by the model the next time you ask a history question, instead of
+rotting unseen in the log. On top of that, a macOS notification fires when
+two consecutive runs abort or the model stamp blocks indexing
+(`[health] notify = false` to turn off). The `/tmp` log remains as
+disposable per-run detail; reboot clearing is its rotation policy.
 Change the cadence via `StartInterval` (seconds) in the plist; if you use a
 non-default embedding model, add an `EnvironmentVariables` dict with
 `CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM`. To stop: `launchctl unload …` then remove

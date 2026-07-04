@@ -88,3 +88,39 @@ def test_health_absent_on_legacy_db(scratch_db, fake_embed, monkeypatch):
     db.execute("DROP TABLE runs")
     db.commit(); db.close()
     assert "health" not in json.loads(server.history_stats())
+
+def test_should_notify_fires_once_per_incident():
+    import index
+    assert index._should_notify(["aborted", "aborted"])
+    assert index._should_notify(["aborted", "aborted", "ok"])
+    assert not index._should_notify(["aborted"])                    # first flake
+    assert not index._should_notify(["aborted", "aborted", "aborted"])  # already pinged
+    assert not index._should_notify(["aborted", "ok"])
+    assert not index._should_notify(["ok", "aborted", "aborted"])
+
+def test_notify_fires_on_second_abort_and_respects_config(
+        scratch_db, fake_embed, monkeypatch):
+    import index
+    pings = []
+    monkeypatch.setattr(index, "_notify", pings.append)
+    def down(texts):
+        raise requests.exceptions.ConnectionError("refused")
+
+    src = [mk_source("alpha", [("a1", "text", rec("alpha")),
+                               ("a2", "more", rec("alpha"))])]
+    monkeypatch.setenv("CLAUDE_RAG_NOTIFY", "true")
+    monkeypatch.setattr(index, "embed_batch", down)
+    run_index(monkeypatch, src)                  # first abort: no ping
+    assert pings == []
+    run_index(monkeypatch, src)                  # second abort: ping
+    assert len(pings) == 1
+    run_index(monkeypatch, src)                  # third abort: still one ping
+    assert len(pings) == 1
+
+    monkeypatch.setenv("CLAUDE_RAG_NOTIFY", "false")
+    db = open_db(scratch_db)
+    db.execute("DELETE FROM runs")
+    db.commit(); db.close()
+    run_index(monkeypatch, src)
+    run_index(monkeypatch, src)                  # disabled: silent
+    assert len(pings) == 1
