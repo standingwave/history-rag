@@ -12,6 +12,7 @@ Run:   python index.py                  # incremental, all sources
        python index.py --prune --source X  # drop chunks source X stopped yielding
 """
 import argparse, json, sqlite3, sys, time
+from datetime import datetime, timezone
 import sqlite_vec
 import requests
 import config
@@ -63,12 +64,26 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
     r.raise_for_status()
     return r.json()["embeddings"]
 
+RUNS_KEEP = 200          # newest run records retained
+
 def setup(db):
     db.execute("""CREATE TABLE IF NOT EXISTS chunks(
         id TEXT PRIMARY KEY, text TEXT, source TEXT,
         timestamp TEXT, location TEXT, meta TEXT)""")
     db.execute(f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
         id TEXT PRIMARY KEY, embedding FLOAT[{config.DIM}])""")
+    # Run health lives in the DB (durable, queryable, backed up): the MCP
+    # server surfaces the newest row via history_stats so failures reach the
+    # user through the tools they already use, not an unread /tmp log.
+    db.execute("""CREATE TABLE IF NOT EXISTS runs(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        started TEXT NOT NULL, finished TEXT,
+        status TEXT NOT NULL,
+        embedded INTEGER, refreshed INTEGER, pruned INTEGER, failed INTEGER,
+        sources TEXT)""")
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 def dry_run(sources):
     n = 0
@@ -130,12 +145,25 @@ def main():
         db.execute("DROP TABLE IF EXISTS chunks")
         db.execute("DROP TABLE IF EXISTS vec_chunks")
         db.execute("DROP TABLE IF EXISTS index_meta")
+        db.execute("DROP TABLE IF EXISTS runs")
     setup(db)
     try:
         # Refuse to write wrong-model vectors; stamp fresh/legacy DBs.
         config.check_stamp(db, stamp_if_missing=True)
     except config.StampMismatch as e:
+        # Record the refusal so history_stats surfaces it as run health.
+        now = _utcnow()
+        db.execute("INSERT INTO runs(started, finished, status, sources) "
+                   "VALUES (?,?,'aborted',?)",
+                   (now, now, json.dumps({"_stamp": {"ok": False,
+                                                     "error": str(e)}})))
+        db.commit()
         sys.exit(str(e))
+
+    print(f"=== run {datetime.now().astimezone().isoformat(timespec='seconds')}")
+    run_id = db.execute("INSERT INTO runs(started, status) VALUES (?, 'aborted')",
+                        (_utcnow(),)).lastrowid
+    db.commit()
 
     # id -> (text, timestamp). Changed text re-embeds (e.g. today's still-
     # growing app-usage total); same text with a changed timestamp gets a
@@ -180,12 +208,13 @@ def main():
 
     # Each source runs isolated: one broken source logs and the rest still
     # index. Only an unreachable Ollama aborts the whole run.
+    srcinfo, aborted = {}, False
     try:
         for src in sources:
             name, t0 = source_name(src), time.monotonic()
             seen_ids, src_cols = set(), set()
             yielded, new0, failed0, refreshed0 = 0, new, failed, refreshed
-            ok, batch = True, []
+            ok, err_text, batch = True, "", []
             try:
                 for cid, text, rec in src.iter_chunks():
                     seen_ids.add(cid)
@@ -208,7 +237,7 @@ def main():
             except requests.exceptions.ConnectionError:
                 raise
             except Exception as e:
-                ok = False
+                ok, err_text = False, str(e)
                 print(f"{name}: source failed after {yielded} chunks -> {e}",
                       file=sys.stderr)
             n_pruned = 0
@@ -222,10 +251,29 @@ def main():
             print(f"{name}: {yielded} chunks, {new - new0} embedded, "
                   f"{failed - failed0} skipped{extra}, "
                   f"{time.monotonic() - t0:.1f}s{status}")
+            info = {"chunks": yielded, "embedded": new - new0,
+                    "failed": failed - failed0, "ok": ok}
+            if refreshed - refreshed0:
+                info["refreshed"] = refreshed - refreshed0
+            if n_pruned:
+                info["pruned"] = n_pruned
+            if err_text:
+                info["error"] = f"{name}: {err_text}"
+            srcinfo[name] = info
     except requests.exceptions.ConnectionError:
+        aborted = True
         print("Ollama not reachable on :11434 — is it running? Stopping.",
               file=sys.stderr)
 
+    run_status = ("aborted" if aborted else
+                  "partial" if any(not i["ok"] for i in srcinfo.values())
+                  else "ok")
+    db.execute("UPDATE runs SET finished=?, status=?, embedded=?, refreshed=?, "
+               "pruned=?, failed=?, sources=? WHERE id=?",
+               (_utcnow(), run_status, new, refreshed, pruned, failed,
+                json.dumps(srcinfo), run_id))
+    db.execute("DELETE FROM runs WHERE id NOT IN "
+               "(SELECT id FROM runs ORDER BY id DESC LIMIT ?)", (RUNS_KEEP,))
     db.commit()
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     extra = f", {pruned} pruned" if pruned else ""

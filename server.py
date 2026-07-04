@@ -356,8 +356,14 @@ def history_stats(locations: bool = False) -> str:
     Pass locations=true to also get each source's top location prefixes with
     counts (browser profiles, git repos, obsidian folders, claude project
     dirs) — these are valid values for the search/list `location` filter.
-    Returns JSON {total_chunks, embedding: {model, dim}, sources: {name:
-    {chunks, earliest, latest [, locations]}}}."""
+    Returns JSON {total_chunks, embedding: {model, dim}, health, sources:
+    {name: {chunks, earliest, latest [, locations]}}}.
+
+    `health` reports the last index run: {last_run, age_minutes, status,
+    failing_sources?, note?}. IMPORTANT: if health contains `note` or
+    `failing_sources`, tell the user about it in one line BEFORE answering
+    their question — the index may be stale or partially blind, and this is
+    the only place that failure becomes visible."""
     db = _db()
     sources = {}
     for src, cnt, mn, mx in db.execute(
@@ -377,7 +383,39 @@ def history_stats(locations: bool = False) -> str:
     stamp = config.check_stamp(db)
     if stamp:
         out["embedding"] = {"model": stamp["model"], "dim": int(stamp["dim"])}
+    health = _run_health(db)
+    if health:
+        out["health"] = health
     return json.dumps(out)
+
+STALL_MINUTES = 120      # ~4 missed 30-min cycles
+
+def _run_health(db):
+    """Health of the last index run, from the runs table the indexer keeps.
+    None on a legacy DB without one (schema-stable for old callers)."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                      "AND name='runs'").fetchone():
+        return None
+    row = db.execute("SELECT started, finished, status, sources FROM runs "
+                     "ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    started, finished, status, sources_json = row
+    ref = datetime.fromisoformat(finished or started)
+    age = (datetime.now(timezone.utc) - ref).total_seconds() / 60
+    health = {"last_run": finished or started, "age_minutes": int(age),
+              "status": status if finished else "unfinished"}
+    failing = {name: info.get("error", "failed")
+               for name, info in json.loads(sources_json or "{}").items()
+               if not info.get("ok", True)}
+    if failing:
+        health["failing_sources"] = failing
+    if not finished or age > STALL_MINUTES:
+        health["note"] = ("index refresh appears stalled — last run "
+                          f"{int(age)} minutes ago")
+    elif status == "aborted":
+        health["note"] = "last index run aborted (is Ollama running?)"
+    return health
 
 @mcp.tool()
 def list_window(since: str = "", until: str = "", source: str = "",
