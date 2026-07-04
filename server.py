@@ -356,8 +356,10 @@ def history_stats(locations: bool = False) -> str:
     Pass locations=true to also get each source's top location prefixes with
     counts (browser profiles, git repos, obsidian folders, claude project
     dirs) — these are valid values for the search/list `location` filter.
-    Returns JSON {total_chunks, embedding: {model, dim}, health, sources:
-    {name: {chunks, earliest, latest [, locations]}}}.
+    Returns JSON {total_chunks, embedding: {model, dim}, db: {bytes,
+    freelist_bytes}, health, sources: {name: {chunks, earliest, latest
+    [, locations]}}}. `db.freelist_bytes` is reclaimable churn inside the
+    file — report size as "X MB (Y reclaimable)" when it's substantial.
 
     `health` reports the last index run: {last_run, age_minutes, status,
     failing_sources?, note?}. IMPORTANT: if health contains `note` or
@@ -383,6 +385,11 @@ def history_stats(locations: bool = False) -> str:
     stamp = config.check_stamp(db)
     if stamp:
         out["embedding"] = {"model": stamp["model"], "dim": int(stamp["dim"])}
+    psize = db.execute("PRAGMA page_size").fetchone()[0]
+    out["db"] = {
+        "bytes": db.execute("PRAGMA page_count").fetchone()[0] * psize,
+        "freelist_bytes": db.execute("PRAGMA freelist_count").fetchone()[0] * psize,
+    }
     health = _run_health(db)
     if health:
         out["health"] = health

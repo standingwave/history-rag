@@ -160,3 +160,9 @@ def test_stats_locations_collapse(seeded):
     s = json.loads(server.history_stats(locations=True))
     assert s["sources"]["browser"]["locations"] == {"safari": 4}
     assert s["total_chunks"] == 6
+
+def test_stats_reports_db_size(seeded):
+    import server
+    db = json.loads(server.history_stats())["db"]
+    assert db["bytes"] > 0
+    assert 0 <= db["freelist_bytes"] < db["bytes"]
