@@ -185,6 +185,31 @@ def _keep(cmd: str) -> bool:
     return (len(cmd) >= MIN_CHARS and cmd not in _STOP
             and not SECRET_RE.search(cmd) and not _FLAG_SECRET_RE.search(cmd))
 
+def iter_dated_runs(since_epoch: float):
+    """(epoch_seconds, cmd, cwd) for every dated run at/after `since_epoch`:
+    atuin runs (cwd known) plus dated histfile entries for commands atuin
+    doesn't know (cwd unknown -> ""). Per-run, NOT deduped — iter_chunks
+    collapses a command to its latest run, so day rollups (the digest source)
+    must count runs through here. Same keep/secret filtering as iter_chunks."""
+    atuin_cmds = set()
+    for epoch, cmd, cwd, _exit in _read_atuin():
+        cmd = (cmd or "").strip()
+        if not _keep(cmd):
+            continue
+        atuin_cmds.add(cmd)
+        if epoch >= since_epoch:
+            yield epoch, cmd, _abbrev(cwd or "")
+    live, archived = _history_files()
+    for path in live + archived:
+        parse = _parse_zsh_extended if _looks_zsh_extended(path) else _parse_bash
+        for epoch, cmd in parse(path):
+            cmd = cmd.strip()
+            if not epoch or epoch < since_epoch or not _keep(cmd):
+                continue
+            if cmd in atuin_cmds:
+                continue           # atuin already covers this command's runs
+            yield epoch, cmd, ""
+
 def iter_chunks():
     # command -> [count, latest_epoch, location, atuin_cwd, atuin_exit]
     seen: dict[str, list] = {}

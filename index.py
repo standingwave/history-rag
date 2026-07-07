@@ -16,9 +16,10 @@ from datetime import datetime, timezone
 import sqlite_vec
 import requests
 import config
-from sources import claude, shell, appusage, browser, git, obsidian
+from sources import claude, shell, appusage, browser, git, obsidian, digest
 
-ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian]
+# digest runs last: it reads this run's freshly committed claude chunks.
+ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian, digest]
 
 def _enabled():
     if config.ENABLED_SOURCES is None:   # no [sources].enabled -> all
@@ -158,6 +159,11 @@ def main():
                  "source no longer yields, which for sources whose backing data "
                  "expires (claude, shell) means losing history the index has "
                  "outlived. Prune one source at a time, deliberately.")
+    if args.prune and args.source == "digest":
+        sys.exit("--prune --source digest would delete every settled digest: "
+                 "the source only yields recent days by design, so every older "
+                 "day counts as 'no longer yielded'. A wrong recent digest "
+                 "fixes itself on the next run; anything older is archive.")
     if args.rebuild and args.source:
         sys.exit("--rebuild wipes the WHOLE index then reindexes; combined "
                  "with --source it would destroy every other source's data, "

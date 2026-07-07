@@ -238,12 +238,17 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                   questions, query with that phrasing to catch every engine.
       - git:      commit messages they've authored across local repos
       - obsidian: their Obsidian vault notes, chunked by heading
+      - digest:   precomputed daily rollups, one chunk per (local day,
+                  stream): browser-profile visits/searches, claude sessions,
+                  shell runs. For "what did I do <day/week>" questions, list
+                  these first (list_window source='digest') instead of paging
+                  raw chunks; expand() returns the full rollup meta.
 
     Args:
       query: natural-language description of what to recall.
       k: max results (default 5).
       source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
-        | 'obsidian' (default: all).
+        | 'obsidian' | 'digest' (default: all).
       location: case-sensitive prefix filter on each chunk's location, e.g.
         'chrome:First user' or 'chrome:' (browser profile), 'littlebird@'
         (git repo), 'projects/' (obsidian folder). Combine with source to
@@ -424,10 +429,30 @@ def _run_health(db):
         health["note"] = "last index run aborted (is Ollama running?)"
     return health
 
+_GROUP_DIMS = ("day", "source", "location", "domain")
+
+def _group_value(dim, src, ts, loc, meta_json):
+    if dim == "day":            # the chunk's LOCAL calendar day, like bounds
+        if not ts:
+            return ""
+        return (datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                .astimezone().date().isoformat())
+    if dim == "source":
+        return src
+    if dim == "domain":         # browser: site; everything else: location
+        if src == "browser" and meta_json:
+            from urllib.parse import urlsplit
+            url = (json.loads(meta_json) or {}).get("url", "")
+            host = (urlsplit(url).hostname or "") if url else ""
+            if host:
+                return host.removeprefix("www.")
+        return loc or ""
+    return loc or ""            # "location"
+
 @mcp.tool()
 def list_window(since: str = "", until: str = "", source: str = "",
                 location: str = "", limit: int = 50, offset: int = 0,
-                include_undated: bool = False) -> str:
+                include_undated: bool = False, group_by: str = "") -> str:
     """Exhaustive chronological listing (newest first) of everything in a time
     window — no semantic ranking, no sampling. The right tool for "everything
     from <day/week>"; use search_history when relevance matters more than
@@ -435,12 +460,31 @@ def list_window(since: str = "", until: str = "", source: str = "",
     the user's local day); at least one bound is required. Results are compact
     pointers {id, source, timestamp, location, text (truncated)} — pass an id
     to expand() to read one in full. `total` is the full match count; page
-    with offset (limit caps at 200)."""
+    with offset (limit caps at 200).
+
+    group_by: comma-separated dimensions from day | source | location |
+    domain — returns aggregate `groups` (sorted by count desc, each with
+    count/earliest/latest) instead of `results`. One call answers "which days
+    were active", "which browser profiles/sites dominated" (source='browser',
+    group_by='domain,day'), "which projects saw work". `day` is the user's
+    local calendar day; `domain` is the site for browser chunks and falls
+    back to location elsewhere. limit caps the group list; a cut list sets
+    groups_truncated.
+
+    For day/week activity summaries, read the precomputed daily digests
+    first: source='digest' (one chunk per day per stream: browser profile /
+    claude / shell; full rollup in meta via expand). Drill into raw chunks
+    only where a digest points."""
     if not since and not until:
         return json.dumps({"error": "list_window requires since and/or until"})
     since, until, err = _parse_bounds(since, until)
     if err:
         return err
+    dims = [d.strip() for d in group_by.split(",") if d.strip()]
+    bad = [d for d in dims if d not in _GROUP_DIMS]
+    if bad:
+        return json.dumps({"error": f"unknown group_by dimension(s) {bad}; "
+                           f"valid: {', '.join(_GROUP_DIMS)}"})
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     where, params = _window_where(since, until, source, location,
@@ -448,6 +492,33 @@ def list_window(since: str = "", until: str = "", source: str = "",
     db = _db()
     total = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
                        params).fetchone()[0]
+    window = {"since": since or None, "until": until or None}
+
+    if dims:
+        buckets = {}
+        for src, ts, loc, meta_json in db.execute(
+                f"SELECT source, timestamp, location, meta FROM chunks "
+                f"WHERE {where}", params):
+            key = tuple(_group_value(d, src, ts, loc, meta_json) for d in dims)
+            b = buckets.get(key)
+            if b is None:
+                buckets[key] = [1, ts, ts]
+            else:
+                b[0] += 1
+                if ts and (not b[1] or ts < b[1]):
+                    b[1] = ts
+                if ts > b[2]:
+                    b[2] = ts
+        ordered = sorted(buckets.items(), key=lambda kv: (-kv[1][0], kv[0]))
+        groups = [{**dict(zip(dims, key)), "count": n,
+                   "earliest": lo or None, "latest": hi or None}
+                  for key, (n, lo, hi) in ordered[:limit]]
+        out = {"group_by": dims, "total": total, "window": window,
+               "groups": groups}
+        if len(ordered) > limit:
+            out["groups_truncated"] = True
+        return json.dumps(out)
+
     rows = db.execute(
         f"""SELECT id, source, timestamp, location, text FROM chunks
             WHERE {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?""",
@@ -455,8 +526,7 @@ def list_window(since: str = "", until: str = "", source: str = "",
     results = [{"id": i, "source": src, "timestamp": ts, "location": loc,
                 "text": text[:160]} for i, src, ts, loc, text in rows]
     return json.dumps({"count": len(results), "total": total,
-                       "window": {"since": since or None, "until": until or None},
-                       "results": results})
+                       "window": window, "results": results})
 
 @mcp.tool()
 def expand(id: str, context: int = 5) -> str:

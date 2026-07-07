@@ -22,6 +22,7 @@ _KNOWN = {
     "git": {"roots", "author"},
     "obsidian": {"vaults"},
     "appusage": {"db"},
+    "digest": {"sources", "recompute_days", "backfill_days"},
     "backup": {"dir", "keep"},
     "health": {"notify"},
 }

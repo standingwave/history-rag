@@ -35,16 +35,20 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
   - `git.py` — your own commits across local repos (opt-in via env var).
   - `obsidian.py` — vault notes chunked by heading (opt-in via env var).
+  - `digest.py` — precomputed daily rollups: one chunk per (local day,
+    stream) summarizing browser visits/searches per profile, claude
+    sessions, and shell runs. See "Daily digests" below.
   - `common.py` — helpers shared across sources (secret redaction).
 - `appusage/` — optional macOS app-usage tracker: a `launchd` daemon that logs
   how long you spend in each app. See "App usage" below.
 - `server.py` — the MCP server. Four tools forming a disclosure ladder:
   `history_stats` (orient; `locations=true` reveals filterable prefixes) →
   `search_history` / `list_window` (relevance-ranked vs exhaustive
-  chronological pointers, both returning chunk ids) → `expand` (the reading
-  view: full chunk + source-aware context, live from the backing store when
-  it still exists — surrounding conversation turns, `git show --stat`, the
-  whole note, the profile's same-day visits).
+  chronological pointers, both returning chunk ids; `list_window` also
+  aggregates with `group_by=day|source|location|domain`) → `expand` (the
+  reading view: full chunk + source-aware context, live from the backing
+  store when it still exists — surrounding conversation turns, `git show
+  --stat`, the whole note, the profile's same-day visits).
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
@@ -79,6 +83,9 @@ histfiles = []            # archived history files
 extra = {}                # name = path, added to the built-in defaults
 keep_params = {}          # per-domain query params to keep, e.g. { "youtube.com" = ["v"] }
 
+[digest]                  # sources (default browser/claude/shell),
+                          # recompute_days (3), backfill_days (90)
+
 [core]                    # model/dim/db/ollama — same keys as the env vars
 
 [backup]                  # dir (default ~/.claude/backups), keep (default 7)
@@ -99,8 +106,8 @@ model's ambient context.
 
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
-`source="appusage"`, `source="browser"`, `source="git"`, or
-`source="obsidian"` to `search_history` to restrict a query.
+`source="appusage"`, `source="browser"`, `source="git"`, `source="obsidian"`,
+or `source="digest"` to `search_history` to restrict a query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -215,6 +222,20 @@ browser the vault is the durable record, so pruning here is safe). Timestamps
 come from `date:` frontmatter when present, else file mtime; frontmatter is
 stripped from the text. Hidden dirs (`.obsidian`, `.trash`), template folders,
 and credential-looking sections are skipped.
+
+**Daily digests** precompute one summary chunk per (local day, stream) so
+"what did I do today/this week?" is a ~30-chunk read instead of a paged crawl
+of every raw chunk in the window: browser visits per profile (counts by site,
+the day's searches, notable titles — read from the browsers' per-visit
+tables, since indexed browser chunks only carry each URL's last visit),
+claude sessions (opening prompt as the topic), and shell runs by cwd. Text is
+templated — same inputs, same text, no re-embed — with the full rollup in
+meta for `expand()`. Only the last `recompute_days` (default 3) days are
+recomputed; older digests settle into archive and survive their backing data
+aging out (Chromium keeps ~90 days of visits), which is also why
+`--prune --source digest` is refused. A fresh index backfills `backfill_days`
+(default 90). Configure via `[digest]`: `sources` (subset of
+browser/claude/shell, `[]` disables), `recompute_days`, `backfill_days`.
 
 **Adding a source:** drop a module in `sources/` with an `iter_chunks()`
 generator that yields `(id, text, {"source", "timestamp", "location", "meta"})`,

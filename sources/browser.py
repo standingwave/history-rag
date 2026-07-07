@@ -80,6 +80,18 @@ def _display_name(path: str, profile: str) -> str:
     except (OSError, ValueError):
         return profile
 
+def _connect_copy(path: str):
+    """Copy a (possibly browser-locked) history DB and connect to the copy.
+    Returns (connection, tmp_path); the caller unlinks tmp_path."""
+    fd, tmp = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        shutil.copyfile(path, tmp)
+        return sqlite3.connect(tmp), tmp
+    except OSError:
+        os.unlink(tmp)
+        raise
+
 def _read_chromium(db):
     for url, title, count, ts in db.execute(
             "SELECT url, title, visit_count, last_visit_time FROM urls"):
@@ -101,6 +113,30 @@ def _reader(db):
         return _read_chromium
     if "history_items" in tables:
         return _read_safari
+    return None
+
+def _read_chromium_visits(db, since_epoch):
+    t0 = int((since_epoch + _WEBKIT_TO_UNIX) * 1e6)
+    for url, title, ts in db.execute(
+            "SELECT u.url, u.title, v.visit_time FROM visits v "
+            "JOIN urls u ON u.id = v.url WHERE v.visit_time >= ?", (t0,)):
+        yield url, title or "", (ts or 0) / 1e6 - _WEBKIT_TO_UNIX
+
+def _read_safari_visits(db, since_epoch):
+    t0 = since_epoch - _CFABSOLUTE_TO_UNIX
+    for url, title, ts in db.execute(
+            "SELECT i.url, v.title, v.visit_time FROM history_visits v "
+            "JOIN history_items i ON i.id = v.history_item "
+            "WHERE v.visit_time >= ?", (t0,)):
+        yield url, title or "", (ts or 0) + _CFABSOLUTE_TO_UNIX
+
+def _visit_reader(db):
+    tables = {r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if "visits" in tables and "urls" in tables:
+        return _read_chromium_visits
+    if "history_visits" in tables:
+        return _read_safari_visits
     return None
 
 # Query params that ARE the page's identity, kept per rule; every other
@@ -159,15 +195,21 @@ def _clean_url(url: str):
 # "<query> - YouTube" would otherwise embed like a video, not a search.
 _SEARCH_PARAMS = ("q", "search_query")
 
-def _search_text(url: str):
+def search_terms(url: str):
+    """(engine_host, terms) when the URL is a search-results page, else None.
+    Also used by the digest source to list a day's searches."""
     parts = urlsplit(url)
-    if not parts.query:
-        return None
     for k, v in parse_qsl(parts.query):
         if k in _SEARCH_PARAMS and v:
-            host = (parts.hostname or "").removeprefix("www.")
-            return f'Searched {host} for "{v}" — {url}'
+            return (parts.hostname or "").removeprefix("www."), v
     return None
+
+def _search_text(url: str):
+    hit = search_terms(url)
+    if not hit:
+        return None
+    host, terms = hit
+    return f'Searched {host} for "{terms}" — {url}'
 
 def _iso(ts: float) -> str:
     if ts <= 0:
@@ -187,10 +229,7 @@ def iter_chunks():
         tmp = None
         try:
             # Copy first: browsers hold their DB locked while running.
-            fd, tmp = tempfile.mkstemp(suffix=".db")
-            os.close(fd)
-            shutil.copyfile(path, tmp)
-            db = sqlite3.connect(tmp)
+            db, tmp = _connect_copy(path)
             read = _reader(db)
             if read is None:
                 db.close()
@@ -232,3 +271,34 @@ def iter_chunks():
             "location": f"{browser}:{display}" if display else browser,
             "meta": meta,
         }
+
+def iter_visits(since_epoch: float):
+    """Per-visit rows at/after `since_epoch`, across every browser profile:
+    (location, epoch_seconds, cleaned_url, title). Indexed browser chunks
+    carry only each URL's LAST visit, so anything that attributes activity to
+    days (the digest source) must read the visit tables through here, not
+    query the index. Same URL cleaning and secret filtering as iter_chunks."""
+    for browser, path in _dbs():
+        if not os.path.exists(path):
+            continue
+        profile = _profile(path)
+        display = _display_name(path, profile) if profile else ""
+        location = f"{browser}:{display}" if display else browser
+        tmp = None
+        try:
+            db, tmp = _connect_copy(path)
+            read = _visit_reader(db)
+            if read is None:
+                db.close()
+                continue
+            for url, title, epoch in read(db, since_epoch):
+                cleaned = _clean_url(url) if url else None
+                if not cleaned or SECRET_RE.search(cleaned) or SECRET_RE.search(title):
+                    continue
+                yield location, epoch, cleaned, title
+            db.close()
+        except (OSError, sqlite3.Error) as e:
+            print(f"browser: skipping {browser} ({path}): {e}", file=sys.stderr)
+        finally:
+            if tmp:
+                os.unlink(tmp)
