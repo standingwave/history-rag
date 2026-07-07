@@ -27,8 +27,8 @@ so each step pays for itself; stop anywhere and still be better off.
   (incl. `TZ=America/Los_Angeles` for deterministic time tests), autouse
   reset of `browser._keep_table`, and the hash→vector `fake_embed` fixture
   over `index.embed_batch` / `server._embed` (no Ollama in tests).
-- Still to do when Tier 2 needs it: monkeypatch `claude.ROOT` at a fixture
-  session dir for the live expand path.
+- ✅ (was "still to do") `claude.ROOT` monkeypatched at a fixture session dir
+  for the live expand path, in `test_server_tools.py`.
 
 ## Tier 1 — pure unit (most value per line; no DB, no network) ✅ DONE
 Implemented across `test_redaction.py`, `test_time_bounds.py`,
@@ -78,6 +78,29 @@ Each driver case below reproduces something that actually happened this week:
   cheap live paths — claude via a fixture session file under a monkeypatched
   ROOT, git via a throwaway `git init` repo.
 
+## Post-plan features (each shipped with its tests)
+- **Stamp enforcement** (`test_stamp.py`): fresh-index stamping, model/dim
+  mismatch refusal by both entry points, legacy-DB tolerance, `--rebuild`
+  restamps.
+- **Run health** (`test_run_health.py`): ok/partial/aborted rows, stamp
+  refusal recorded, retention, `history_stats` health field incl. stall
+  note, notify-once-per-incident debounce + config gate.
+- **Backup tool** (`test_backup.py`): once-per-day, faithful copy, retention
+  prune scoped by stem.
+- **Model eval/migration** (`test_eval_tool.py`, `test_migrate_tool.py`):
+  candidate path never prod, config restore on failure, archive-only chunks
+  survive migration (pinned item 3), eval-vector reuse only on (id, text)
+  match.
+- **Daily digests** (`test_digest_source.py`): per-stream rollup content and
+  day attribution (incl. the 23:30-local boundary), Chromium AND Safari
+  visit-reader fixtures (schema sniff + epoch conversions + SQL since
+  bound), atuin dedup in `iter_dated_runs`, backfill/resume/recompute window
+  selection, pipeline determinism (zero re-embeds on unchanged data),
+  `--prune --source digest` refusal.
+- **group_by** (`test_group_by.py`): local-day bucketing across a UTC
+  midnight, domain extraction + location fallback, undated gating, limit
+  clamp + truncation flag, dimension validation, filter composition.
+
 ## Explicit non-goals
 Daemon sensor subprocesses (`lsappinfo`/`ioreg` — test their regexes on
 captured output only), Ollama integration, the MCP transport layer, launchd,
@@ -103,6 +126,9 @@ The manual steps repeated constantly during this week's development, scripted:
 2. ✅ Tier 1 redaction + time bounds + parsers (the incident-prone trio).
 3. ✅ Tier 2 driver behaviors, then server envelopes.
 4. ✅ Remaining Tier 1 (git ids, shell dedup, config precedence, aggregation).
-   Suite: 52 tests, <1s, no Ollama needed. Still open: `tools/migrate-model.py`
-   before any embedding-model switch (pinned item 3 above), and CI (GitHub
-   Actions, Tier 1+2, mac-only bits skipped) once the repo has outside users.
+5. ✅ `tools/migrate-model.py` (pinned item 3) and CI (GitHub Actions, pytest
+   on push and PR — `f9578d9`).
+6. ✅ Post-plan feature tests as they shipped (section above).
+   Suite: 98 tests, <1s, no Ollama needed. Reviewed 2026-07-07: meets the
+   plan; the only deliberate redundancies kept are stamp-mismatch (refusal
+   vs. audit row) and notify (truth table vs. integration), both cheap.
