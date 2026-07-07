@@ -12,6 +12,17 @@ SHARED_MUST_DROP = [
     "git clone https://user:hunter2@github.com/x/y.git",
     "PASSWD=root mysql",
     "set PRIVATE_KEY /tmp/k",
+    # unlabeled key SHAPES (the 2025-07-20 vault-note incident: no trigger
+    # word anywhere near the value)
+    "new relic: NRAK-IOYR664U2IA93US35GIR1AJF530",
+    "imagekit public_SYvfrf+on6GdDHFtR4KXHvln8kk=",
+    "private_bQx91LmNe4Prv77Zw2yTk3s=",
+    "sk-ant-api03-Zz9Yx8Ww7Vv6Uu5T",
+    "remote add x ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+    "github_pat_11ABCDEFG",
+    "slack hook xoxb-1234-abcd",
+    "maps key AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY",
+    "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig",
 ]
 
 # Must survive the shared regex (browser URLs / notes must not over-drop).
@@ -20,6 +31,12 @@ SHARED_MUST_KEEP = [
     "https://mobalytics.gg/poe-2/builds",
     "brew install ollama",
     "git log --oneline",
+    # near-misses for the shape patterns: boundaries and short runs
+    "desk-mounted-monitor-arm-comparison-notes",     # \b keeps sk- out of prose
+    "chmod 755 public_html && ls private_docs",      # short runs after the _
+    "the private_messages setting toggles DMs",
+    "NRAK notes from the retro",                     # no key run after the dash
+    "risk-based-authentication-writeup",
 ]
 
 # Shell-only pattern (mysql -pSecret style); deliberately NOT shared because
