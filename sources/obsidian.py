@@ -11,6 +11,10 @@ section re-embeds it in place instead of orphaning chunks; only deleting or
 renaming a section orphans (--prune --source obsidian cleans up).
 
 Timestamp is the note's `date:` frontmatter when present, else file mtime.
+Frontmatter dates may be bare (2026-07-07) or full datetimes with optional
+offset; naive values mean the author's local time. Either way the stored
+timestamp is UTC ISO — the server's window filters compare lexicographically
+against UTC bounds, so a naive local stamp would land notes in the wrong day.
 Frontmatter is stripped from the indexed text, and any section that looks
 credential-bearing is dropped via the shared secret regex — personal notes
 hold passwords more often than you'd think.
@@ -22,7 +26,9 @@ from sources.common import SECRET_RE
 MAX_CHARS = 2000
 WHOLE_NOTE_MAX = 1500        # notes at or under this stay one chunk
 _HEADING_RE = re.compile(r"^#{1,3} +(.*)$", re.M)
-_DATE_RE = re.compile(r"^date:\s*(\d{4}-\d{2}-\d{2})", re.M)
+_DATE_RE = re.compile(r"^date:\s*(\d{4}-\d{2}-\d{2}"
+                      r"(?:[T ]\d{2}:\d{2}(?::\d{2})?"
+                      r"(?:Z|[+-]\d{2}:?\d{2})?)?)", re.M)
 _SKIP_DIRS = {".trash", "templates", "template"}
 
 def _vaults():
@@ -53,6 +59,17 @@ def _sections(body: str):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
         yield m.group(1).strip(), body[m.start():end]
 
+def _fm_iso(fm_date: str) -> str:
+    """Frontmatter date -> UTC ISO string ('' if unparseable). Bare dates
+    become local midnight; naive datetimes are local time."""
+    try:
+        dt = datetime.fromisoformat(fm_date.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt.astimezone(timezone.utc).isoformat()
+
 def _mtime_iso(path: str) -> str:
     try:
         return datetime.fromtimestamp(os.path.getmtime(path),
@@ -80,7 +97,7 @@ def iter_chunks():
                 body, fm_date = _strip_frontmatter(raw)
                 if not body.strip():
                     continue
-                ts = f"{fm_date}T00:00:00" if fm_date else _mtime_iso(path)
+                ts = (_fm_iso(fm_date) if fm_date else "") or _mtime_iso(path)
                 rel = os.path.relpath(path, vault)
                 secs = ([("", body)] if len(body) <= WHOLE_NOTE_MAX
                         else _sections(body))

@@ -1,5 +1,6 @@
 """Per-source parsing and chunking edge cases."""
 import textwrap
+from datetime import datetime
 from sources import browser, obsidian, shell
 from sources.claude import _text_from_content
 
@@ -88,6 +89,25 @@ def test_strip_frontmatter():
     assert date == "2025-03-15"
     assert body.startswith("Preamble")
     assert obsidian._strip_frontmatter("no fm")[1] is None
+
+def test_fm_iso_utc_normalized():
+    # bare date -> local midnight expressed in UTC (offset-carrying string)
+    ts = obsidian._fm_iso("2025-03-15")
+    assert ts.endswith("+00:00")
+    assert datetime.fromisoformat(ts).astimezone().strftime("%Y-%m-%d %H:%M") \
+        == "2025-03-15 00:00"
+    # explicit offset survives conversion
+    assert obsidian._fm_iso("2025-03-15T10:00:00+02:00") \
+        == "2025-03-15T08:00:00+00:00"
+    assert obsidian._fm_iso("2025-03-15T08:00Z") == "2025-03-15T08:00:00+00:00"
+    # nonsense that matches the date shape falls back cleanly
+    assert obsidian._fm_iso("2025-13-45") == ""
+
+def test_date_re_accepts_datetimes():
+    for v in ["2025-03-15", "2025-03-15T10:00", "2025-03-15 10:00:00",
+              "2025-03-15T10:00:00-07:00", "2025-03-15T10:00:00Z"]:
+        m = obsidian._DATE_RE.search(f"date: {v}\n")
+        assert m and m.group(1) == v, v
 
 def test_sections_split():
     body, _ = obsidian._strip_frontmatter(NOTE)
