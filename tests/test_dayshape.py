@@ -1,8 +1,9 @@
-"""Bundle-ID capture (schema migration, tick keying, coalescing) and the
-day-shape derived metrics (switches, focus blocks, breaks, bounds).
+"""Day-shape derived metrics (switches, focus blocks, breaks, bounds),
+bundle-ID capture/migration/coalescing, and the day-shape chunk + report line.
 Local times assume the America/Los_Angeles pin in conftest."""
 import datetime, sqlite3
 from appusage import store, daemon, report
+from sources import appusage as appusage_src
 
 B = datetime.datetime(2025, 1, 6, 8, 42).timestamp()   # Mon 08:42 local
 
@@ -119,6 +120,56 @@ def test_breaks_bounds_and_start_day_attribution():
     seg(db, "A", late, late + 600)
     assert store.day_shape(db, "2025-01-06")["last"] == late + 600
     assert store.day_shape(db, "2025-01-07") is None
+
+# ── day-shape chunk ──────────────────────────────────────────────────────────
+
+def _dayshape_chunks():
+    return {c[2]["meta"]["date"]: c for c in appusage_src.iter_chunks()
+            if "first" in c[2]["meta"]}
+
+def test_dayshape_chunk_text_meta_and_min_day_floor():
+    db = store.connect()                 # frozen at the conftest tmp path
+    store.setup(db)
+    seg(db, "Xcode", B, B + 3120, "com.apple.dt.Xcode")   # 52m focus
+    seg(db, "Slack", B + 7120, B + 7420)                  # after a 4000s break
+    seg(db, "Chrome", B + 7421, B + 7541, "com.chrome")   # 1s gap = switch
+    tiny = datetime.datetime(2025, 1, 7, 9, 0).timestamp()
+    seg(db, "Slack", tiny, tiny + 400)                    # under the 10m floor
+    db.commit()
+    try:
+        chunks = _dayshape_chunks()
+        assert "2025-01-07" not in chunks                 # floor holds
+        cid, text, rec = chunks["2025-01-06"]
+        assert text == ("On 2025-01-06 (Monday), active 08:42–10:47. "
+                        "1 break totaling 1h 6m away. 1 app switch (1.0/hour). "
+                        "Focus sessions: 52m in Xcode (08:42–09:34).")
+        assert rec["timestamp"] == "2025-01-06T08:00:00+00:00"   # PST midnight
+        m = rec["meta"]
+        assert (m["switches"], m["active_seconds"]) == (1, 3540)
+        assert m["breaks"] == [{"start": "09:34", "minutes": 66}]
+        assert m["focus"] == [{"app": "Xcode", "start": "08:42", "minutes": 52}]
+        assert cid == next(iter(_dayshape_chunks().values()))[0]  # id stable
+        # per-app chunks carry bundle_id only when known
+        by_app = {r["meta"]["app"]: r["meta"] for _, _, r in appusage_src.iter_chunks()
+                  if r["meta"].get("date") == "2025-01-06" and "app" in r["meta"]}
+        assert by_app["Xcode"]["bundle_id"] == "com.apple.dt.Xcode"
+        assert "bundle_id" not in by_app["Slack"]
+    finally:
+        db.execute("DELETE FROM segments")
+        db.commit()
+
+def test_dayshape_chunk_omits_empty_clauses():
+    db = store.connect()
+    store.setup(db)
+    seg(db, "Xcode", B, B + 700, "x")     # no breaks, no focus, no switches
+    db.commit()
+    try:
+        _, text, _ = _dayshape_chunks()["2025-01-06"]
+        assert "break" not in text and "Focus" not in text
+        assert "0 app switches (0.0/hour)." in text
+    finally:
+        db.execute("DELETE FROM segments")
+        db.commit()
 
 # ── report line ──────────────────────────────────────────────────────────────
 
