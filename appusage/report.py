@@ -19,6 +19,9 @@ def shape_line(shape) -> str:
     if shape["breaks"]:
         b, away = len(shape["breaks"]), sum(gap for _, gap in shape["breaks"])
         parts.append(f"{b} break{'s' if b != 1 else ''} ({store.fmt_duration(away)})")
+    if shape["calls"]:
+        on = sum(e - s for s, e, _ in shape["calls"])
+        parts.append(f"calls: {store.fmt_duration(on)}")
     if shape["focus"]:
         parts.append("focus: " + ", ".join(
             f"{app} {store.fmt_duration(secs)}" for app, _, _, secs in shape["focus"]))

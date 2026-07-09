@@ -40,6 +40,11 @@ def _dayshape_chunk(store, db, day: str, weekday: str):
     n = shape["switches"]
     rate = n * 3600 / shape["active_seconds"]
     parts.append(f"{n} app switch{'es' if n != 1 else ''} ({rate:.1f}/hour).")
+    if shape["calls"]:
+        total = sum(e - s for s, e, _ in shape["calls"])
+        parts.append(f"On calls {dur(total)}: " + ", ".join(
+            f"{clock(s)}–{clock(e)}" + (f" ({app})" if app else "")
+            for s, e, app in shape["calls"]) + ".")
     if shape["focus"]:
         parts.append("Focus sessions: " + ", ".join(
             f"{dur(secs)} in {app} ({clock(s)}–{clock(e)})"
@@ -49,6 +54,8 @@ def _dayshape_chunk(store, db, day: str, weekday: str):
             "active_seconds": int(shape["active_seconds"]),
             "breaks": [{"start": clock(s), "minutes": int(gap // 60)}
                        for s, gap in shape["breaks"]],
+            "calls": [{"start": clock(s), "minutes": int((e - s) // 60), "app": app}
+                      for s, e, app in shape["calls"]],
             "focus": [{"app": app, "start": clock(s), "minutes": int(secs // 60)}
                       for app, s, _, secs in shape["focus"]]}
     return _chunk(day, f"day:{day}", " ".join(parts), meta)

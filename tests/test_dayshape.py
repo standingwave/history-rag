@@ -176,7 +176,7 @@ def test_dayshape_chunk_omits_empty_clauses():
 def test_report_shape_line():
     shape = {"first": B, "last": B + 3540, "active_seconds": 3540.0,
              "switches": 47, "breaks": [(B + 600, 3900)],
-             "focus": [("Xcode", B, B + 3120, 3120)]}
+             "focus": [("Xcode", B, B + 3120, 3120)], "calls": []}
     line = report.shape_line(shape)
     assert line == ("08:42–09:41 · 47 switches (47.8/h) · "
                     "1 break (1h 5m) · focus: Xcode 52m")

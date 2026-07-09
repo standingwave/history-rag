@@ -20,6 +20,12 @@ SWITCH_GAP = 60          # max gap (s) for adjacent segments to count as a direc
 FOCUS_MERGE_GAP = 300    # same-app gap (s) bridged when merging focus blocks
 FOCUS_MIN = 25 * 60      # active seconds for a merged block to count as focus
 BREAK_MIN = 15 * 60      # gap (s) that counts as a break rather than a pause
+CALL_MIN = 180           # mic-live seconds before a stretch counts as a call
+MEETING_APPS = {         # bundle ids whose overlap labels a call
+    "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2",
+    "com.apple.FaceTime", "com.tinyspeck.slackmacgap", "com.hnc.Discord",
+    "Cisco-Systems.Spark",
+}
 
 def connect():
     db = sqlite3.connect(APPUSAGE_DB, timeout=30)
@@ -112,11 +118,39 @@ def day_segments(db, day: str):
         "WHERE start_ts >= ? AND start_ts < ? AND end_ts > start_ts "
         "ORDER BY start_ts", (t0, t1)).fetchall()
 
+def day_calls(db, day: str, segs=None):
+    """Calls for one local day (start-day attribution, like day_segments):
+    [(start_ts, end_ts, label|None)]. A call is a mic segment >= CALL_MIN —
+    shorter blips are Siri/dictation, not calls. The label is the overlapping
+    MEETING_APPS app with the most overlap; a background call you never look
+    at gets None."""
+    d = datetime.date.fromisoformat(day)
+    t0 = datetime.datetime.combine(d, datetime.time()).timestamp()
+    t1 = datetime.datetime.combine(
+        d + datetime.timedelta(days=1), datetime.time()).timestamp()
+    mics = db.execute(
+        "SELECT start_ts, end_ts FROM mic_segments "
+        "WHERE start_ts >= ? AND start_ts < ? AND end_ts - start_ts >= ? "
+        "ORDER BY start_ts", (t0, t1, CALL_MIN)).fetchall()
+    if not mics:
+        return []
+    if segs is None:
+        segs = day_segments(db, day)
+    out = []
+    for cs, ce in mics:
+        overlap = {}
+        for app, bundle, s, e in segs:
+            if bundle in MEETING_APPS and min(ce, e) > max(cs, s):
+                overlap[app] = overlap.get(app, 0) + min(ce, e) - max(cs, s)
+        out.append((cs, ce, max(overlap, key=overlap.get) if overlap else None))
+    return out
+
 def day_shape(db, day: str):
     """Derived shape of one local day, or None when it has no segments:
     {first, last: epoch bounds, active_seconds, switches,
      breaks: [(gap_start_ts, gap_seconds)],
-     focus: [(display_name, start_ts, end_ts, active_seconds)]}.
+     focus: [(display_name, start_ts, end_ts, active_seconds)],
+     calls: day_calls() result}.
     A switch is an adjacent different-app pair within SWITCH_GAP — idle
     returns don't qualify (idle gaps are >= the daemon's 120s threshold).
     A focus block merges same-app segments across gaps <= FOCUS_MERGE_GAP;
@@ -147,7 +181,8 @@ def day_shape(db, day: str):
 
     return {"first": segs[0][2], "last": segs[-1][3],
             "active_seconds": sum(e - s for _, _, s, e in segs),
-            "switches": switches, "breaks": breaks, "focus": focus}
+            "switches": switches, "breaks": breaks, "focus": focus,
+            "calls": day_calls(db, day, segs)}
 
 def fmt_duration(seconds: float) -> str:
     s = int(seconds)
