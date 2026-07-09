@@ -34,6 +34,11 @@ def setup(db):
         start_ts REAL NOT NULL,
         end_ts REAL NOT NULL,
         closed INTEGER NOT NULL DEFAULT 0)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS mic_segments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        start_ts REAL NOT NULL,
+        end_ts REAL NOT NULL,
+        closed INTEGER NOT NULL DEFAULT 0)""")
     cols = {row[1] for row in db.execute("PRAGMA table_info(segments)")}
     if "bundle_id" not in cols:
         _add_bundle_column(db)

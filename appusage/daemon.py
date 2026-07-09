@@ -4,16 +4,19 @@ App-usage tracker daemon (macOS). Samples the frontmost app and idle time every
 INTERVAL seconds and records how long you spend in each app into ~/.claude/
 appusage.db. Time while the machine is idle (no input for IDLE_THRESHOLD
 seconds) or asleep is not counted — unless a display wake lock is held
-(video playback, presenting), which counts as present-but-passive.
+(video playback, presenting) or the mic is live (a call), both of which
+count as present-but-passive. Mic-live stretches are also recorded into
+mic_segments so readers can derive a calls timeline.
 
 Zero dependencies — reads the frontmost app via `lsappinfo`, idle time via
-`ioreg`, and wake locks via `pmset`, all permission-free. Run directly for testing, or under launchd (see
+`ioreg`, wake locks via `pmset`, and mic state via in-process CoreAudio
+(see mic.py), all permission-free. Run directly for testing, or under launchd (see
 com.user.appusage.plist) to track continuously.
 """
 import os, sys, re, time, signal, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from appusage import store
+from appusage import store, mic
 
 INTERVAL = int(os.environ.get("APPUSAGE_INTERVAL", "20"))       # seconds per sample
 IDLE_THRESHOLD = int(os.environ.get("APPUSAGE_IDLE", "120"))    # idle secs -> stop counting
@@ -63,11 +66,12 @@ def display_wake_lock():
     except (subprocess.SubprocessError, OSError):
         return False
 
-def is_active():
-    """Present at the machine: recent input, or — evaluated lazily so the
-    common working case never runs pmset — a display wake lock keeping the
-    screen on through hands-off playback."""
-    return idle_seconds() < IDLE_THRESHOLD or display_wake_lock()
+def is_active(mic_live=False):
+    """Present at the machine: recent input, a live mic (a call), or a
+    display wake lock (playback, presenting). Ordered cheapest-first —
+    mic_live is already sampled, so the pmset subprocess only runs when
+    idle and mic-silent."""
+    return idle_seconds() < IDLE_THRESHOLD or mic_live or display_wake_lock()
 
 def _open_segment(db):
     return db.execute(
@@ -93,11 +97,35 @@ def tick(db, app, now, bundle=None, max_gap=None):
                    "VALUES (?,?,?,?,0)", (app, bundle, now, now))
     db.commit()
 
+def _open_mic(db):
+    return db.execute("SELECT id, end_ts FROM mic_segments WHERE closed=0 "
+                      "ORDER BY id DESC LIMIT 1").fetchone()
+
+def mic_tick(db, live, now, max_gap=None):
+    """mic_segments mirror of tick(): extend, close, or open on the mic
+    boolean, with the same sleep-gap rule (a gap longer than max_gap means
+    the machine slept — close rather than back-fill)."""
+    if max_gap is None:
+        max_gap = INTERVAL * 3
+    cur = _open_mic(db)
+    if not live:
+        if cur:
+            db.execute("UPDATE mic_segments SET closed=1 WHERE id=?", (cur[0],))
+    elif cur and now - cur[1] <= max_gap:
+        db.execute("UPDATE mic_segments SET end_ts=? WHERE id=?", (now, cur[0]))
+    else:
+        if cur:
+            db.execute("UPDATE mic_segments SET closed=1 WHERE id=?", (cur[0],))
+        db.execute("INSERT INTO mic_segments(start_ts, end_ts, closed) "
+                   "VALUES (?,?,0)", (now, now))
+    db.commit()
+
 def main():
     db = store.connect()
     store.setup(db)
     # Any segment left open by a previous run is stale — finalize it.
     db.execute("UPDATE segments SET closed=1 WHERE closed=0")
+    db.execute("UPDATE mic_segments SET closed=1 WHERE closed=0")
     db.commit()
 
     running = {"v": True}
@@ -107,8 +135,11 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     while running["v"]:
-        app, bundle = frontmost_app() if is_active() else (None, None)
-        tick(db, app, time.time(), bundle=bundle)
+        mic_live = mic.mic_in_use()
+        app, bundle = frontmost_app() if is_active(mic_live) else (None, None)
+        now = time.time()
+        tick(db, app, now, bundle=bundle)
+        mic_tick(db, mic_live, now)
 
         # Sleep in short slices so SIGTERM is handled promptly.
         for _ in range(INTERVAL):
@@ -117,6 +148,7 @@ def main():
             time.sleep(1)
 
     db.execute("UPDATE segments SET closed=1 WHERE closed=0")
+    db.execute("UPDATE mic_segments SET closed=1 WHERE closed=0")
     db.commit()
 
 if __name__ == "__main__":
