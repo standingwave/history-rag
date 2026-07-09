@@ -3,10 +3,11 @@
 App-usage tracker daemon (macOS). Samples the frontmost app and idle time every
 INTERVAL seconds and records how long you spend in each app into ~/.claude/
 appusage.db. Time while the machine is idle (no input for IDLE_THRESHOLD
-seconds) or asleep is not counted.
+seconds) or asleep is not counted — unless a display wake lock is held
+(video playback, presenting), which counts as present-but-passive.
 
-Zero dependencies — reads the frontmost app via `lsappinfo` and idle time via
-`ioreg`, both permission-free. Run directly for testing, or under launchd (see
+Zero dependencies — reads the frontmost app via `lsappinfo`, idle time via
+`ioreg`, and wake locks via `pmset`, all permission-free. Run directly for testing, or under launchd (see
 com.user.appusage.plist) to track continuously.
 """
 import os, sys, re, time, signal, subprocess
@@ -20,6 +21,7 @@ IDLE_THRESHOLD = int(os.environ.get("APPUSAGE_IDLE", "120"))    # idle secs -> s
 _NAME_RE = re.compile(r'"LSDisplayName"="([^"]*)"')
 _BUNDLE_RE = re.compile(r'"CFBundleIdentifier"="([^"]*)"')
 _IDLE_RE = re.compile(r'"HIDIdleTime"\s*=\s*(\d+)')
+_WAKE_RE = re.compile(r"^\s*PreventUserIdleDisplaySleep\s+(\d+)", re.M)
 
 def frontmost_app():
     """(localized name, bundle id) of the frontmost app; (None, None) during
@@ -48,6 +50,24 @@ def idle_seconds():
         return int(m.group(1)) / 1_000_000_000 if m else 0.0
     except (subprocess.SubprocessError, OSError):
         return 0.0
+
+def display_wake_lock():
+    """True while some process holds PreventUserIdleDisplaySleep — video
+    playback, presenting, or a video call. Parses the summary count only;
+    the owners are helper processes and aren't worth mapping to apps."""
+    try:
+        out = subprocess.run(["pmset", "-g", "assertions"],
+                             capture_output=True, text=True, timeout=5).stdout
+        m = _WAKE_RE.search(out)
+        return bool(m) and int(m.group(1)) > 0
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+def is_active():
+    """Present at the machine: recent input, or — evaluated lazily so the
+    common working case never runs pmset — a display wake lock keeping the
+    screen on through hands-off playback."""
+    return idle_seconds() < IDLE_THRESHOLD or display_wake_lock()
 
 def _open_segment(db):
     return db.execute(
@@ -87,8 +107,7 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     while running["v"]:
-        active = idle_seconds() < IDLE_THRESHOLD
-        app, bundle = frontmost_app() if active else (None, None)
+        app, bundle = frontmost_app() if is_active() else (None, None)
         tick(db, app, time.time(), bundle=bundle)
 
         # Sleep in short slices so SIGTERM is handled promptly.
