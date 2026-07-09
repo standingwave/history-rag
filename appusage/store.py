@@ -15,6 +15,12 @@ import collections
 # it themselves before importing this module.
 from config import APPUSAGE_DB
 
+# Derived-metric definitions (definitions, not preferences — no config knobs).
+SWITCH_GAP = 60          # max gap (s) for adjacent segments to count as a direct app switch
+FOCUS_MERGE_GAP = 300    # same-app gap (s) bridged when merging focus blocks
+FOCUS_MIN = 25 * 60      # active seconds for a merged block to count as focus
+BREAK_MIN = 15 * 60      # gap (s) that counts as a break rather than a pause
+
 def connect():
     db = sqlite3.connect(APPUSAGE_DB, timeout=30)
     db.execute("PRAGMA journal_mode=WAL")   # daemon writes while readers read
@@ -89,7 +95,59 @@ def daily_durations(db):
             out[day][name] = info["seconds"]
     return out
 
+def day_segments(db, day: str):
+    """Ordered (app, bundle_id, start_ts, end_ts) for segments starting on
+    local day `day` (same start-day attribution as daily_apps)."""
+    d = datetime.date.fromisoformat(day)
+    t0 = datetime.datetime.combine(d, datetime.time()).timestamp()
+    t1 = datetime.datetime.combine(
+        d + datetime.timedelta(days=1), datetime.time()).timestamp()
+    return db.execute(
+        "SELECT app, bundle_id, start_ts, end_ts FROM segments "
+        "WHERE start_ts >= ? AND start_ts < ? AND end_ts > start_ts "
+        "ORDER BY start_ts", (t0, t1)).fetchall()
+
+def day_shape(db, day: str):
+    """Derived shape of one local day, or None when it has no segments:
+    {first, last: epoch bounds, active_seconds, switches,
+     breaks: [(gap_start_ts, gap_seconds)],
+     focus: [(display_name, start_ts, end_ts, active_seconds)]}.
+    A switch is an adjacent different-app pair within SWITCH_GAP — idle
+    returns don't qualify (idle gaps are >= the daemon's 120s threshold).
+    A focus block merges same-app segments across gaps <= FOCUS_MERGE_GAP;
+    any other-app segment splits it regardless of duration."""
+    segs = day_segments(db, day)
+    if not segs:
+        return None
+
+    switches, breaks = 0, []
+    for (pa, pb, _, pe), (ca, cb, cs, _) in zip(segs, segs[1:]):
+        gap = cs - pe
+        if gap >= BREAK_MIN:
+            breaks.append((pe, gap))
+        elif gap <= SWITCH_GAP and not same_app(pa, pb, ca, cb):
+            switches += 1
+
+    focus, run = [], None   # run: [name, bundle, start, end, active]
+    for name, bundle, s, e in segs:
+        if run and same_app(run[0], run[1], name, bundle) and s - run[3] <= FOCUS_MERGE_GAP:
+            run[4] += e - s
+            run[0], run[1], run[3] = name, bundle or run[1], e
+        else:
+            if run and run[4] >= FOCUS_MIN:
+                focus.append((run[0], run[2], run[3], run[4]))
+            run = [name, bundle, s, e, e - s]
+    if run and run[4] >= FOCUS_MIN:
+        focus.append((run[0], run[2], run[3], run[4]))
+
+    return {"first": segs[0][2], "last": segs[-1][3],
+            "active_seconds": sum(e - s for _, _, s, e in segs),
+            "switches": switches, "breaks": breaks, "focus": focus}
+
 def fmt_duration(seconds: float) -> str:
     s = int(seconds)
     h, m = divmod(s // 60, 60)
     return f"{h}h {m}m" if h else f"{m}m"
+
+def fmt_clock(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(ts).strftime("%H:%M")
