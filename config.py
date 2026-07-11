@@ -26,6 +26,7 @@ _KNOWN = {
     "appusage": {"db"},
     "digest": {"sources", "recompute_days", "backfill_days"},
     "backup": {"dir", "keep"},
+    "sync": {"bucket", "key", "region"},
     "health": {"notify"},
 }
 
@@ -92,6 +93,14 @@ MXBAI_API_MODEL = "mixedbread-ai/mxbai-embed-large-v1"
 MXBAI_QUERY_PROMPT = str(get("core", "mxbai_query_prompt",
                              "CLAUDE_RAG_MXBAI_QUERY_PROMPT", ""))
 MXBAI_API_KEY = os.environ.get("MXBAI_API_KEY", "")
+
+# Remote replica (deploy/lambda): S3 destination for tools/sync-s3.py.
+# No bucket means no replica — the sync tool no-ops.
+SYNC_BUCKET = str(get("sync", "bucket", "CLAUDE_RAG_SYNC_BUCKET", "") or "")
+SYNC_KEY = str(get("sync", "key", "CLAUDE_RAG_SYNC_KEY", "history-rag.db"))
+# Bucket region; empty falls back to the profile/env default. Set it when the
+# bucket lives outside the default region or S3 will bounce the upload.
+SYNC_REGION = str(get("sync", "region", "CLAUDE_RAG_SYNC_REGION", "") or "")
 
 # App-usage tracker (macOS): daemon writes here, sources/appusage.py reads it.
 APPUSAGE_DB = os.path.expanduser(get("appusage", "db", "CLAUDE_RAG_APPUSAGE_DB",

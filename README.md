@@ -55,8 +55,11 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `tools/` — dev loop and maintenance: `smoke.py` (exercise every tool path
   in-process after a change; warns if the running MCP server predates your
   edits), `kick.sh` (trigger the launchd refresh and print its stats block),
-  `backup.py` (daily dated copies of the sole-copy DBs), `eval-model.py` /
-  `migrate-model.py` (embedding-model evaluation and archive-safe switching),
+  `backup.py` (daily dated copies of the sole-copy DBs), `sync-s3.py` (push
+  the index to S3 for the optional remote replica — see `deploy/lambda/`),
+  `eval-model.py` / `migrate-model.py` (embedding-model evaluation and
+  archive-safe switching), `eval-embed-parity.py` (verify a hosted embedding
+  API matches the local index's vector space),
   and `inspect-sessions.py` (format-drift diagnostic: dumps the raw session
   JSONL shape if the claude source ever stops matching reality).
 
@@ -361,6 +364,7 @@ Fill the plist's absolute-path placeholders and load it:
 PY=~/.claude/rag-venv/bin/python
 sed -e "s#__PYTHON__#$PY#g" -e "s#__INDEX__#$(pwd)/index.py#" \
     -e "s#__BACKUP__#$(pwd)/tools/backup.py#" \
+    -e "s#__SYNC__#$(pwd)/tools/sync-s3.py#" \
   com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
 launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
 ```

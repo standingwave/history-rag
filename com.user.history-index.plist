@@ -17,7 +17,7 @@
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>__PYTHON__ __INDEX__ &amp;&amp; __PYTHON__ __BACKUP__</string>
+        <string>__PYTHON__ __INDEX__ &amp;&amp; __PYTHON__ __BACKUP__ &amp;&amp; __PYTHON__ __SYNC__</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
