@@ -15,7 +15,8 @@ _CONFIG_PATH = os.path.expanduser(
     os.environ.get("CLAUDE_RAG_CONFIG", "~/.claude/history-rag.toml"))
 
 _KNOWN = {
-    "core": {"model", "dim", "db", "ollama"},
+    "core": {"model", "dim", "db", "ollama", "embed_backend",
+             "nomic_task_type", "mxbai_query_prompt"},
     "sources": {"enabled"},
     "shell": {"histfiles", "atuin_db"},
     "browser": {"extra", "keep_params"},
@@ -68,6 +69,29 @@ DB_PATH = os.path.expanduser(get("core", "db", "CLAUDE_RAG_DB",
                                  "~/.claude/history-rag.db"))
 OLLAMA = str(get("core", "ollama", "CLAUDE_RAG_OLLAMA",
                  "http://localhost:11434")).rstrip("/") + "/api/embed"
+
+# Query-time embedding backend: "ollama" (the default; everything above) or
+# a hosted API serving the same weights — for deployments with no Ollama
+# (deploy/lambda). "nomic-api" pairs with nomic-embed-text indexes,
+# "mixedbread-api" with mxbai-embed-large ones. Hosted runtimes may apply
+# prompt prefixes the local index never saw, so vector parity must be
+# verified (tools/eval-embed-parity.py) before pointing a real index at one.
+# Keys are env-only: secrets don't belong in the TOML.
+EMBED_BACKEND = str(get("core", "embed_backend",
+                        "CLAUDE_RAG_EMBED_BACKEND", "ollama"))
+NOMIC_API_URL = "https://api-atlas.nomic.ai/v1/embedding/text"
+NOMIC_API_MODEL = "nomic-embed-text-v1.5"
+NOMIC_TASK_TYPE = str(get("core", "nomic_task_type",
+                          "CLAUDE_RAG_NOMIC_TASK_TYPE", "search_query"))
+NOMIC_API_KEY = os.environ.get("NOMIC_API_KEY", "")
+MXBAI_API_URL = "https://api.mixedbread.com/v1/embeddings"
+MXBAI_API_MODEL = "mixedbread-ai/mxbai-embed-large-v1"
+# Prefix prepended to queries; empty matches the index convention (raw text).
+# mxbai's own retrieval recipe prompts queries — only adopt that here if the
+# parity eval shows it beats raw against a raw-embedded index.
+MXBAI_QUERY_PROMPT = str(get("core", "mxbai_query_prompt",
+                             "CLAUDE_RAG_MXBAI_QUERY_PROMPT", ""))
+MXBAI_API_KEY = os.environ.get("MXBAI_API_KEY", "")
 
 # App-usage tracker (macOS): daemon writes here, sources/appusage.py reads it.
 APPUSAGE_DB = os.path.expanduser(get("appusage", "db", "CLAUDE_RAG_APPUSAGE_DB",
