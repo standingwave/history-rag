@@ -38,9 +38,9 @@ Secret filtering is per-field: a credential-looking title drops the event,
 but notes or a room string only drop that field — Zoom invites are full of
 "Password:" lines, and the meeting itself is exactly what recall needs.
 """
-import os, hashlib, shutil, sqlite3, sys, tempfile
+import os, hashlib, sqlite3, sys
 from datetime import datetime, timedelta, timezone
-from sources.common import SECRET_RE
+from sources.common import SECRET_RE, snapshot_db
 
 FUTURE_DAYS = 90         # index upcoming events this far ahead
 PRUNE_WINDOW_DAYS = 30   # prune bound: chunks older than this are archive
@@ -69,17 +69,6 @@ def _settings():
         str(c) for c in config.get("calendar", "exclude_calendars", "", [])}
     return apps, excl
 
-def _connect_copy(path: str):
-    """calendard holds the store open; copy it and read the copy (browser's
-    locked-DB pattern). Caller unlinks tmp."""
-    fd, tmp = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    try:
-        shutil.copyfile(path, tmp)
-        return sqlite3.connect(tmp), tmp
-    except OSError:
-        os.unlink(tmp)
-        raise
 
 def _attendee_names(db):
     """owner CalendarItem ROWID -> display names. Never emails: a bare-email
@@ -108,7 +97,7 @@ def _read_apple(excludes):
     midnight (take the local date) — both verified live."""
     if not os.path.exists(APPLE_DB):
         return []
-    db, tmp = _connect_copy(APPLE_DB)
+    db, tmp = snapshot_db(APPLE_DB)
     try:
         cals = {}      # Calendar ROWID -> (title, account)
         for cid, title, account in db.execute(

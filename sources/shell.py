@@ -12,9 +12,9 @@ from live histfiles — atuin covers that era, and counting both would inflate.
 Trivial commands are dropped, and any command that looks like it contains a
 secret is skipped so it never gets embedded or surfaced back into a session.
 """
-import os, re, glob, hashlib, shutil, sqlite3, sys, tempfile
+import os, re, glob, hashlib, sqlite3, sys
 from datetime import datetime, timezone
-from sources.common import SECRET_RE
+from sources.common import SECRET_RE, snapshot_db
 
 MAX_CHARS = 2000
 MIN_CHARS = 4
@@ -71,18 +71,14 @@ def _abbrev(path: str) -> str:
     return "~" + path[len(home):] if path.startswith(home) else path
 
 def _atuin_snapshot():
-    """Copy atuin's DB (it holds the file open) and connect; None if absent."""
+    """Snapshot atuin's DB (live, WAL-mode) and connect; None if absent."""
     path = _atuin_db()
     if not path or not os.path.isfile(path):
         return None, None
-    fd, tmp = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
     try:
-        shutil.copyfile(path, tmp)
-        return sqlite3.connect(tmp), tmp
-    except OSError as e:
+        return snapshot_db(path)
+    except (OSError, sqlite3.Error) as e:
         print(f"shell: skipping atuin ({path}): {e}", file=sys.stderr)
-        os.unlink(tmp)
         return None, None
 
 def _read_atuin():

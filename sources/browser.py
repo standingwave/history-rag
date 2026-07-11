@@ -23,10 +23,10 @@ CLAUDE_RAG_BROWSERS overrides the default locations: colon-separated
 name=path entries, e.g. "arc=~/Library/.../Arc/User Data/Default/History".
 The schema (Safari vs Chromium) is sniffed from the tables, not the name.
 """
-import os, glob, hashlib, json, shutil, sqlite3, sys, tempfile
+import os, glob, hashlib, json, sqlite3, sys
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-from sources.common import SECRET_RE
+from sources.common import SECRET_RE, snapshot_db
 
 MAX_CHARS = 500
 
@@ -81,16 +81,10 @@ def _display_name(path: str, profile: str) -> str:
         return profile
 
 def _connect_copy(path: str):
-    """Copy a (possibly browser-locked) history DB and connect to the copy.
-    Returns (connection, tmp_path); the caller unlinks tmp_path."""
-    fd, tmp = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    try:
-        shutil.copyfile(path, tmp)
-        return sqlite3.connect(tmp), tmp
-    except OSError:
-        os.unlink(tmp)
-        raise
+    """Snapshot a (possibly browser-locked, possibly WAL) history DB and
+    connect to the snapshot. Returns (connection, tmp_path); the caller
+    unlinks tmp_path."""
+    return snapshot_db(path)
 
 def _read_chromium(db):
     for url, title, count, ts in db.execute(
