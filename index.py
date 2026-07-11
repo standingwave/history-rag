@@ -12,7 +12,7 @@ Run:   python index.py                  # incremental, all sources
        python index.py --prune --source X  # drop chunks source X stopped yielding
 """
 import argparse, json, sqlite3, subprocess, sys, time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import sqlite_vec
 import requests
 import config
@@ -136,12 +136,23 @@ def dry_run(sources):
     else:
         print(f"\n{n} kept so far. Looks right? Run without --dry-run.")
 
-def prune_stale(db, src_cols: set, keep_ids: set) -> int:
+def prune_stale(db, src_cols: set, keep_ids: set, min_ts: str = "") -> int:
     """Delete stored chunks belonging to `src_cols` whose id wasn't yielded this
     run. Only called for a source that completed cleanly and yielded something,
-    so an empty or broken source can never wipe its own history."""
+    so an empty or broken source can never wipe its own history.
+
+    `min_ts` (UTC ISO) bounds deletion to chunks stamped at or after it. A
+    source whose backing store forgets legitimately (a calendar account's
+    bounded sync window, a rolling occurrence cache) declares
+    PRUNE_WINDOW_DAYS: not-yielded-anymore then only means stale within that
+    window — anything older, or undated, is archive the index has outlived."""
     q = ",".join("?" * len(src_cols))
-    rows = db.execute(f"SELECT id FROM chunks WHERE source IN ({q})", tuple(src_cols))
+    sql = f"SELECT id FROM chunks WHERE source IN ({q})"
+    params = list(src_cols)
+    if min_ts:
+        sql += " AND timestamp >= ?"
+        params.append(min_ts)
+    rows = db.execute(sql, params)
     stale = [(r[0],) for r in rows if r[0] not in keep_ids]
     if stale:
         db.executemany("DELETE FROM chunks WHERE id = ?", stale)
@@ -280,7 +291,11 @@ def main():
                       file=sys.stderr)
             n_pruned = 0
             if args.prune and ok and seen_ids:
-                n_pruned = prune_stale(db, src_cols, seen_ids)
+                window = getattr(src, "PRUNE_WINDOW_DAYS", None)
+                min_ts = ((datetime.now(timezone.utc)
+                           - timedelta(days=window)).isoformat()
+                          if window else "")
+                n_pruned = prune_stale(db, src_cols, seen_ids, min_ts)
                 pruned += n_pruned
             status = "" if ok else "  [FAILED, partial]"
             extra = f", {n_pruned} pruned" if n_pruned else ""
