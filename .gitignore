@@ -5,3 +5,5 @@ __pycache__/
 hash
 .claude/
 wip/
+deploy/lambda/build/
+deploy/lambda/*.zip

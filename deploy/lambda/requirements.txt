@@ -1,0 +1,9 @@
+# Lambda bundle only — the Mac install keeps using the repo-root
+# requirements.txt. pysqlite3-binary replaces the runtime's extension-less
+# sqlite3; mangum adapts the ASGI app to Function URL events.
+mcp>=1.10
+sqlite-vec
+pysqlite3-binary
+mangum
+requests
+boto3
