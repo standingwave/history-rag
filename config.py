@@ -19,6 +19,7 @@ _KNOWN = {
     "sources": {"enabled"},
     "shell": {"histfiles", "atuin_db"},
     "browser": {"extra", "keep_params"},
+    "calendar": {"apps", "exclude_calendars"},
     "git": {"roots", "author"},
     "obsidian": {"vaults"},
     "appusage": {"db"},

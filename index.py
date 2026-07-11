@@ -16,10 +16,10 @@ from datetime import datetime, timedelta, timezone
 import sqlite_vec
 import requests
 import config
-from sources import claude, shell, appusage, browser, git, obsidian, digest
+from sources import claude, shell, appusage, browser, git, obsidian, calendar, digest
 
 # digest runs last: it reads this run's freshly committed claude chunks.
-ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian, digest]
+ALL_SOURCES = [claude, shell, appusage, browser, git, obsidian, calendar, digest]
 
 def _enabled():
     if config.ENABLED_SOURCES is None:   # no [sources].enabled -> all
