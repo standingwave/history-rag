@@ -189,6 +189,28 @@ def _expand_obsidian(db, chunk, n):
     return {"sections": [{"id": i, "location": l, "text": t}
                          for i, l, t in rows]}, "index"
 
+def _expand_calendar(db, chunk, n):
+    """The day's agenda: every calendar chunk on the hit's local day, across
+    calendars and apps, ordered by start. All-day chunks are stamped local
+    midnight, so they lead the list. Index-backed (chunks ARE the agenda);
+    n is unused — a day's agenda is the unit of meaning."""
+    cid, ts = chunk["id"], chunk["timestamp"]
+    if not ts:
+        return None, None
+    local = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone()
+    day0 = datetime(local.year, local.month, local.day)
+    lo = day0.astimezone(timezone.utc).isoformat()
+    hi = ((day0 + timedelta(days=1)).astimezone(timezone.utc)
+          - timedelta(microseconds=1)).isoformat()
+    rows = db.execute(
+        """SELECT id, timestamp, text FROM chunks WHERE source = 'calendar'
+           AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp""",
+        (lo, hi)).fetchall()
+    agenda = [{"id": i, "timestamp": t, "text": x[:300], **({"target": True}
+               if i == cid else {})}
+              for i, t, x in rows]
+    return {"day": day0.date().isoformat(), "agenda": agenda}, "index"
+
 def _expand_appusage(db, chunk, n):
     try:
         from appusage import store
@@ -214,6 +236,7 @@ _EXPANDERS = {
     "obsidian": _expand_obsidian,
     "appusage": _expand_appusage,
     "shell": _expand_shell,
+    "calendar": _expand_calendar,
 }
 
 # ── tools ────────────────────────────────────────────────────────────────────
@@ -238,6 +261,11 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                   questions, query with that phrasing to catch every engine.
       - git:      commit messages they've authored across local repos
       - obsidian: their Obsidian vault notes, chunked by heading
+      - calendar: their calendar events — meetings and appointments with
+                  attendee names, all past plus ~90 days ahead (so "what's
+                  coming up Thursday" works; this source's timestamps can be
+                  in the future). Location is "app:calendar name", e.g.
+                  "apple:Work".
       - digest:   precomputed daily rollups, one chunk per (local day,
                   stream): browser-profile visits/searches, claude sessions,
                   shell runs. For "what did I do <day/week>" questions, list
@@ -248,7 +276,7 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
       query: natural-language description of what to recall.
       k: max results (default 5).
       source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
-        | 'obsidian' | 'digest' (default: all).
+        | 'obsidian' | 'calendar' | 'digest' (default: all).
       location: case-sensitive prefix filter on each chunk's location, e.g.
         'chrome:First user' or 'chrome:' (browser profile), 'littlebird@'
         (git repo), 'projects/' (obsidian folder). Combine with source to
@@ -536,7 +564,8 @@ def expand(id: str, context: int = 5) -> str:
     index ("index"). Per source: claude -> the ±context conversation turns
     around the hit; git -> the full commit message + file stats; browser ->
     that profile's other visits the same local day; obsidian -> the whole
-    note; appusage -> the day's full per-app seconds; shell -> the commands
+    note; appusage -> the day's full per-app seconds; calendar -> that
+    local day's full agenda across calendars; shell -> the commands
     around its latest run when atuin recorded it (with cwd + exit codes),
     else no context. context caps at 25."""
     db = _db()

@@ -146,6 +146,26 @@ def test_expand_browser_day_view(seeded):
     assert [v.get("target", False) for v in visits] == [False, True, False]
     assert x["context"]["day"] == "2026-07-02"
 
+def test_expand_calendar_day_agenda(scratch_db, fake_embed, monkeypatch):
+    import server
+    seed(monkeypatch, {"calendar": [
+        # all-day chunk at local midnight (07:00Z in PDT) leads the agenda
+        ("c1", "Calendar event on 2026-07-02 (Thursday), all day: Offsite (apple:Work).",
+         rec("calendar", ts=f"{D}07:00:00+00:00", loc="apple:Work")),
+        ("c2", "Calendar event on 2026-07-02 (Thursday) 10:00–10:30: Standup (apple:Work).",
+         rec("calendar", ts=f"{D}17:00:00+00:00", loc="apple:Work")),
+        ("c3", "Calendar event on 2026-07-02 (Thursday) 12:00–13:00: Lunch (apple:Home).",
+         rec("calendar", ts=f"{D}19:00:00+00:00", loc="apple:Home")),
+        ("c4", "Calendar event on 2026-07-03 (Friday) 10:00–10:30: Standup (apple:Work).",
+         rec("calendar", ts="2026-07-03T17:00:00+00:00", loc="apple:Work")),
+    ]})
+    x = json.loads(server.expand("c2"))
+    assert x["context_source"] == "index"
+    ctx = x["context"]
+    assert ctx["day"] == "2026-07-02"
+    assert [e["id"] for e in ctx["agenda"]] == ["c1", "c2", "c3"]
+    assert [e["id"] for e in ctx["agenda"] if e.get("target")] == ["c2"]
+
 def test_expand_shell_no_atuin_is_null(seeded):
     import server
     x = json.loads(server.expand("sh1"))
