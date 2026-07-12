@@ -57,6 +57,9 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   edits), `kick.sh` (trigger the launchd refresh and print its stats block),
   `backup.py` (daily dated copies of the sole-copy DBs), `sync-s3.py` (push
   the index to S3 for the optional remote replica — see `deploy/lambda/`),
+  `hist.py` (stdlib-only terminal client for that replica: `hist search
+  "the proxy bug" -k 5` from any machine holding the secret URL; suggested
+  `alias hist='python3 <repo>/tools/hist.py'`),
   `eval-model.py` / `migrate-model.py` (embedding-model evaluation and
   archive-safe switching), `eval-embed-parity.py` (verify a hosted embedding
   API matches the local index's vector space),

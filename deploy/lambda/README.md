@@ -106,6 +106,22 @@ claude.ai → Settings → Connectors → Add custom connector → paste the URL
 (no OAuth). Connectors are account-level: the phone app, web, and desktop
 all pick it up.
 
+## Direct access
+
+Two thin clients ride the same endpoint (design: `wip/SPEC-direct-access.md`):
+
+- **CLI** — `tools/hist.py`, stdlib only, copyable as a single file.
+  Endpoint from `$HISTORY_RAG_URL`, else the URL field of the
+  `history-rag remote` LastPass entry (`$HISTORY_RAG_LPASS_ENTRY`
+  overrides the name). `hist search "that proxy bug" -k 5`, `hist stats`,
+  `hist window --since 2026-07-01 --group-by day`, `hist expand <id>`;
+  `--json` for piping.
+- **Browser page** — `https://<function-url-host>/$SECRET/search`, served
+  by the Lambda itself: a no-JS search form sized for phones, behind the
+  same secret gate. Bookmark it on the home screen. Queries ride the URL
+  query string, so they land in the phone browser's history — acceptable
+  for a personal tool, noted in the page footer.
+
 ## Deploy loop
 
 ```sh
