@@ -601,3 +601,65 @@ def test_expanded_chunk_uses_card_renderer(monkeypatch):
     monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
     _, _, body = _get("/s3cr3t/search", "expand=x1")
     assert '<pre class="mono">make deploy</pre>' in body   # unclamped mono
+
+
+# ── ask mode (wip/SPEC-ask-mode.md) ──────────────────────────────────────────
+
+PRESETS2 = [{"name": "haiku", "backend": "anthropic", "model": "m",
+             "key_env": ""},
+            {"name": "gpt", "backend": "openai-compatible", "model": "g",
+             "key_env": ""}]
+
+
+def test_no_presets_means_no_ask_ui():
+    _, _, body = _get("/s3cr3t/search")     # test env has no [ask] config
+    assert 'value="ask"' not in body and 'name="model"' not in body
+
+
+def test_ask_button_and_model_picker(monkeypatch):
+    monkeypatch.setattr(app.ask, "presets", lambda: PRESETS2)
+    _, _, body = _get("/s3cr3t/search")
+    assert '<button name="mode" value="ask">Ask</button>' in body
+    assert 'name="model" value="haiku" checked' in body
+    assert 'name="model" value="gpt"' in body
+    monkeypatch.setattr(app.ask, "presets", lambda: PRESETS2[:1])
+    _, _, body = _get("/s3cr3t/search")
+    assert 'value="ask"' in body            # button stays with one preset
+    assert 'name="model"' not in body       # picker hides below two
+
+
+def test_ask_mode_renders_answer_card(monkeypatch):
+    seen = {}
+
+    def fake_ask(q, model=""):
+        seen.update({"q": q, "model": model})
+        return {"answer": "Found <it> [id:abc123].", "citations": ["abc123"],
+                "usage": {"model": "haiku", "turns": 3, "in": 100, "out": 42}}
+
+    monkeypatch.setattr(app.ask, "ask", fake_ask)
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("search must not run in ask mode")))
+    _, _, body = _get("/s3cr3t/search", "q=why&mode=ask&model=haiku")
+    assert seen == {"q": "why", "model": "haiku"}
+    assert "Found &lt;it&gt;" in body                     # escaped
+    assert 'href="search?expand=abc123&amp;q=why&amp;model=haiku">[1]</a>' \
+        in body                                           # citation link
+    assert "haiku · 3 turns · 100+42 tokens" in body
+
+
+def test_ask_json_mode(monkeypatch):
+    payload = {"answer": "A.", "citations": [], "usage": {"turns": 1}}
+    monkeypatch.setattr(app.ask, "ask", lambda q, model="": payload)
+    status, headers, body = _get("/s3cr3t/search", "q=x&mode=ask&json=1")
+    assert status == 200
+    assert headers["content-type"] == "application/json"
+    assert json.loads(body) == payload
+
+
+def test_ask_error_renders_as_note(monkeypatch):
+    monkeypatch.setattr(app.ask, "ask",
+                        lambda q, model="": {"error": "ask mode isn't "
+                                             "configured — add presets"})
+    _, _, body = _get("/s3cr3t/search", "q=x&mode=ask")
+    assert 'class="note"' in body and "isn&#x27;t configured" in body

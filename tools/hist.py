@@ -9,6 +9,7 @@ Stdlib only: copy this one file to any machine holding the secret URL.
     hist window --since 2026-07-01 --group-by day
     hist expand 042e2d9b21022acd --context 10
     hist stats --locations
+    hist ask "when did I set up the lambda replica?" --model haiku
 
 Endpoint resolution: $HISTORY_RAG_URL, else the URL field of the
 'history-rag remote' LastPass entry (name overridable via
@@ -18,9 +19,11 @@ handle it carefully.
 
 Suggested: alias hist='python3 <repo>/tools/hist.py'
 """
-import argparse, json, os, subprocess, sys, urllib.error, urllib.request
+import argparse, json, os, subprocess, sys
+import urllib.error, urllib.parse, urllib.request
 
 TIMEOUT = 60        # first request after idle pays the cold start (~2-5s)
+ASK_TIMEOUT = 120   # the agent loop runs multiple model calls
 
 
 def resolve_url() -> str:
@@ -43,17 +46,12 @@ def resolve_url() -> str:
     return url
 
 
-def call_tool(url: str, tool: str, arguments: dict) -> str:
-    """POST one tools/call, return the tool's raw JSON string."""
-    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-               "params": {"name": tool, "arguments": arguments}}
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json",
-                 "Accept": "application/json, text/event-stream"})
+def _fetch(req, timeout: int) -> str:
+    """One request with the transport-error mapping (no URLs in output —
+    the URL is a credential)."""
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            envelope = json.load(resp)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode()
     except urllib.error.HTTPError as e:
         if e.code == 404:
             sys.exit("endpoint returned 404 — the secret path is wrong or "
@@ -65,10 +63,31 @@ def call_tool(url: str, tool: str, arguments: dict) -> str:
     except urllib.error.URLError as e:
         sys.exit(f"could not reach the endpoint ({e.reason}) — network, "
                  "DNS, or a mistyped host")
+
+def call_tool(url: str, tool: str, arguments: dict) -> str:
+    """POST one tools/call, return the tool's raw JSON string."""
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+               "params": {"name": tool, "arguments": arguments}}
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json",
+                 "Accept": "application/json, text/event-stream"})
+    envelope = json.loads(_fetch(req, TIMEOUT))
     if "error" in envelope:
         err = envelope["error"]
         sys.exit(f"MCP error: {err.get('message', err)}")
     return envelope["result"]["content"][0]["text"]
+
+def ask_request(url: str, question: str, model: str) -> str:
+    """GET the page's ask handler in JSON mode — same base URL, /search
+    instead of /mcp (wip/SPEC-ask-mode.md)."""
+    base = url[:-len("/mcp")] if url.endswith("/mcp") else url
+    params = {"q": question, "mode": "ask", "json": "1"}
+    if model:
+        params["model"] = model
+    req = urllib.request.Request(
+        base + "/search?" + urllib.parse.urlencode(params))
+    return _fetch(req, ASK_TIMEOUT)
 
 
 def build_call(args) -> tuple[str, dict]:
@@ -166,8 +185,19 @@ def human_stats(data):
             print(f"          {n:7}  {loc}")
 
 
+def human_ask(data):
+    print(data.get("answer") or "")
+    if data.get("note"):
+        print(f"({data['note']})")
+    if data.get("citations"):
+        print("\ncitations: " + ", ".join(data["citations"]))
+    u = data.get("usage") or {}
+    print(f"[{u.get('model', '')} · {u.get('turns', 0)} turns · "
+          f"{u.get('in', 0)}+{u.get('out', 0)} tokens]")
+
+
 HUMANS = {"search": human_search, "window": human_window,
-          "expand": human_expand, "stats": human_stats}
+          "expand": human_expand, "stats": human_stats, "ask": human_ask}
 
 
 def parse_args(argv=None):
@@ -203,7 +233,12 @@ def parse_args(argv=None):
     t = sub.add_parser("stats", help="what the index covers, and run health")
     t.add_argument("--locations", action="store_true")
 
-    for cmd in (s, w, e, t):
+    a = sub.add_parser("ask", help="ask a model a question over the history")
+    a.add_argument("question")
+    a.add_argument("--model", default="",
+                   help="preset name from [ask.models] (default: first)")
+
+    for cmd in (s, w, e, t, a):
         cmd.add_argument("--json", action="store_true",
                          help="emit the tool's raw JSON for piping")
     return p.parse_args(argv)
@@ -211,8 +246,11 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    tool, arguments = build_call(args)
-    raw = call_tool(resolve_url(), tool, arguments)
+    if args.cmd == "ask":
+        raw = ask_request(resolve_url(), args.question, args.model)
+    else:
+        tool, arguments = build_call(args)
+        raw = call_tool(resolve_url(), tool, arguments)
     data = json.loads(raw)
     if isinstance(data, dict) and "error" in data:
         print(data["error"], file=sys.stderr)

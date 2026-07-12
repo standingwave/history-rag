@@ -150,3 +150,40 @@ def test_human_vs_json_rendering(transport, capsys):
 
     hist.main(["search", "q", "--json"])
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_ask_rides_the_search_endpoint(monkeypatch, capsys):
+    seen = {}
+    payload = {"answer": "It was Tuesday.", "citations": ["abc"],
+               "usage": {"model": "m1", "turns": 2, "in": 5, "out": 7}}
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"], seen["timeout"] = req.full_url, timeout
+        return _FakeResponse(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("HISTORY_RAG_URL", URL)
+    hist.main(["ask", "what did I do tuesday", "--model", "m1"])
+    assert seen["url"].startswith("https://host.example/s3cr3t/search?")
+    for part in ("mode=ask", "json=1", "model=m1",
+                 "q=what+did+I+do+tuesday"):
+        assert part in seen["url"]
+    assert seen["timeout"] == 120
+    out = capsys.readouterr().out
+    assert "It was Tuesday." in out
+    assert "citations: abc" in out
+    assert "[m1 · 2 turns · 5+7 tokens]" in out
+
+    hist.main(["ask", "q", "--json"])
+    assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_ask_error_payload_exits_1(monkeypatch, capsys):
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, timeout=None: _FakeResponse(
+                            {"error": "unknown model preset 'x'"}))
+    monkeypatch.setenv("HISTORY_RAG_URL", URL)
+    with pytest.raises(SystemExit) as e:
+        hist.main(["ask", "q", "--model", "x"])
+    assert e.value.code == 1
+    assert "unknown model preset" in capsys.readouterr().err

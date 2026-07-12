@@ -52,6 +52,7 @@ def _refresh_db():
     _state["checked"] = time.monotonic()
 
 import server  # noqa: E402  — import after the env vars above are set
+import ask     # noqa: E402  — the ask-mode agent loop (same env rule)
 
 # Stateless + JSON responses: each invocation is self-contained (no session
 # affinity to pin, no SSE stream to hold open), which is exactly the shape a
@@ -222,15 +223,20 @@ def _badge(source: str) -> str:
 # chunk text still cannot execute. All HTML the scripts insert is
 # server-rendered (fetched fragments) — JS never builds markup from data.
 
-# Submit feedback: disable the button + show progress, re-enable on
-# bfcache back-navigation.
+# Submit feedback: disable both submit buttons, label the one that was
+# clicked, re-enable on bfcache back-navigation.
 _SCRIPT_SUBMIT = (
     "(function(){var f=document.querySelector('form');if(!f)return;"
-    "var b=f.querySelector('button');"
-    "f.addEventListener('submit',function(){b.disabled=true;"
-    "b.textContent='Searching\\u2026'});"
-    "window.addEventListener('pageshow',function(){b.disabled=false;"
-    "b.textContent='Search'})})();")
+    "var bs=f.querySelectorAll('button:not(.qp)');"
+    "function reset(){for(var i=0;i<bs.length;i++){bs[i].disabled=false;"
+    "bs[i].textContent=bs[i].getAttribute('value')==='ask'?'Ask':'Search'}}"
+    "f.addEventListener('submit',function(e){"
+    "var b=(e&&e.submitter&&e.submitter.getAttribute('value')==='ask')"
+    "?e.submitter:bs[0];"
+    "for(var i=0;i<bs.length;i++)bs[i].disabled=true;"
+    "b.textContent=b.getAttribute('value')==='ask'"
+    "?'Asking\\u2026':'Searching\\u2026'});"
+    "window.addEventListener('pageshow',reset)})();")
 
 # Live form (chips auto-submit, date quick-picks) + inline expand
 # (fragment fetch; failures fall through to plain navigation).
@@ -414,14 +420,26 @@ def _form(g, stats: dict) -> str:
                   f'data-days="{d}">{t}</button>'
                   for d, t in (("0", "Today"), ("6", "7d"), ("29", "30d"),
                                ("", "All time")))
+    ps = ask.presets()
+    picker = ""
+    if len(ps) >= 2:                    # a non-choice gets no UI
+        sel = g("model") or ps[0]["name"]
+        mchips = []
+        for p in ps:
+            chk = " checked" if p["name"] == sel else ""
+            mchips.append('<label class="chip"><input type="radio" '
+                          f'name="model" value="{_esc(p["name"])}"{chk}>'
+                          f'<span>{_esc(p["name"])}</span></label>')
+        picker = f'<div class="chips">{"".join(mchips)}</div>'
+    ask_btn = ('<button name="mode" value="ask">Ask</button>' if ps else "")
     return (
         '<form method="get">'
         '<div class="row">'
         f'<input type="search" name="q" value="{_esc(g("q"))}" '
         'placeholder="search history" autofocus>'
-        "<button>Search</button></div>"
+        f"<button>Search</button>{ask_btn}</div>"
         f'<div class="chips">{"".join(chips)}</div>'
-        f'<div class="chips">{qps}</div>'
+        f'<div class="chips">{qps}</div>{picker}'
         f'<details{" open" if active else ""}><summary>filters</summary>'
         '<div class="filters">'
         f'<label>since <input type="date" name="since" value="{_esc(since)}">'
@@ -449,7 +467,7 @@ def _back_qs(g) -> str:
     """The originating search, as a query string — carried on expand links
     so the expand page's back link restores the search, not the homepage."""
     keep = {n: g(n) for n in ("q", "source", "location", "since", "until",
-                              "undated", "k", "offset") if g(n)}
+                              "undated", "k", "offset", "model") if g(n)}
     return urlencode(keep)
 
 # ── card renderers: chunk text is the embedded prose; render the meta's
@@ -856,6 +874,40 @@ def _render_expand(cid: str, n: int = 5, bq: str = "") -> str:
     back = f'<p><a href="{_esc(back_href)}">&larr; search</a></p>'
     return _page(back + _expand_articles(cid, n, bq))
 
+def _render_answer(result: dict, g, chrome: str, tail: str) -> str:
+    """The ask answer card: escaped text with [id:…] citations turned
+    into numbered expand links, usage line beneath. Back params skip
+    `mode` deliberately — returning from a citation lands on the cheap
+    search view, never a paid re-ask."""
+    if "error" in result:
+        return _page(chrome + f'<p class="note">{_icon("warn")}<span>'
+                     f'{_esc(result["error"])}</span></p>', tail)
+    bq = _back_qs(g)
+    n = 0
+
+    def link(m):
+        nonlocal n
+        n += 1
+        href = f"search?expand={m.group(1)}" + (f"&{bq}" if bq else "")
+        return f'<a class="expand" href="{_esc(href)}">[{n}]</a>'
+
+    text = ask.CITE_RE.sub(link, _esc(result.get("answer") or ""))
+    u = result.get("usage") or {}
+    usage = (f"{u.get('model', '')} · {u.get('turns', 0)} turns · "
+             f"{u.get('in', 0)}+{u.get('out', 0)} tokens")
+    note = (f'<p class="health">{_esc(result["note"])}</p>'
+            if result.get("note") else "")
+    return _page(chrome + f'<article class="answer"><pre>{text}</pre>'
+                 f'</article>{note}<p class="health">{_esc(usage)}</p>', tail)
+
+async def _send_json(send, obj: dict):
+    data = json.dumps(obj).encode()
+    await send({"type": "http.response.start", "status": 200, "headers": [
+        (b"content-type", b"application/json"),
+        (b"content-length", str(len(data)).encode()),
+        (b"x-content-type-options", b"nosniff")]})
+    await send({"type": "http.response.body", "body": data})
+
 async def _send_html(send, body: str):
     data = body.encode()
     await send({"type": "http.response.start", "status": 200, "headers": [
@@ -882,7 +934,13 @@ async def _search_page(scope, send):
         stats = _stats()
         chrome = _banner(stats) + _form(g, stats)
         tail = _stats_panel(stats)
-        if g("q"):
+        if g("q") and g("mode") == "ask":
+            result = ask.ask(g("q"), g("model"))
+            if g("json"):
+                await _send_json(send, result)
+                return
+            body = _render_answer(result, g, chrome, tail)
+        elif g("q"):
             body = _render_results(g, chrome, tail)
         elif g("since") or g("until"):
             body = _render_window(g, chrome, tail)

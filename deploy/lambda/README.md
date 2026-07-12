@@ -126,6 +126,26 @@ Two thin clients ride the same endpoint (design: `wip/SPEC-direct-access.md`):
   query string, so they land in the phone browser's history — acceptable
   for a personal tool, noted in the page footer.
 
+## Ask mode
+
+The `/search` page's Ask button runs a model over the four tools
+in-process and renders a cited answer (`wip/SPEC-ask-mode.md`); `hist ask`
+rides the same handler with `json=1`. Configure named presets as JSON in
+the function env (there's no TOML on Lambda), plus each preset's key:
+
+```sh
+python3 set-env.py CLAUDE_RAG_ASK_MODELS - <<'EOF'
+[{"name": "haiku", "backend": "anthropic",
+  "model": "claude-haiku-4-5", "key_env": "ANTHROPIC_API_KEY"}]
+EOF
+pbpaste | python3 set-env.py ANTHROPIC_API_KEY -
+```
+
+The picker offers only presets whose `key_env` is set; the client selects
+by name — endpoints and models never come from the request. Bump the
+function timeout for the agent loop:
+`aws lambda update-function-configuration --function-name history-rag --timeout 120`.
+
 ## Deploys
 
 Pushes to main touching the shipped files (`app.py`, `requirements.txt`,

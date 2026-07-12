@@ -8,7 +8,7 @@ python3 -m pip install --quiet --target build --no-compile \
   --platform manylinux2014_x86_64 --implementation cp \
   --python-version 3.12 --only-binary=:all: \
   -r requirements.txt
-cp app.py ../../server.py ../../config.py build/
+cp app.py ../../server.py ../../config.py ../../ask.py build/
 # server.py's expanders import sources/* lazily — the import must resolve
 # even though live context falls back to index reconstruction here.
 # appusage/ stays out: its expander guards its own import.

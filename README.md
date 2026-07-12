@@ -112,6 +112,15 @@ apps = ["apple"]          # enables the calendar source; exclude_calendars = [..
 [refresh]
 prune = ["calendar"]      # sources pruned on each scheduled refresh
 
+[ask]                     # /search "Ask" mode: named model presets; keys
+max_turns = 8             # env-only via each preset's key_env. See
+                          # deploy/lambda/README.md "Ask mode".
+# [[ask.models]]
+# name = "haiku"
+# backend = "anthropic"           # or "openai-compatible" (+ base_url)
+# model = "claude-haiku-4-5"
+# key_env = "ANTHROPIC_API_KEY"
+
 [health]
 notify = true             # macOS notification when indexing stalls (default true)
 ```

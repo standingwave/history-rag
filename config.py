@@ -29,6 +29,7 @@ _KNOWN = {
     "sync": {"bucket", "key", "region"},
     "health": {"notify"},
     "refresh": {"prune"},
+    "ask": {"models", "max_turns"},
 }
 
 _FILE: dict = {}
