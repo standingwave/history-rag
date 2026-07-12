@@ -186,3 +186,20 @@ def test_stats_reports_db_size(seeded):
     db = json.loads(server.history_stats())["db"]
     assert db["bytes"] > 0
     assert 0 <= db["freelist_bytes"] < db["bytes"]
+
+def test_expand_survives_a_broken_context_handler(scratch_db, fake_embed,
+                                                  monkeypatch):
+    """Context is garnish: a raising expander (missing module on the
+    replica, broken store, absent binary) degrades to a note — the chunk
+    itself must always come back."""
+    import server
+    seed(monkeypatch, {"claude": [("a1", "the text", rec("claude"))]})
+
+    def boom(db, chunk, n):
+        raise ModuleNotFoundError("No module named 'sources'")
+
+    monkeypatch.setitem(server._EXPANDERS, "claude", boom)
+    out = json.loads(server.expand("a1"))
+    assert out["chunk"]["text"] == "the text"
+    assert "context unavailable" in out["context"]["note"]
+    assert out["context_source"] is None

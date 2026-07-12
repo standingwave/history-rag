@@ -172,7 +172,8 @@ def _expand_git(db, chunk, n):
                 return {"show": out.stdout[:4000]}, "live"
             return {"note": "git show failed: "
                     + out.stderr.strip()[:200]}, "index"
-        except subprocess.SubprocessError as e:
+        except (OSError, subprocess.SubprocessError) as e:
+            # OSError covers a missing git binary (FileNotFoundError)
             return {"note": f"git show failed: {e}"}, "index"
     return {"note": "repo or commit no longer available"}, "index"
 
@@ -633,7 +634,13 @@ def expand(id: str, context: int = 5) -> str:
              "text": text, "meta": json.loads(meta_json) if meta_json else {}}
     n = max(0, min(int(context), 25))
     handler = _EXPANDERS.get(source)
-    ctx, ctx_src = handler(db, chunk, n) if handler else (None, None)
+    try:
+        ctx, ctx_src = handler(db, chunk, n) if handler else (None, None)
+    except Exception as e:
+        # Context is best-effort garnish; the chunk itself must always come
+        # back (a replica without the backing stores, a broken store, a
+        # missing binary — none of these may fail the read).
+        ctx, ctx_src = {"note": f"context unavailable: {e}"}, None
     return json.dumps({"chunk": chunk, "context": ctx,
                        "context_source": ctx_src})
 
