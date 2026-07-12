@@ -27,6 +27,12 @@ def shape_line(shape) -> str:
             f"{app} {store.fmt_duration(secs)}" for app, _, _, secs in shape["focus"]))
     return " · ".join(parts)
 
+def category_line(rollup) -> str:
+    """One-line category rollup, seconds desc: 'developer-tools 1h 30m ·
+    video 12m · other 2h'."""
+    return " · ".join(f"{cat} {store.fmt_duration(secs)}" for cat, secs in
+                      sorted(rollup.items(), key=lambda kv: -kv[1]))
+
 def main():
     days = int(sys.argv[1]) if len(sys.argv) > 1 else 7
     if not os.path.exists(store.APPUSAGE_DB):
@@ -34,7 +40,10 @@ def main():
         return
     db = store.connect()
     store.setup(db)
-    daily = store.daily_durations(db)
+    daily = store.daily_apps(db)
+    cats = store.categories(db, {info["bundle_id"]
+                                 for apps in daily.values()
+                                 for info in apps.values()})
     today = datetime.date.today()
 
     for i in range(days + 1):
@@ -43,13 +52,16 @@ def main():
         if not apps:
             continue
         label = "today" if i == 0 else day
-        total = sum(apps.values())
+        total = sum(info["seconds"] for info in apps.values())
         print(f"\n{label}  ({store.fmt_duration(total)} tracked)")
         shape = store.day_shape(db, day)
         if shape:
             print(f"  {shape_line(shape)}")
-        for app, secs in sorted(apps.items(), key=lambda kv: -kv[1]):
-            print(f"  {store.fmt_duration(secs):>8}  {app}")
+        rollup = store.category_rollup(apps, cats)
+        if rollup:
+            print(f"  {category_line(rollup)}")
+        for app, info in sorted(apps.items(), key=lambda kv: -kv[1]["seconds"]):
+            print(f"  {store.fmt_duration(info['seconds']):>8}  {app}")
 
 if __name__ == "__main__":
     main()

@@ -1,10 +1,17 @@
 """Mic capture (probe, mic_segments ticks, idle-veto ordering) and the
 derived calls timeline. Local times assume the America/Los_Angeles pin."""
 import datetime, sqlite3
+import pytest
 from appusage import store, daemon, mic, report
 from sources import appusage as appusage_src
 
 B = datetime.datetime(2025, 1, 6, 10, 0).timestamp()   # Mon 10:00 local
+
+@pytest.fixture(autouse=True)
+def _no_category_resolution(monkeypatch):
+    """Keep iter_chunks off the real mdfind: resolution is machine-dependent
+    and covered by test_app_category.py."""
+    monkeypatch.setattr(store, "_resolve_category", lambda bundle_id: None)
 
 def seg(db, app, start, end, bundle=None):
     db.execute("INSERT INTO segments(app, bundle_id, start_ts, end_ts, closed) "

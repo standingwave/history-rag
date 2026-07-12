@@ -26,7 +26,7 @@ def _chunk(day: str, key: str, text: str, meta: dict):
     return cid, text, {"source": "appusage", "timestamp": _day_utc(day),
                        "location": "appusage", "meta": meta}
 
-def _dayshape_chunk(store, db, day: str, weekday: str):
+def _dayshape_chunk(store, db, day: str, weekday: str, rollup=None):
     shape = store.day_shape(db, day)
     if not shape or shape["active_seconds"] < MIN_DAY_SECONDS:
         return None
@@ -49,6 +49,10 @@ def _dayshape_chunk(store, db, day: str, weekday: str):
         parts.append("Focus sessions: " + ", ".join(
             f"{dur(secs)} in {app} ({clock(s)}–{clock(e)})"
             for app, s, e, secs in shape["focus"]) + ".")
+    if rollup:
+        parts.append("Time by category: " + ", ".join(
+            f"{cat} {dur(secs)}" for cat, secs in
+            sorted(rollup.items(), key=lambda kv: -kv[1])) + ".")
     meta = {"date": day, "first": clock(shape["first"]), "last": clock(shape["last"]),
             "switches": shape["switches"],
             "active_seconds": int(shape["active_seconds"]),
@@ -67,7 +71,11 @@ def iter_chunks():
     db = store.connect()
     store.setup(db)
 
-    for day, apps in store.daily_apps(db).items():
+    daily = store.daily_apps(db)
+    cats = store.categories(db, {info["bundle_id"]
+                                 for apps in daily.values()
+                                 for info in apps.values()})
+    for day, apps in daily.items():
         weekday = datetime.date.fromisoformat(day).strftime("%A")
         for app, info in apps.items():
             if info["seconds"] < MIN_SECONDS:
@@ -75,9 +83,12 @@ def iter_chunks():
             meta = {"app": app, "date": day, "seconds": int(info["seconds"])}
             if info["bundle_id"]:
                 meta["bundle_id"] = info["bundle_id"]
+                if cats.get(info["bundle_id"]):
+                    meta["category"] = cats[info["bundle_id"]]
             yield _chunk(day, f"{day}:{app}",
                          f"On {day} ({weekday}), spent "
                          f"{store.fmt_duration(info['seconds'])} in {app}.", meta)
-        shaped = _dayshape_chunk(store, db, day, weekday)
+        shaped = _dayshape_chunk(store, db, day, weekday,
+                                 store.category_rollup(apps, cats))
         if shaped:
             yield shaped

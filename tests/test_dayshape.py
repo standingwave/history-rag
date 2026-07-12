@@ -2,10 +2,17 @@
 bundle-ID capture/migration/coalescing, and the day-shape chunk + report line.
 Local times assume the America/Los_Angeles pin in conftest."""
 import datetime, sqlite3
+import pytest
 from appusage import store, daemon, report
 from sources import appusage as appusage_src
 
 B = datetime.datetime(2025, 1, 6, 8, 42).timestamp()   # Mon 08:42 local
+
+@pytest.fixture(autouse=True)
+def _no_category_resolution(monkeypatch):
+    """Keep iter_chunks off the real mdfind: resolution is machine-dependent
+    and covered by test_app_category.py."""
+    monkeypatch.setattr(store, "_resolve_category", lambda bundle_id: None)
 
 def _db():
     db = sqlite3.connect(":memory:")

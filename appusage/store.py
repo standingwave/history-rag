@@ -10,6 +10,10 @@ don't provide; rows written before bundle capture existed have NULL.
 import sqlite3
 import datetime
 import collections
+import os
+import plistlib
+import subprocess
+import time
 
 # Repo root is on sys.path when run via index.py; the daemon/report scripts add
 # it themselves before importing this module.
@@ -26,6 +30,8 @@ MEETING_APPS = {         # bundle ids whose overlap labels a call
     "com.apple.FaceTime", "com.tinyspeck.slackmacgap", "com.hnc.Discord",
     "Cisco-Systems.Spark",
 }
+CATEGORY_RECHECK = 7 * 86400  # cached categories re-resolve after this (s):
+                              # apps gain categories on update, deleted apps age out
 
 def connect():
     db = sqlite3.connect(APPUSAGE_DB, timeout=30)
@@ -45,6 +51,10 @@ def setup(db):
         start_ts REAL NOT NULL,
         end_ts REAL NOT NULL,
         closed INTEGER NOT NULL DEFAULT 0)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS app_meta(
+        bundle_id TEXT PRIMARY KEY,
+        category TEXT,            -- NULL = looked, none declared (or app gone)
+        checked_ts REAL NOT NULL)""")
     cols = {row[1] for row in db.execute("PRAGMA table_info(segments)")}
     if "bundle_id" not in cols:
         _add_bundle_column(db)
@@ -59,6 +69,58 @@ def _add_bundle_column(db):
     except sqlite3.OperationalError as e:
         if "duplicate column name" not in str(e):
             raise
+
+def _resolve_category(bundle_id: str):
+    """The app's own LSApplicationCategoryType, located via Spotlight, with
+    the public.app-category. prefix stripped. The key is optional outside
+    the App Store, so None is a first-class answer — and any failure
+    (Spotlight off, app gone, unreadable plist) degrades to None, never
+    an error."""
+    try:
+        r = subprocess.run(
+            ["mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+            capture_output=True, text=True, timeout=10)
+        hits = r.stdout.splitlines() if r.returncode == 0 else []
+        if not hits or not hits[0].strip():
+            return None
+        with open(os.path.join(hits[0].strip(), "Contents", "Info.plist"),
+                  "rb") as f:
+            cat = plistlib.load(f).get("LSApplicationCategoryType") or ""
+        return cat.removeprefix("public.app-category.") or None
+    except Exception:
+        return None
+
+def categories(db, bundle_ids) -> dict:
+    """{bundle_id: category|None} through the app_meta cache; misses and
+    entries older than CATEGORY_RECHECK resolve via Spotlight."""
+    now = time.time()
+    cache = {b: (cat, ts) for b, cat, ts in db.execute(
+        "SELECT bundle_id, category, checked_ts FROM app_meta")}
+    out, dirty = {}, False
+    for b in {b for b in bundle_ids if b}:
+        hit = cache.get(b)
+        if hit and now - hit[1] < CATEGORY_RECHECK:
+            out[b] = hit[0]
+            continue
+        out[b] = _resolve_category(b)
+        db.execute("INSERT OR REPLACE INTO app_meta VALUES (?,?,?)",
+                   (b, out[b], now))
+        dirty = True
+    if dirty:
+        db.commit()
+    return out
+
+def category_rollup(apps: dict, cats: dict):
+    """{category|'other': seconds} for one day's daily_apps entry, or None
+    when nothing resolves. Uncategorized and unbundled time lands in
+    'other', never dropped — omitting the biggest app would misrepresent
+    the day."""
+    by, resolved = {}, False
+    for info in apps.values():
+        cat = cats.get(info["bundle_id"]) if info["bundle_id"] else None
+        resolved = resolved or cat is not None
+        by[cat or "other"] = by.get(cat or "other", 0.0) + info["seconds"]
+    return by if resolved else None
 
 def same_app(name_a, bundle_a, name_b, bundle_b):
     """Whether two samples/segments are the same app: bundle IDs when both
