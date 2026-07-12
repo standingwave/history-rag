@@ -138,7 +138,8 @@ def test_bounds_without_q_call_list_window(monkeypatch):
     monkeypatch.setattr(app.server, "list_window", fake_window)
     monkeypatch.setattr(app.server, "search_history", no_search)
     _, _, body = _get("/s3cr3t/search", "since=2026-07-01&until=2026-07-02")
-    assert seen == {"since": "2026-07-01", "until": "2026-07-02"}
+    assert seen == {"since": "2026-07-01", "until": "2026-07-02",
+                    "include_meta": True}
     assert 'href="search?expand=w1&amp;since=2026-07-01' in body
     assert "1–50 of 120" in body
     assert "offset=50" in body and "since=2026-07-01" in body  # older link
@@ -570,3 +571,33 @@ def test_noctx_marker_on_the_right_sources(monkeypatch):
     _, _, body = _get("/s3cr3t/search", "q=x")
     assert 'class="expand" data-noctx href="search?expand=a' in body
     assert 'class="expand" href="search?expand=b' in body   # claude: none
+
+
+def test_window_mode_renders_structured_cards(monkeypatch):
+    """The regression behind the screenshot: list_window used to strip
+    meta, starving the card renderers into the prose fallback."""
+    meta = {"date": "2026-07-12", "first": "00:52", "last": "13:46",
+            "switches": 3, "active_seconds": 15240,
+            "breaks": [{"start": "01:26", "minutes": 191}],
+            "focus": [{"app": "Helium", "start": "11:45", "minutes": 37}]}
+    monkeypatch.setattr(app.server, "list_window",
+                        lambda **kw: json.dumps(
+                            {"count": 1, "total": 1, "window": {},
+                             "results": [{"id": "d1", "source": "appusage",
+                                          "location": "appusage",
+                                          "timestamp": "2026-07-12T07:00:00+00:00",
+                                          "text": "On 2026-07-12 (Sunday)…",
+                                          "meta": meta}]}))
+    _, _, body = _get("/s3cr3t/search", "since=2026-07-12&until=2026-07-12")
+    assert "active 00:52–13:46" in body and "focus: 37m Helium" in body
+    assert "On 2026-07-12 (Sunday)…" not in body
+
+
+def test_expanded_chunk_uses_card_renderer(monkeypatch):
+    payload = json.dumps(
+        {"chunk": {"id": "x1", "source": "shell", "timestamp": "",
+                   "location": "", "text": "make deploy", "meta": {}},
+         "context": None, "context_source": None})
+    monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
+    _, _, body = _get("/s3cr3t/search", "expand=x1")
+    assert '<pre class="mono">make deploy</pre>' in body   # unclamped mono

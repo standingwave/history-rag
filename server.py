@@ -550,7 +550,8 @@ def _group_value(dim, src, ts, loc, meta_json):
 @mcp.tool()
 def list_window(since: str = "", until: str = "", source: str = "",
                 location: str = "", limit: int = 50, offset: int = 0,
-                include_undated: bool = False, group_by: str = "") -> str:
+                include_undated: bool = False, group_by: str = "",
+                include_meta: bool = False) -> str:
     """Exhaustive chronological listing (newest first) of everything in a time
     window — no semantic ranking, no sampling. The right tool for "everything
     from <day/week>"; use search_history when relevance matters more than
@@ -558,7 +559,8 @@ def list_window(since: str = "", until: str = "", source: str = "",
     the user's local day); at least one bound is required. Results are compact
     pointers {id, source, timestamp, location, text (truncated)} — pass an id
     to expand() to read one in full. `total` is the full match count; page
-    with offset (limit caps at 200).
+    with offset (limit caps at 200). include_meta=true adds each chunk's
+    meta to the pointers (heavier; default off).
 
     group_by: comma-separated dimensions from day | source | location |
     domain — returns aggregate `groups` (sorted by count desc, each with
@@ -618,11 +620,16 @@ def list_window(since: str = "", until: str = "", source: str = "",
         return json.dumps(out)
 
     rows = db.execute(
-        f"""SELECT id, source, timestamp, location, text FROM chunks
+        f"""SELECT id, source, timestamp, location, text, meta FROM chunks
             WHERE {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?""",
         (*params, limit, offset)).fetchall()
-    results = [{"id": i, "source": src, "timestamp": ts, "location": loc,
-                "text": text[:160]} for i, src, ts, loc, text in rows]
+    results = []
+    for i, src, ts, loc, text, meta_json in rows:
+        item = {"id": i, "source": src, "timestamp": ts, "location": loc,
+                "text": text[:160] + ("…" if len(text) > 160 else "")}
+        if include_meta and meta_json and meta_json != "{}":
+            item["meta"] = json.loads(meta_json)
+        results.append(item)
     return json.dumps({"count": len(results), "total": total,
                        "window": window, "results": results})
 

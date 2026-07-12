@@ -81,6 +81,10 @@ aws logs put-retention-policy --log-group-name /aws/lambda/history-rag \
 The MCP endpoint is `https://<function-url-host>/$SECRET/mcp` — treat the
 whole URL as a credential.
 
+Also set `TZ` (e.g. `America/Los_Angeles`) in the function env: the
+`/search` page renders times in the function's local zone, and bare-date
+window bounds are interpreted as local days — without it, both mean UTC.
+
 ## Smoke test
 
 ```sh

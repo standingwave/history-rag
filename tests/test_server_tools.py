@@ -79,7 +79,7 @@ def test_list_window_paging_and_truncation(seeded, monkeypatch):
         ("big", "x" * 500, rec("browser", ts=f"{D}18:00:00+00:00", loc="safari"))]})
     r = json.loads(server.list_window(since="2026-07-02", source="browser"))
     big = [x for x in r["results"] if x["id"] == "big"][0]
-    assert len(big["text"]) == 160
+    assert len(big["text"]) == 161 and big["text"].endswith("…")
 
 def test_expand_claude_index_fallback(seeded):
     import server
@@ -241,3 +241,23 @@ def test_claude_truncation_marker_only_when_cut(scratch_db, fake_embed,
     assert not by_len["short"].endswith("[truncated]")  # no marker
     assert by_len["long"].endswith("… [truncated]")
     assert len(by_len["long"]) == 2000 + len("… [truncated]")
+
+def test_list_window_meta_optin_and_ellipsis(scratch_db, fake_embed,
+                                             monkeypatch):
+    import server
+    seed(monkeypatch, {"shell": [
+        ("s1", "x" * 200, rec("shell", ts=f"{D}10:00:00+00:00",
+                              meta={"count": 3})),
+        ("s2", "short", rec("shell", ts=f"{D}11:00:00+00:00"))]})
+    out = json.loads(server.list_window(since="2026-07-02",
+                                        until="2026-07-02"))
+    assert all("meta" not in r for r in out["results"])   # default: compact
+    long = next(r for r in out["results"] if len(r["text"]) > 100)
+    assert long["text"].endswith("…") and len(long["text"]) == 161
+
+    out = json.loads(server.list_window(since="2026-07-02",
+                                        until="2026-07-02",
+                                        include_meta=True))
+    by_id = {r["id"]: r for r in out["results"]}
+    assert by_id["s1"]["meta"] == {"count": 3}
+    assert "meta" not in by_id["s2"]                      # empty meta omitted

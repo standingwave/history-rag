@@ -456,24 +456,27 @@ def _back_qs(g) -> str:
 # structure where it's richer. Fallback (None or an error) is the plain
 # clamped <pre>, so unformatted sources lose nothing.
 
-def _card_shell(r):
-    return f'<pre class="clamp mono">{_esc(r["text"])}</pre>'
+def _card_shell(r, clamp=True):
+    cls = "clamp mono" if clamp else "mono"
+    return f'<pre class="{cls}">{_esc(r["text"])}</pre>'
 
-def _card_git(r):
+def _card_git(r, clamp=True):
     subject, _, body = r["text"].partition("\n")
     out = f"<b>{_esc(subject)}</b>"
     if body.strip():
         out += f"\n{_esc(body.strip())}"
-    return f'<pre class="clamp">{out}</pre>'
+    cls = ' class="clamp"' if clamp else ""
+    return f"<pre{cls}>{out}</pre>"
 
-def _card_calendar(r):
-    out = f'<pre class="clamp">{_esc(r["text"])}</pre>'
+def _card_calendar(r, clamp=True):
+    cls = ' class="clamp"' if clamp else ""
+    out = f"<pre{cls}>{_esc(r['text'])}</pre>"
     att = (r.get("meta") or {}).get("attendees") or []
     if att:
         out += f'<p class="health">with {_esc(", ".join(att[:8]))}</p>'
     return out
 
-def _card_appusage(r):
+def _card_appusage(r, clamp=True):
     m = r.get("meta") or {}
     if "first" not in m:
         return None                     # per-app chunk: plain text card
@@ -553,6 +556,7 @@ def _render_results(g, chrome: str, tail: str = "") -> str:
 def _render_window(g, chrome: str, tail: str = "") -> str:
     offset = _int(g("offset"), 0, 0, 10**9)
     args = _filter_args(g)
+    args["include_meta"] = True    # the card renderers feed on meta
     if offset:
         args["offset"] = offset
     data = json.loads(server.list_window(**args))
@@ -822,9 +826,18 @@ def _expand_articles(cid: str, n: int = 5, bq: str = "") -> str:
         head += f"<span>{_esc(ts)}</span>"
     if c.get("location"):
         head += f"<span>{_esc(c['location'])}</span>"
+    body = None
+    renderer = _CARD_RENDERERS.get(c["source"])
+    if renderer:
+        try:
+            body = renderer(c, clamp=False)
+        except Exception:
+            body = None
+    if body is None:
+        body = f"<pre>{_esc(c['text'])}</pre>"
     parts = [f"<article><header>{head}</header>"
-             f"{_meta_line(c['source'], c.get('meta') or {})}"
-             f"<pre>{_esc(c['text'])}</pre></article>"]
+             f"{_meta_line(c['source'], c.get('meta') or {})}{body}"
+             "</article>"]
     if data.get("context") is not None:
         label = "context"
         if data.get("context_source"):
