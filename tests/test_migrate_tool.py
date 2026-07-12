@@ -1,18 +1,14 @@
 """migrate-model tool: archive-only chunks survive (the pinned TESTING.md
 case), eval vectors are reused only on (id, text) match, and the stamp
 refusal fires until config catches up."""
-import importlib.util, json, pathlib, sqlite3
+import json, sqlite3
 import pytest
 import sqlite_vec
 import config
-from tests.test_driver import mk_source, rec, run_index, open_db
+from tests.helpers import load_script, mk_source, rec, run_index, open_db
 
 def _load():
-    p = pathlib.Path(__file__).resolve().parent.parent / "tools" / "migrate-model.py"
-    spec = importlib.util.spec_from_file_location("migrate_model", p)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("tools/migrate-model.py")
 
 @pytest.fixture
 def prod_with_archive(scratch_db, fake_embed, monkeypatch):

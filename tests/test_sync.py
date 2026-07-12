@@ -1,15 +1,12 @@
 """Replica sync: the change signature moves exactly when replica-visible
 content moves, unchanged content skips the upload, and an unconfigured
 bucket makes the whole tool a no-op (file-less installs untouched)."""
-import importlib.util, os, pathlib, sqlite3, sys, types
+import os, sqlite3, sys, types
 
 import config
+from tests.helpers import load_script
 
-_spec = importlib.util.spec_from_file_location(
-    "sync_s3", pathlib.Path(__file__).resolve().parent.parent
-    / "tools" / "sync-s3.py")
-sync_s3 = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(sync_s3)
+sync_s3 = load_script("tools/sync-s3.py")
 
 
 def _make_index(path):

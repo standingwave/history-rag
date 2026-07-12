@@ -3,7 +3,7 @@ scratch index with the fake embedder. Timestamps are UTC; TZ is pinned to
 America/Los_Angeles, so local day 2026-07-02 = [07-02T07:00Z, 07-03T07:00Z)."""
 import json, os, subprocess
 import pytest
-from tests.test_driver import mk_source, rec, run_index
+from tests.helpers import mk_source, rec, run_index
 
 D = "2026-07-02T"   # inside local 2026-07-02
 

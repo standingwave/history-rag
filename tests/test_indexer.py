@@ -1,35 +1,7 @@
 """Tier 2: index.py driver behaviors against real sqlite-vec + fake embedder.
 Each case reproduces something that actually happened during development."""
-import sqlite3, types
-import sqlite_vec
 import pytest
-
-def mk_source(name, chunks, explode=False):
-    mod = types.SimpleNamespace()
-    mod.__name__ = f"sources.{name}"
-    def iter_chunks():
-        yield from chunks
-        if explode:
-            raise RuntimeError("boom")
-    mod.iter_chunks = iter_chunks
-    return mod
-
-def rec(src, ts="", loc="x", meta=None):
-    return {"source": src, "timestamp": ts, "location": loc, "meta": meta or {}}
-
-def run_index(monkeypatch, sources, argv=()):
-    import index
-    monkeypatch.setattr(index, "SOURCES", sources)
-    monkeypatch.setattr(index, "ALL_SOURCES", sources)
-    monkeypatch.setattr("sys.argv", ["index.py", *argv])
-    index.main()
-
-def open_db(path):
-    db = sqlite3.connect(path)
-    db.enable_load_extension(True)
-    sqlite_vec.load(db)
-    return db
-
+from tests.helpers import mk_source, rec, run_index, open_db
 def test_incremental_reembed_and_consistency(scratch_db, fake_embed, monkeypatch):
     src = [mk_source("alpha", [("a1", "first text", rec("alpha"))])]
     run_index(monkeypatch, src)

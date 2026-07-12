@@ -2,17 +2,14 @@
 tick with the steps JSON on it, prune config validation and argv, synced_at
 stamping rules, the notify debounce, the summary line, and the replica
 health field the server derives from steps."""
-import datetime, importlib.util, json, pathlib, re, sqlite3, sys
+import datetime, json, re, sqlite3, sys
 
 import pytest
 
 import config, index
+from tests.helpers import load_script
 
-_spec = importlib.util.spec_from_file_location(
-    "refresh", pathlib.Path(__file__).resolve().parent.parent
-    / "tools" / "refresh.py")
-refresh = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(refresh)
+refresh = load_script("tools/refresh.py")
 
 
 @pytest.fixture(autouse=True)

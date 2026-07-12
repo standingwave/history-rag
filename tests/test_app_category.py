@@ -6,14 +6,9 @@ import datetime, plistlib, sqlite3, subprocess, time, types
 
 from appusage import store, report
 from sources import appusage as appusage_src
+from tests.helpers import mem_store
 
 B = datetime.datetime(2025, 1, 6, 9, 0).timestamp()    # Mon 09:00 local
-
-
-def _db():
-    db = sqlite3.connect(":memory:")
-    store.setup(db)
-    return db
 
 
 def _fake_app(tmp_path, name, category):
@@ -45,7 +40,7 @@ def test_resolves_and_caches_with_prefix_stripped(tmp_path, monkeypatch):
     path = _fake_app(tmp_path, "Super", "public.app-category.developer-tools")
     calls = []
     _mdfind(monkeypatch, {"com.x.super": path}, calls)
-    db = _db()
+    db = mem_store()
     assert store.categories(db, {"com.x.super"}) == {"com.x.super":
                                                      "developer-tools"}
     assert len(calls) == 1
@@ -61,7 +56,7 @@ def test_missing_key_and_missing_app_cache_null(tmp_path, monkeypatch):
     path = _fake_app(tmp_path, "Helium", None)      # no category key
     calls = []
     _mdfind(monkeypatch, {"com.x.helium": path}, calls)   # com.x.gone: no hit
-    db = _db()
+    db = mem_store()
     assert store.categories(db, {"com.x.helium", "com.x.gone"}) == {
         "com.x.helium": None, "com.x.gone": None}
     rows = dict(db.execute("SELECT bundle_id, category FROM app_meta"))
@@ -72,7 +67,7 @@ def test_missing_key_and_missing_app_cache_null(tmp_path, monkeypatch):
 
 
 def test_null_rechecked_only_past_window(tmp_path, monkeypatch):
-    db = _db()
+    db = mem_store()
     fresh, stale = time.time(), time.time() - store.CATEGORY_RECHECK - 1
     db.execute("INSERT INTO app_meta VALUES ('com.x.fresh', NULL, ?)", (fresh,))
     db.execute("INSERT INTO app_meta VALUES ('com.x.stale', NULL, ?)", (stale,))
@@ -87,7 +82,7 @@ def test_null_rechecked_only_past_window(tmp_path, monkeypatch):
 def test_resolver_failure_degrades_to_null(monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda *a, **k: (_ for _ in ()).throw(OSError("no mdfind")))
-    db = _db()
+    db = mem_store()
     assert store.categories(db, {"com.x.y"}) == {"com.x.y": None}
 
 
@@ -125,7 +120,7 @@ def _seed_day(db):
 def test_chunk_meta_and_dayshape_sentence(tmp_path, monkeypatch):
     monkeypatch.setattr(appusage_src, "APPUSAGE_DB", __file__)  # exists-check
     monkeypatch.setattr(store, "connect", lambda: db)
-    db = _db()
+    db = mem_store()
     _seed_day(db)
     path = _fake_app(tmp_path, "Super", "public.app-category.developer-tools")
     _mdfind(monkeypatch, {"com.x.super": path}, [])
@@ -140,7 +135,7 @@ def test_chunk_meta_and_dayshape_sentence(tmp_path, monkeypatch):
 def test_all_unknown_day_omits_sentence(monkeypatch):
     monkeypatch.setattr(appusage_src, "APPUSAGE_DB", __file__)
     monkeypatch.setattr(store, "connect", lambda: db)
-    db = _db()
+    db = mem_store()
     _seed_day(db)
     _mdfind(monkeypatch, {}, [])                        # nothing resolves
     texts = [text for _, text, rec in appusage_src.iter_chunks()

@@ -2,15 +2,13 @@
 resolution precedence (env beats lpass; lpass never forked when env is set),
 tool-error -> exit 1, human vs --json rendering. No network — urlopen is
 faked at the module boundary."""
-import importlib.util, json, pathlib, subprocess, urllib.request
+import json, subprocess, urllib.request
 
 import pytest
 
-_spec = importlib.util.spec_from_file_location(
-    "hist", pathlib.Path(__file__).resolve().parent.parent
-    / "tools" / "hist.py")
-hist = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(hist)
+from tests.helpers import load_script
+
+hist = load_script("tools/hist.py")
 
 URL = "https://host.example/s3cr3t/mcp"
 

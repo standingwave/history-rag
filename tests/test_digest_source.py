@@ -5,7 +5,7 @@ import json, sqlite3
 from datetime import date, datetime, timedelta
 import pytest
 from sources import browser, digest, shell
-from tests.test_driver import mk_source, rec, run_index, open_db
+from tests.helpers import mk_source, rec, run_index, open_db
 
 def _local_epoch(iso_naive: str) -> float:
     return datetime.fromisoformat(iso_naive).timestamp()

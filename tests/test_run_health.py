@@ -3,7 +3,7 @@ history_stats builds from it — how failures reach the user."""
 import json, sqlite3
 import pytest
 import requests
-from tests.test_driver import mk_source, rec, run_index, open_db
+from tests.helpers import mk_source, rec, run_index, open_db
 
 def last_run(path):
     db = sqlite3.connect(path)
@@ -88,6 +88,15 @@ def test_health_absent_on_legacy_db(scratch_db, fake_embed, monkeypatch):
     db.execute("DROP TABLE runs")
     db.commit(); db.close()
     assert "health" not in json.loads(server.history_stats())
+
+def test_no_run_record_writes_no_row(scratch_db, fake_embed, monkeypatch):
+    """The refresh driver's one-row-per-tick property rests on this flag:
+    prune sub-runs must leave the runs table untouched."""
+    run_index(monkeypatch, [mk_source("alpha", [("a1", "text", rec("alpha"))])],
+              argv=("--no-run-record",))
+    db = sqlite3.connect(scratch_db)
+    assert db.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+    db.close()
 
 def test_should_notify_fires_once_per_incident():
     import index

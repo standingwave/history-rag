@@ -4,27 +4,17 @@ import datetime, sqlite3
 import pytest
 from appusage import store, daemon, mic, report
 from sources import appusage as appusage_src
+from tests.helpers import mem_store, seg
 
 B = datetime.datetime(2025, 1, 6, 10, 0).timestamp()   # Mon 10:00 local
 
 @pytest.fixture(autouse=True)
-def _no_category_resolution(monkeypatch):
-    """Keep iter_chunks off the real mdfind: resolution is machine-dependent
-    and covered by test_app_category.py."""
-    monkeypatch.setattr(store, "_resolve_category", lambda bundle_id: None)
-
-def seg(db, app, start, end, bundle=None):
-    db.execute("INSERT INTO segments(app, bundle_id, start_ts, end_ts, closed) "
-               "VALUES (?,?,?,?,1)", (app, bundle, start, end))
+def _pin_categories(no_category_resolution):
+    """These tests run iter_chunks with real bundle ids."""
 
 def mic_seg(db, start, end):
     db.execute("INSERT INTO mic_segments(start_ts, end_ts, closed) "
                "VALUES (?,?,1)", (start, end))
-
-def _db():
-    db = sqlite3.connect(":memory:")
-    store.setup(db)
-    return db
 
 # ── probe ─────────────────────────────────────────────────────────────────────
 
@@ -47,7 +37,7 @@ def test_mic_in_use_live_returns_bool():
 # ── mic ticks ─────────────────────────────────────────────────────────────────
 
 def test_mic_tick_extend_close_and_sleep_gap():
-    db = _db()
+    db = mem_store()
     daemon.mic_tick(db, True, 1000, max_gap=60)
     daemon.mic_tick(db, True, 1020, max_gap=60)      # extend
     daemon.mic_tick(db, True, 9000, max_gap=60)      # slept: close + reopen
@@ -73,13 +63,13 @@ def test_mic_live_vetoes_idle_before_pmset(monkeypatch):
 # ── call derivation ──────────────────────────────────────────────────────────
 
 def test_short_mic_blips_are_not_calls():
-    db = _db()
+    db = mem_store()
     seg(db, "Xcode", B, B + 700, "x")
     mic_seg(db, B + 100, B + 250)                    # 150s < CALL_MIN
     assert store.day_calls(db, "2025-01-06") == []
 
 def test_call_labeled_by_max_overlap_meeting_app():
-    db = _db()
+    db = mem_store()
     seg(db, "Supacode", B, B + 1000, "app.supabit.supacode")
     seg(db, "zoom.us", B + 1000, B + 1400, "us.zoom.xos")
     seg(db, "Supacode", B + 1400, B + 3000, "app.supabit.supacode")
@@ -88,13 +78,13 @@ def test_call_labeled_by_max_overlap_meeting_app():
     assert calls == [(B + 900, B + 2900, "zoom.us")] # meeting app wins, not dominant Supacode
 
 def test_background_call_without_meeting_app_is_unlabeled():
-    db = _db()
+    db = mem_store()
     seg(db, "Supacode", B, B + 2000, "app.supabit.supacode")
     mic_seg(db, B + 100, B + 1900)
     assert store.day_calls(db, "2025-01-06") == [(B + 100, B + 1900, None)]
 
 def test_calls_attributed_to_start_day():
-    db = _db()
+    db = mem_store()
     prev = datetime.datetime(2025, 1, 5, 23, 50).timestamp()
     mic_seg(db, prev, prev + 1200)                   # starts Sunday
     seg(db, "Xcode", B, B + 700, "x")

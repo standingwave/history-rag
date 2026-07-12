@@ -100,6 +100,36 @@ Each driver case below reproduces something that actually happened this week:
 - **group_by** (`test_group_by.py`): local-day bucketing across a UTC
   midnight, domain extraction + location fallback, undated gating, limit
   clamp + truncation flag, dimension validation, filter composition.
+- **Snapshot reads** (`test_snapshot_db.py`): `snapshot_db` per journal
+  mode — live WAL stores are copied via the backup API, never read raw.
+- **Hosted embed backends** (`test_embed_backend.py`): backend switch,
+  request shapes, key handling for the nomic/mixedbread APIs.
+- **Day shape + bundle IDs** (`test_dayshape.py`): switches, focus blocks,
+  breaks, bundle capture/migration/coalescing, the day-shape chunk.
+- **Mic + calls** (`test_mic_calls.py`): probe logic, mic ticks, idle-veto
+  ordering, call derivation + labeling, the calls sentence.
+- **Playback idle** (`test_playback_idle.py`): pmset wake-lock parsing and
+  the lazy active decision.
+- **Calendar source** (`test_calendar_source.py`): Apple store reader,
+  recurrence window, bounded prune, agenda expand.
+- **App categories** (`test_app_category.py`): LSApplicationCategoryType
+  resolution + app_meta cache + 7-day recheck, the `other` rollup, per-app
+  meta / day-shape sentence / report line.
+- **hist CLI** (`test_hist_cli.py`): flag→arguments mapping, endpoint
+  resolution precedence (env beats lpass), tool-error exit codes, human vs
+  `--json` rendering — faked urlopen, no network.
+- **/search page** (`test_search_page.py`): secret gate, escaping (the
+  index holds attacker-influenceable text), CSP hash pinning, filters →
+  kwargs, window mode + paging, health line/banners — app.py imported with
+  Lambda deps stubbed.
+- **Refresh driver** (`test_refresh.py`): step isolation incl. SystemExit,
+  one runs row per tick, prune validation + argv, `synced_at` stamping
+  rules, notify debounce, summary line, `health.replica` derivation.
+
+Shared plumbing lives in `tests/helpers.py` (script loading for non-package
+tools, the fabricated-source index harness, appusage store builders); the
+`no_category_resolution` fixture in conftest keeps appusage tests off the
+real mdfind.
 
 ## Explicit non-goals
 Daemon sensor subprocesses (`lsappinfo`/`ioreg` — test their regexes on
@@ -114,9 +144,9 @@ The manual steps repeated constantly during this week's development, scripted:
   source, pool + exact search, paging, error paths). Exits non-zero on
   failure, and warns when the *running* MCP server process is older than
   `server.py` — the "edits don't apply until /mcp reconnect" trap.
-- **`tools/kick.sh`** — kick the launchd refresh and block until its `done.`
-  line, then print the per-source stats block (replaces the
-  kickstart/sleep/tail dance).
+- **`tools/kick.sh`** — kick the launchd refresh and block until the
+  driver's `refresh:` summary line (the last thing a tick prints, after
+  backup and sync), then print the run's stats block.
 - Scratch-index pattern (used by tests too): point `CLAUDE_RAG_CONFIG` and
   `CLAUDE_RAG_DB` at a tmp dir — never the real `~/.claude`. For one source:
   `index.py --dry-run --source <name>`.

@@ -1,14 +1,10 @@
 """eval-model tool: the safety-critical parts — the candidate path can never
 be the production path, and the in-process config override always restores."""
-import importlib.util, pathlib
 import config
+from tests.helpers import load_script
 
 def _load():
-    p = pathlib.Path(__file__).resolve().parent.parent / "tools" / "eval-model.py"
-    spec = importlib.util.spec_from_file_location("eval_model", p)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("tools/eval-model.py")
 
 def test_candidate_path_is_derived_and_never_prod():
     ev = _load()

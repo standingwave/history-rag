@@ -57,3 +57,11 @@ def scratch_db(monkeypatch, tmp_path):
     path = str(tmp_path / "ix.db")
     monkeypatch.setattr(config, "DB_PATH", path)
     return path
+
+@pytest.fixture
+def no_category_resolution(monkeypatch):
+    """Pin appusage category resolution off the real mdfind — resolution is
+    machine-dependent and covered by test_app_category.py. Files whose tests
+    run iter_chunks with bundle ids wrap this in a local autouse fixture."""
+    from appusage import store
+    monkeypatch.setattr(store, "_resolve_category", lambda bundle_id: None)

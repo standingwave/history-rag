@@ -4,7 +4,7 @@ corruption for same-dimension model swaps)."""
 import json, sqlite3
 import pytest
 import config
-from tests.test_driver import mk_source, rec, run_index
+from tests.helpers import mk_source, rec, run_index
 
 CHUNK = [("a1", "some text", rec("alpha"))]
 

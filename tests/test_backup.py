@@ -1,12 +1,10 @@
 """Backup tool: once-per-day semantics, faithful copies, retention pruning."""
-import importlib.util, os, pathlib, sqlite3
+import os, sqlite3
+
+from tests.helpers import load_script
 
 def _load():
-    p = pathlib.Path(__file__).resolve().parent.parent / "tools" / "backup.py"
-    spec = importlib.util.spec_from_file_location("backup_tool", p)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_script("tools/backup.py", "backup_tool")
 
 def _mk_db(path, rows):
     db = sqlite3.connect(path)
@@ -43,6 +41,17 @@ def test_prune_keeps_newest(tmp_path):
     left = sorted(p.name for p in tmp_path.glob("history-rag-*.db"))
     assert left == ["history-rag-2026-06-30.db", "history-rag-2026-07-01.db"]
     assert (tmp_path / "appusage-2026-06-01.db").exists()
+
+def test_main_returns_written_or_current(tmp_path, monkeypatch):
+    """The refresh driver's note mapping consumes these exact values."""
+    import config
+    b = _load()
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "history-rag.db"))
+    monkeypatch.setattr(config, "APPUSAGE_DB", str(tmp_path / "appusage.db"))
+    monkeypatch.setenv("CLAUDE_RAG_BACKUP_DIR", str(tmp_path / "bk"))
+    _mk_db(str(tmp_path / "history-rag.db"), ["a"])
+    assert b.main() == {"history-rag": "written", "appusage": "current"}
+    assert b.main() == {"history-rag": "current", "appusage": "current"}
 
 def test_config_defaults(monkeypatch):
     b = _load()

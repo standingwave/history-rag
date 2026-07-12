@@ -3,7 +3,7 @@ the form renders, results render escaped (the index holds attacker-
 influenceable text), expand round-trips, k is clamped, and MCP paths still
 fall through to the inner app. app.py is imported with its Lambda-only
 deps stubbed — no AWS, no network."""
-import asyncio, base64, hashlib, importlib.util, json, pathlib, sys, types
+import asyncio, base64, hashlib, json, sys, types
 
 import sqlite3 as _real_sqlite3
 
@@ -23,14 +23,12 @@ import os
 os.environ.setdefault("CLAUDE_RAG_SYNC_BUCKET", "test-bucket")
 os.environ.setdefault("CLAUDE_RAG_URL_SECRET", "s3cr3t")
 
-_spec = importlib.util.spec_from_file_location(
-    "lambda_app", pathlib.Path(__file__).resolve().parent.parent
-    / "deploy" / "lambda" / "app.py")
-app = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(app)
+from tests.helpers import load_script
+
+app = load_script("deploy/lambda/app.py", "lambda_app")
 
 
-def _get(path, query="", inner=None):
+def _get(path, query=""):
     sent = []
 
     async def send(msg):
