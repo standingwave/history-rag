@@ -1,0 +1,55 @@
+# Deploy the Lambda replica. Function-config API responses include the
+# function's env secrets — keep aws lambda stdout out of this public log.
+name: deploy-lambda
+on:
+  workflow_dispatch:
+concurrency:
+  group: deploy-lambda
+  cancel-in-progress: false
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -q
+      - run: ./deploy/lambda/build.sh
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Update function code
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ vars.LAMBDA_FUNCTION }}" \
+            --zip-file fileb://deploy/lambda/history-rag-lambda.zip \
+            --query LastUpdateStatus --output text
+          aws lambda wait function-updated-v2 \
+            --function-name "${{ vars.LAMBDA_FUNCTION }}"
+      - name: Smoke — gate must answer 404 without the secret
+        # Cold-starts the new bundle: import errors surface as FunctionError;
+        # a healthy gate 404s a secret-less path.
+        run: |
+          printf '%s' '{"version":"2.0","rawPath":"/","requestContext":{"http":{"method":"GET","path":"/"}}}' > event.json
+          aws lambda invoke --function-name "${{ vars.LAMBDA_FUNCTION }}" \
+            --payload fileb://event.json out.json \
+            --query FunctionError --output text > function-error.txt
+          if grep -qv '^None$' function-error.txt; then
+            echo "function errored:"; cat out.json; exit 1
+          fi
+          python -c "import json; d = json.load(open('out.json')); \
+            assert d.get('statusCode') == 404, d; print('smoke ok: 404')"
+      - name: Stamp deployed SHA
+        run: |
+          aws lambda tag-resource \
+            --resource "$(aws lambda get-function \
+              --function-name "${{ vars.LAMBDA_FUNCTION }}" \
+              --query Configuration.FunctionArn --output text)" \
+            --tags "deployed-sha=${GITHUB_SHA},deployed-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "deployed ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
