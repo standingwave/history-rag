@@ -28,6 +28,7 @@ _KNOWN = {
     "backup": {"dir", "keep"},
     "sync": {"bucket", "key", "region"},
     "health": {"notify"},
+    "refresh": {"prune"},
 }
 
 _FILE: dict = {}

@@ -53,15 +53,20 @@ def prune(out_dir: str, stem: str, keep: int):
     return removed
 
 def main():
+    """Returns {stem: "written"|"current"} so the refresh driver can record
+    the outcome without scraping stdout; standalone runs just print."""
     out_dir = backup_dir()
     os.makedirs(out_dir, exist_ok=True)
     today = datetime.date.today().isoformat()
+    outcome = {}
     for src in (config.DB_PATH, config.APPUSAGE_DB):
         stem = os.path.splitext(os.path.basename(src))[0]
         written = backup_one(src, out_dir, today)
         removed = prune(out_dir, stem, keep_count())
         note = f", pruned {len(removed)}" if removed else ""
         print(f"{stem}: {written or 'already current'}{note}", flush=True)
+        outcome[stem] = "written" if written else "current"
+    return outcome
 
 if __name__ == "__main__":
     main()

@@ -32,29 +32,46 @@ def signature(db) -> str:
             h.update(b"\x1f")
     return h.hexdigest()
 
+def _remote_present(s3, bucket) -> bool:
+    """HEAD the object so skip-unchanged means "replica confirmed current",
+    not "the local marker says so" — a deleted object triggers a re-push.
+    Duck-typed error check: no botocore import, tests fake boto3 whole."""
+    try:
+        s3.head_object(Bucket=bucket, Key=config.SYNC_KEY)
+        return True
+    except Exception as e:
+        code = str(getattr(e, "response", {}).get("Error", {}).get("Code", ""))
+        if code in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
 def main():
+    """Returns the outcome for the refresh driver: {"action": "unconfigured"
+    | "no-index" | "unchanged" | "pushed"[, "bytes": N]}. `synced_at`
+    stamping belongs to the caller — and only for unchanged/pushed."""
     bucket = config.SYNC_BUCKET
     if not bucket:
         print("sync: no [sync] bucket configured — skipping")
-        return
+        return {"action": "unconfigured"}
     if not os.path.exists(config.DB_PATH):
         print("sync: no index yet — skipping")
-        return
+        return {"action": "no-index"}
 
     db = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
     sig = signature(db)
     db.close()
     marker = config.DB_PATH + ".synced"
     last = open(marker).read().strip() if os.path.exists(marker) else ""
-    if sig == last:
-        print("sync: index unchanged since last push — skipping")
-        return
 
     try:
         import boto3
     except ImportError:
         sys.exit("sync: boto3 not installed — "
                  "uv pip install --python $(which python) boto3")
+    s3 = boto3.client("s3", region_name=config.SYNC_REGION or None)
+    if sig == last and _remote_present(s3, bucket):
+        print("sync: index unchanged since last push — replica current")
+        return {"action": "unchanged"}
 
     snap = config.DB_PATH + ".sync-snapshot"
     src, dst = sqlite3.connect(config.DB_PATH), sqlite3.connect(snap)
@@ -63,14 +80,14 @@ def main():
     dst.close()
     src.close()
     try:
-        s3 = boto3.client("s3", region_name=config.SYNC_REGION or None)
         s3.upload_file(snap, bucket, config.SYNC_KEY)
     finally:
         os.remove(snap)
     with open(marker, "w") as f:
         f.write(sig)
-    mb = os.path.getsize(config.DB_PATH) / 1e6
-    print(f"sync: pushed ~{mb:.0f}MB to s3://{bucket}/{config.SYNC_KEY}")
+    size = os.path.getsize(config.DB_PATH)
+    print(f"sync: pushed ~{size / 1e6:.0f}MB to s3://{bucket}/{config.SYNC_KEY}")
+    return {"action": "pushed", "bytes": size}
 
 if __name__ == "__main__":
     main()

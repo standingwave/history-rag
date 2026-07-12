@@ -45,6 +45,9 @@ def parse_args():
     p.add_argument("--prune", action="store_true",
                    help="delete stored chunks a source no longer yields")
     p.add_argument("--source", metavar="NAME", help=f"run a single source ({names})")
+    p.add_argument("--no-run-record", action="store_true",
+                   help="(refresh driver) don't write a runs row — the "
+                        "driver records sub-runs in its own steps record")
     return p.parse_args()
 
 def pick_sources(only: str | None):
@@ -73,9 +76,14 @@ def setup(db):
         timestamp TEXT, location TEXT, meta TEXT)""")
     db.execute(f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
         id TEXT PRIMARY KEY, embedding FLOAT[{config.DIM}])""")
-    # Run health lives in the DB (durable, queryable, backed up): the MCP
-    # server surfaces the newest row via history_stats so failures reach the
-    # user through the tools they already use, not an unread /tmp log.
+    ensure_runs(db)
+
+def ensure_runs(db):
+    """Run health lives in the DB (durable, queryable, backed up): the MCP
+    server surfaces the newest row via history_stats so failures reach the
+    user through the tools they already use, not an unread /tmp log. Split
+    out of setup() so the refresh driver can use it on a plain connection
+    (no vec extension)."""
     db.execute("""CREATE TABLE IF NOT EXISTS runs(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         started TEXT NOT NULL, finished TEXT,
@@ -195,24 +203,28 @@ def main():
         db.execute("DROP TABLE IF EXISTS index_meta")
         db.execute("DROP TABLE IF EXISTS runs")
     setup(db)
+    record = not args.no_run_record
     try:
         # Refuse to write wrong-model vectors; stamp fresh/legacy DBs.
         config.check_stamp(db, stamp_if_missing=True)
     except config.StampMismatch as e:
         # Record the refusal so history_stats surfaces it as run health.
-        now = _utcnow()
-        db.execute("INSERT INTO runs(started, finished, status, sources) "
-                   "VALUES (?,?,'aborted',?)",
-                   (now, now, json.dumps({"_stamp": {"ok": False,
-                                                     "error": str(e)}})))
-        db.commit()
-        _maybe_notify(db, "embedding model/config mismatch — indexing is stopped")
+        if record:
+            now = _utcnow()
+            db.execute("INSERT INTO runs(started, finished, status, sources) "
+                       "VALUES (?,?,'aborted',?)",
+                       (now, now, json.dumps({"_stamp": {"ok": False,
+                                                         "error": str(e)}})))
+            db.commit()
+            _maybe_notify(db, "embedding model/config mismatch — indexing is stopped")
         sys.exit(str(e))
 
     print(f"=== run {datetime.now().astimezone().isoformat(timespec='seconds')}")
-    run_id = db.execute("INSERT INTO runs(started, status) VALUES (?, 'aborted')",
-                        (_utcnow(),)).lastrowid
-    db.commit()
+    run_id = None
+    if record:
+        run_id = db.execute("INSERT INTO runs(started, status) VALUES (?, 'aborted')",
+                            (_utcnow(),)).lastrowid
+        db.commit()
 
     # id -> (text, timestamp). Changed text re-embeds (e.g. today's still-
     # growing app-usage total); same text with a changed timestamp gets a
@@ -321,15 +333,16 @@ def main():
     run_status = ("aborted" if aborted else
                   "partial" if any(not i["ok"] for i in srcinfo.values())
                   else "ok")
-    db.execute("UPDATE runs SET finished=?, status=?, embedded=?, refreshed=?, "
-               "pruned=?, failed=?, sources=? WHERE id=?",
-               (_utcnow(), run_status, new, refreshed, pruned, failed,
-                json.dumps(srcinfo), run_id))
-    db.execute("DELETE FROM runs WHERE id NOT IN "
-               "(SELECT id FROM runs ORDER BY id DESC LIMIT ?)", (RUNS_KEEP,))
-    db.commit()
-    if run_status == "aborted":
-        _maybe_notify(db, "index refresh aborted twice — is Ollama running?")
+    if record:
+        db.execute("UPDATE runs SET finished=?, status=?, embedded=?, refreshed=?, "
+                   "pruned=?, failed=?, sources=? WHERE id=?",
+                   (_utcnow(), run_status, new, refreshed, pruned, failed,
+                    json.dumps(srcinfo), run_id))
+        db.execute("DELETE FROM runs WHERE id NOT IN "
+                   "(SELECT id FROM runs ORDER BY id DESC LIMIT ?)", (RUNS_KEEP,))
+        db.commit()
+        if run_status == "aborted":
+            _maybe_notify(db, "index refresh aborted twice — is Ollama running?")
     total = db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     extra = f", {pruned} pruned" if pruned else ""
     print(f"done. {new} embedded (new or changed), {failed} skipped{extra}, "

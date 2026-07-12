@@ -449,10 +449,41 @@ def history_stats(locations: bool = False) -> str:
     }
     health = _run_health(db)
     if health:
+        replica = _replica_health(db)
+        if replica:
+            health["replica"] = replica
         out["health"] = health
     return json.dumps(out)
 
-STALL_MINUTES = 120      # ~4 missed 30-min cycles
+STALL_MINUTES = 120           # ~4 missed 30-min cycles
+REPLICA_STALL_MINUTES = 90    # ~3 missed refresh ticks without a sync stamp
+
+def _replica_health(db):
+    """Replica sync recency from the newest refresh-driver tick (rows with
+    a steps JSON — see tools/refresh.py). None when no [sync] bucket is
+    configured or no tick has recorded yet; a legacy runs table without
+    the steps column reads as no ticks."""
+    if not config.SYNC_BUCKET:
+        return None
+    try:
+        row = db.execute("SELECT steps FROM runs WHERE steps IS NOT NULL "
+                         "ORDER BY id DESC LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not row:
+        return None
+    sync = (json.loads(row[0]) or {}).get("sync") or {}
+    out = {}
+    if sync.get("synced_at"):
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(sync["synced_at"])).total_seconds() / 60
+        out["synced_age_minutes"] = int(age)
+    if not sync.get("ok", True):
+        out["note"] = "replica sync failing — serving old data remotely"
+    elif out.get("synced_age_minutes", 0) > REPLICA_STALL_MINUTES:
+        out["note"] = (f"replica stale — last confirmed sync "
+                       f"{out['synced_age_minutes']} minutes ago")
+    return out or None
 
 def _run_health(db):
     """Health of the last index run, from the runs table the indexer keeps.
