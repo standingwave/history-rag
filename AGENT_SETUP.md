@@ -11,7 +11,7 @@ they defer. Everything else, decide yourself with sensible defaults.
 
 | # | Ask | Phase | Default if they defer |
 |---|-----|-------|-----------------------|
-| Q1 | Which sources? claude sessions, shell, browser history, git commits, Obsidian notes, app usage (macOS daemon, see Q12) | 0 | claude + shell + browser (the zero-config ones) |
+| Q1 | Which sources? claude sessions, shell, browser history, git commits, Obsidian notes, calendar events (macOS), app usage (macOS daemon, see Q12) | 0 | claude + shell + browser (the zero-config ones) |
 | Q2 | OK to index shell history? Can contain sensitive commands (redaction is on, but confirm). Mention atuin if `~/.local/share/atuin/history.db` exists — it adds timestamps, cwd, and exit codes | 0 | Index it (atuin included when present) |
 | Q3 | OK to index browser history? Privacy-relevant; covers all profiles of Safari/Chrome/Helium found | 0 | Index it |
 | Q4 | Archived shell history to include (`[shell] histfiles`)? | 0 | Live + macOS session dirs only |
@@ -39,8 +39,9 @@ Note the platform (`uname`); it changes the Ollama install and macOS-only bits.
 2. Missing → **ASK Q7**, then macOS `brew install ollama && brew services start ollama`;
    Linux `curl -fsSL https://ollama.com/install.sh | sh`.
 3. Daemon down → start it, re-check the curl returns JSON.
-4. **ASK Q8**; `ollama pull <model>` if absent. Non-default model ⇒ carry
-   `CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM` through Phases 3 and 5 (see guardrails).
+4. **ASK Q8**; `ollama pull <model>` if absent. Non-default model ⇒ set
+   `[core] model`/`dim` in the TOML (Phase 3) — every entry point reads it,
+   so no env plumbing through later phases.
 
 ## Phase 2 — venv + dependencies
 Canonical venv: `~/.claude/rag-venv` (outside the repo — the MCP registration
@@ -62,6 +63,9 @@ Verify: `~/.claude/rag-venv/bin/python -c "import sqlite_vec, requests, mcp; pri
    vaults = ["~/path/to/Vault"]               # Q6 answer, if chosen
    [shell]
    histfiles = []                             # Q4 archived paths, if any
+   [calendar]
+   apps = ["apple"]                           # if calendar chosen (macOS;
+                                              # needs Full Disk Access)
    ```
    Omit `[sources].enabled` entirely when all sources are wanted. Never edit
    `SOURCES` in `index.py` — that fights git pulls.
@@ -105,9 +109,9 @@ a `no such column` error ⇒ DB and code disagree — rebuild (Q9) and retry.
 ```bash
 claude mcp add history -s user -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 ```
-(`-s project` for project scope; non-default model ⇒ add `--env CLAUDE_RAG_MODEL=…
---env CLAUDE_RAG_DIM=…`. Wrong existing registration ⇒ `claude mcp remove history`
-first.) Confirm with `claude mcp list`.
+(`-s project` for project scope; the model comes from the TOML, no `--env`
+needed. Wrong existing registration ⇒ `claude mcp remove history` first.)
+Confirm with `claude mcp list`.
 
 **STOP — tell the human:** the tool isn't callable until they reconnect
 (`/mcp` → `history`) or restart the session. Same applies after any later
@@ -118,20 +122,21 @@ first.) Confirm with `claude mcp list`.
 - **macOS — launchd.** Fill the plist and load it:
   ```bash
   PY=~/.claude/rag-venv/bin/python
-  sed -e "s#__PYTHON__#$PY#g" -e "s#__INDEX__#$(pwd)/index.py#" \
-      -e "s#__BACKUP__#$(pwd)/tools/backup.py#" \
+  sed -e "s#__PYTHON__#$PY#g" -e "s#__REFRESH__#$(pwd)/tools/refresh.py#" \
     com.user.history-index.plist > ~/Library/LaunchAgents/com.user.history-index.plist
   launchctl load ~/Library/LaunchAgents/com.user.history-index.plist
   ```
-  Each cycle chains `tools/backup.py`: daily dated copies of the sole-copy
-  DBs in `~/.claude/backups`, pruned to `[backup] keep` (default 7).
-  No env plumbing needed — scheduled runs read `~/.claude/history-rag.toml`
-  like every other entry point. Cadence: `StartInterval` seconds.
-  Verify: `launchctl list | grep history-index`, then the per-source stats
-  lines in `/tmp/history-index.log`.
+  Each cycle runs `tools/refresh.py`: index → prune (the sources in
+  `[refresh] prune` — set `prune = ["calendar"]` if calendar was chosen) →
+  daily backup to `~/.claude/backups` → S3 sync (no-op without `[sync]`),
+  each step isolated and recorded in the `runs` table. No env plumbing
+  needed — scheduled runs read `~/.claude/history-rag.toml` like every
+  other entry point. Cadence: `StartInterval` seconds.
+  Verify: `launchctl list | grep history-index`, then the `refresh:`
+  summary line in `/tmp/history-index.log`.
 - **Linux — cron** (absolute paths; config comes from the same file):
   ```cron
-  */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/index.py >> $HOME/.claude/rag-index.log 2>&1
+  */30 * * * * /ABS/rag-venv/bin/python /ABS/repo/tools/refresh.py >> $HOME/.claude/rag-index.log 2>&1
   ```
 
 **STOP — two macOS permission gotchas on the first scheduled run:**
@@ -157,19 +162,25 @@ Verify: `launchctl list | grep com.user.appusage` shows a PID;
 `/tmp/appusage-daemon.log` clean. Data → `~/.claude/appusage.db`;
 `appusage/report.py` shows totals; days flow into the index on the next run.
 
+A remote replica (phone access via AWS Lambda) also exists but is its own
+setup — `deploy/lambda/README.md`. Don't set it up unless explicitly asked.
+
 ## Guardrails — do not violate
 - **Never disable secret redaction** — the shared regex in `sources/common.py`
   plus shell's extra `-p` pattern keep credentials out of the index.
 - **Never commit `~/.claude/history-rag.db`** or the venv (both gitignored;
   nothing machine-specific belongs in the repo).
 - **Model/dim must match between index and queries** (`config.py`). Switching
-  models ⇒ `--rebuild` AND re-register the server with matching env vars.
-- **Rebuild is for model/dim/column changes only.** Adding a source is additive
-  — plain incremental runs handle it.
-- **`--prune` requires `--source`, and is only routine-safe for git/obsidian**
-  (their backing stores are durable). The index is an *archive* for
-  claude/shell/browser — their raw data expires, and pruning them deletes
-  history the index has outlived.
+  models on an existing index ⇒ `tools/eval-model.py` then
+  `tools/migrate-model.py` (archive-safe: re-embeds from stored chunk text),
+  then update `[core]` in the TOML — not `--rebuild`.
+- **Rebuild is for schema changes and fresh starts only.** Adding a source is
+  additive — plain incremental runs handle it — and rebuilding re-reads
+  *sources*, losing archived chunks whose backing data expired.
+- **`--prune` requires `--source`, and is only routine-safe for
+  git/obsidian/calendar** (durable stores; calendar's prune is bounded to its
+  sync window). The index is an *archive* for claude/shell/browser — their
+  raw data expires, and pruning them deletes history the index has outlived.
 - **New sources:** a module in `sources/` exposing `iter_chunks()` yielding
   `(id, text, {"source","timestamp","location","meta"})` with a run-stable id,
   added to `SOURCES` in `index.py`. Don't bolt onto existing modules.

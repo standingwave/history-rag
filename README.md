@@ -2,10 +2,12 @@
 
 ![tests](https://github.com/standingwave/history-rag/actions/workflows/tests.yml/badge.svg)
 
-Local semantic search over your history — Claude Code sessions and shell command
-history — exposed to Claude Code as an MCP `search_history` tool. Everything is
-indexed into one vector space, so a single query ranks chat turns and terminal
-commands together. Runs entirely on your machine; nothing leaves it.
+Local semantic search over your history — Claude Code sessions, shell
+commands, browsing, git commits, notes, calendar events, and app usage —
+exposed to Claude Code as MCP tools. Everything is indexed into one vector
+space, so a single query ranks chat turns, terminal commands, and page
+visits together. Runs entirely on your machine; nothing leaves it unless
+you opt into the remote replica (see "Remote replica" below).
 
 > Setting this up by handing it to your coding agent? Point it at
 > [`AGENT_SETUP.md`](AGENT_SETUP.md) instead — that's the agent runbook. This
@@ -35,6 +37,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
   - `git.py` — your own commits across local repos (opt-in via env var).
   - `obsidian.py` — vault notes chunked by heading (opt-in via env var).
+  - `calendar.py` — calendar events with attendees (macOS, opt-in). See
+    "Calendar events" below.
   - `digest.py` — precomputed daily rollups: one chunk per (local day,
     stream) summarizing browser visits/searches per profile, claude
     sessions, and shell runs. See "Daily digests" below.
@@ -52,11 +56,15 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
-- `tools/` — dev loop and maintenance: `smoke.py` (exercise every tool path
+- `deploy/lambda/` — optional read-only replica on AWS Lambda: phone access
+  via a claude.ai connector plus a `/search` page. See "Remote replica".
+- `tools/` — dev loop and maintenance: `refresh.py` (the scheduled chain:
+  index → prune → backup → sync, each step isolated, outcomes recorded in
+  the `runs` table), `smoke.py` (exercise every tool path
   in-process after a change; warns if the running MCP server predates your
   edits), `kick.sh` (trigger the launchd refresh and print its stats block),
   `backup.py` (daily dated copies of the sole-copy DBs), `sync-s3.py` (push
-  the index to S3 for the optional remote replica — see `deploy/lambda/`),
+  the index to S3 for the optional remote replica),
   `hist.py` (stdlib-only terminal client for that replica: `hist search
   "the proxy bug" -k 5` from any machine holding the secret URL; suggested
   `alias hist='python3 <repo>/tools/hist.py'`),
@@ -89,12 +97,20 @@ histfiles = []            # archived history files
 extra = {}                # name = path, added to the built-in defaults
 keep_params = {}          # per-domain query params to keep, e.g. { "youtube.com" = ["v"] }
 
+[calendar]
+apps = ["apple"]          # enables the calendar source; exclude_calendars = [...]
+
 [digest]                  # sources (default browser/claude/shell),
                           # recompute_days (3), backfill_days (90)
 
 [core]                    # model/dim/db/ollama — same keys as the env vars
 
 [backup]                  # dir (default ~/.claude/backups), keep (default 7)
+
+[sync]                    # bucket/key/region — S3 push for the remote replica
+
+[refresh]
+prune = ["calendar"]      # sources pruned on each scheduled refresh
 
 [health]
 notify = true             # macOS notification when indexing stalls (default true)
@@ -113,7 +129,8 @@ model's ambient context.
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
 `source="appusage"`, `source="browser"`, `source="git"`, `source="obsidian"`,
-or `source="digest"` to `search_history` to restrict a query.
+`source="calendar"`, or `source="digest"` to `search_history` to restrict a
+query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
 snapshots macOS keeps in `~/.zsh_sessions/` and `~/.bash_sessions/`. Live history
@@ -229,6 +246,19 @@ come from `date:` frontmatter when present, else file mtime; frontmatter is
 stripped from the text. Hidden dirs (`.obsidian`, `.trash`), template folders,
 and credential-looking sections are skipped.
 
+**Calendar events (macOS, opt-in)** indexes meetings and appointments from
+Apple Calendar's store — the strongest "what did I do Tuesday" anchors, and
+what turns a mic-detected call into *which meeting*. Off until `[calendar]
+apps = ["apple"]`; `exclude_calendars` skips noisy ones (holidays,
+birthdays). One chunk per event with attendee names, all past plus ~90 days
+ahead — timestamps can be in the future, so "what's coming up Thursday"
+works. `location` is `app:calendar name` (e.g. `apple:Work`), and `expand`
+returns that day's full agenda. Reading the store needs Full Disk Access
+(the same grant as Safari). Unlike claude/shell/browser, routine pruning is
+safe here: the source declares a bounded prune window, so
+`[refresh] prune = ["calendar"]` only ever touches the recent sync window,
+never archived events.
+
 **Daily digests** precompute one summary chunk per (local day, stream) so
 "what did I do today/this week?" is a ~30-chunk read instead of a paged crawl
 of every raw chunk in the window: browser visits per profile (counts by site,
@@ -326,8 +356,9 @@ swap would otherwise corrupt search silently. Adding a source needs no
 rebuild (sources are additive). `--rebuild` is the deliberate escape hatch
 for a model/schema change, but note it reindexes from *sources*: chunks whose
 backing data has aged out (old session transcripts, expired browser history)
-are lost. For a model switch that preserves them, see the migration plan in
-`TESTING.md`.
+are lost. For a model switch that preserves them, use `tools/eval-model.py`
+(side-by-side candidate ranking) then `tools/migrate-model.py`
+(archive-safe: re-embeds from stored chunk text).
 
 Each run prints one stats line per source (`shell: 905 chunks, 3 embedded,
 0 skipped, 0.4s`), and a source that throws is logged and skipped without
@@ -391,10 +422,10 @@ rotting unseen in the log. On top of that, a macOS notification fires when
 two consecutive runs abort or the model stamp blocks indexing
 (`[health] notify = false` to turn off). The `/tmp` log remains as
 disposable per-run detail; reboot clearing is its rotation policy.
-Change the cadence via `StartInterval` (seconds) in the plist; if you use a
-non-default embedding model, add an `EnvironmentVariables` dict with
-`CLAUDE_RAG_MODEL`/`CLAUDE_RAG_DIM`. To stop: `launchctl unload …` then remove
-the plist.
+Change the cadence via `StartInterval` (seconds) in the plist; everything
+else (model, prune list, sync bucket) comes from the TOML, which scheduled
+runs read like every other entry point. To stop: `launchctl unload …` then
+remove the plist.
 
 **manual** — run when you want it current:
 ```bash
@@ -404,14 +435,14 @@ the plist.
 **cron (portable / Linux)** — `crontab -e`, then (absolute paths; cron has a
 minimal PATH and no `~` expansion):
 ```cron
-*/30 * * * * /ABS/PATH/rag-venv/bin/python /ABS/PATH/index.py >> $HOME/.claude/rag-index.log 2>&1
+*/30 * * * * /ABS/PATH/rag-venv/bin/python /ABS/PATH/tools/refresh.py >> $HOME/.claude/rag-index.log 2>&1
 ```
 On macOS, cron may also need Full Disk Access (System Settings → Privacy &
 Security → Full Disk Access → add `/usr/sbin/cron`) to read `~/.claude` — which
 is a good reason to prefer the launchd agent above.
 
 ## 5. Verify it works inside a Claude Code session
-After registering (step 4) and indexing (step 3):
+After indexing (step 2) and registering (step 3):
 
 1. **Confirm the server is connected.** In a session, run the MCP status command:
    ```
@@ -457,19 +488,29 @@ After registering (step 4) and indexing (step 3):
   embeds your query at call time). Start it: `open -a Ollama`.
 - Tool returns nothing → the index is empty or stale; re-run index.py.
 
+## Remote replica (optional)
+Everything above is local-only. `deploy/lambda/` adds a read-only replica
+on AWS Lambda: the Mac stays the single writer, the scheduled refresh
+pushes the index to S3 on change, and the function serves the same four
+MCP tools behind a secret-path URL usable as a claude.ai custom connector
+(phone/web/desktop). The same endpoint serves `/search` — an HTML search
+page sized for phones — and `tools/hist.py` gives terminal search from any
+machine holding the URL. Code deploys ride GitHub Actions on pushes to
+main (OIDC role, no stored keys). Setup, secrets, and runbook:
+[`deploy/lambda/README.md`](deploy/lambda/README.md).
+
 ## Notes
 - One chunk per Claude message, per unique shell command, and per day-per-app.
   For long assistant turns you may later want sliding-window chunking;
   per-message is fine to start.
 - Indexing is incremental and self-healing: a chunk is re-embedded only when its
   text changed, so growing app-usage totals stay current without a rebuild.
-- `nomic-embed-text` is the speed pick. For higher quality, set the env vars
-  (in both your indexing shell and the MCP registration) and re-index:
-  ```bash
-  ollama pull mxbai-embed-large
-  CLAUDE_RAG_MODEL=mxbai-embed-large CLAUDE_RAG_DIM=1024 ~/.claude/rag-venv/bin/python index.py --rebuild
-  ```
-  Other overrides: `CLAUDE_RAG_DB`, `CLAUDE_RAG_OLLAMA`. See `config.py`.
+- `nomic-embed-text` is the speed pick. To switch an existing index to a
+  higher-quality model (e.g. `mxbai-embed-large`, dim 1024), don't
+  `--rebuild` — that re-reads sources and loses archived chunks. Evaluate
+  with `tools/eval-model.py`, switch with `tools/migrate-model.py`, then
+  set `[core] model`/`dim` in the TOML. Other overrides: `CLAUDE_RAG_DB`,
+  `CLAUDE_RAG_OLLAMA`; see `config.py`.
 - `search_history` returns `{query, count, results[]}`, ranked best-first, with
   a `distance` (L2; lower = closer) on each hit. `history_stats` reports the
   corpus. Filter a search with `source=` and trim noise with `max_distance=`.
