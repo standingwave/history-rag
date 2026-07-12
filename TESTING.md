@@ -4,6 +4,16 @@ The minimal test set that buys concrete value, updated after the week-one
 build-out (six sources, time windows, disclosure tools, config file). Ordered
 so each step pays for itself; stop anywhere and still be better off.
 
+**Full-suite review ✅ 2026-07-12** (210 tests, ~1s): no obsolete tests —
+every pinned guard still exists and nothing asserts removed behavior. Fixes
+applied: real `--no-run-record` and `backup.main()` return contract now
+covered (both were previously exercised only through refresh-driver stubs),
+shared plumbing consolidated into `tests/helpers.py` behind a real `tests/`
+package, `test_driver.py` renamed `test_indexer.py` (the "driver" name now
+belongs to tools/refresh.py), category resolution pinned via one conftest
+fixture, and this file refreshed to cover the nine post-2026-07-07 test
+files.
+
 ## Bugs found in review that tests must pin (fix alongside their test)
 1. ✅ FIXED `index.py --rebuild --source X` drops BOTH tables then reindexes
    only X — silently destroys the other sources, including archive rows whose
