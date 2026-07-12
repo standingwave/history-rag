@@ -552,8 +552,10 @@ def list_window(since: str = "", until: str = "", source: str = "",
                 location: str = "", limit: int = 50, offset: int = 0,
                 include_undated: bool = False, group_by: str = "",
                 include_meta: bool = False) -> str:
-    """Exhaustive chronological listing (newest first) of everything in a time
-    window — no semantic ranking, no sampling. The right tool for "everything
+    """Exhaustive listing of everything in a time window — no semantic
+    ranking, no sampling. Newest local day first; within each day the
+    summary chunks lead (appusage day-shape, then digests), then raw
+    chunks newest-first. The right tool for "everything
     from <day/week>"; use search_history when relevance matters more than
     completeness. Bounds work like search_history's since/until (bare dates =
     the user's local day); at least one bound is required. Results are compact
@@ -619,9 +621,21 @@ def list_window(since: str = "", until: str = "", source: str = "",
             out["groups_truncated"] = True
         return json.dumps(out)
 
+    # Newest local day first; within a day, the summary chunks lead —
+    # day-shape (the day's arc), then digests (per-stream rollups), then
+    # raw chunks newest-first. Day/week questions read the summaries
+    # before the detail, matching the disclosure ladder.
     rows = db.execute(
         f"""SELECT id, source, timestamp, location, text, meta FROM chunks
-            WHERE {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?""",
+            WHERE {where}
+            ORDER BY date(timestamp, 'localtime') DESC,
+                     CASE WHEN source = 'appusage'
+                               AND json_extract(meta, '$.first') IS NOT NULL
+                          THEN 0
+                          WHEN source = 'digest' THEN 1
+                          ELSE 2 END,
+                     timestamp DESC
+            LIMIT ? OFFSET ?""",
         (*params, limit, offset)).fetchall()
     results = []
     for i, src, ts, loc, text, meta_json in rows:

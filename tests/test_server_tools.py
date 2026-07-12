@@ -261,3 +261,28 @@ def test_list_window_meta_optin_and_ellipsis(scratch_db, fake_embed,
     by_id = {r["id"]: r for r in out["results"]}
     assert by_id["s1"]["meta"] == {"count": 3}
     assert "meta" not in by_id["s2"]                      # empty meta omitted
+
+def test_list_window_summaries_lead_their_day(scratch_db, fake_embed,
+                                              monkeypatch):
+    import server
+    seed(monkeypatch, {
+        "shell": [("raw2", "late command run today",
+                   rec("shell", ts=f"{D}22:00:00+00:00")),
+                  ("prev", "yesterday's command",
+                   rec("shell", ts="2026-07-01T22:00:00+00:00"))],
+        "digest": [("dig", "Browsing digest…",
+                    rec("digest", ts=f"{D}07:00:00+00:00",
+                        meta={"date": "2026-07-02", "visits": 3}))],
+        "appusage": [("shape", "On 2026-07-02, active…",
+                      rec("appusage", ts=f"{D}07:00:00+00:00",
+                          meta={"first": "08:00", "active_seconds": 60})),
+                     ("perapp", "spent 2m in Figma",
+                      rec("appusage", ts=f"{D}07:00:00+00:00",
+                          meta={"app": "Figma", "seconds": 120}))]})
+    out = json.loads(server.list_window(since="2026-07-01",
+                                        until="2026-07-02"))
+    ids = [r["id"] for r in out["results"]]
+    # newest local day first; within it: day-shape, digest, then raw DESC
+    assert ids[:3] == ["shape", "dig", "raw2"]
+    assert ids[-1] == "prev"                      # older day after
+    assert "perapp" in ids[3:]                    # per-app is detail, not summary
