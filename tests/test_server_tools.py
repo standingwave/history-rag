@@ -203,3 +203,41 @@ def test_expand_survives_a_broken_context_handler(scratch_db, fake_embed,
     assert out["chunk"]["text"] == "the text"
     assert "context unavailable" in out["context"]["note"]
     assert out["context_source"] is None
+
+def test_digest_expand_surfaces_the_rollup(scratch_db, fake_embed,
+                                           monkeypatch):
+    import server
+    meta = {"date": "2026-07-02", "digest_of": "browser",
+            "visits": 41, "domains": {"github.com": 12},
+            "searches": ["sqlite vec"]}
+    seed(monkeypatch, {"digest": [("d1", "Browsing digest…",
+                                   rec("digest", meta=meta))]})
+    out = json.loads(server.expand("d1"))
+    assert out["context_source"] == "index"
+    assert out["context"]["day"] == "2026-07-02"
+    assert out["context"]["rollup"]["domains"] == {"github.com": 12}
+    assert "date" not in out["context"]["rollup"]        # lifted out
+
+
+def test_claude_truncation_marker_only_when_cut(scratch_db, fake_embed,
+                                                monkeypatch, tmp_path):
+    import server
+    from sources import claude as claude_src
+    long_text = "x" * 2500
+    lines = [json.dumps({"type": "user", "message": {
+                 "role": "user", "content": t}, "timestamp": "2026-07-02T10:00:00Z"})
+             for t in ("a perfectly ordinary short turn, over forty chars",
+                       long_text)]
+    (tmp_path / "ph").mkdir()
+    (tmp_path / "ph" / "s1.jsonl").write_text("\n".join(lines))
+    monkeypatch.setattr(claude_src, "ROOT", str(tmp_path))
+    meta = {"session_id": "s1", "project_hash": "ph", "lineno": 1,
+            "role": "user"}
+    seed(monkeypatch, {"claude": [("c1", "short turn",
+                                   rec("claude", meta=meta))]})
+    turns = json.loads(server.expand("c1"))["context"]["turns"]
+    by_len = {("long" if len(t["text"]) > 100 else "short"): t["text"]
+              for t in turns}
+    assert not by_len["short"].endswith("[truncated]")  # no marker
+    assert by_len["long"].endswith("… [truncated]")
+    assert len(by_len["long"]) == 2000 + len("… [truncated]")

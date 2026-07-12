@@ -15,7 +15,7 @@ Optional env:
   CLAUDE_RAG_SYNC_KEY      S3 object key       (default history-rag.db)
   CLAUDE_RAG_DB_FRESHNESS  seconds between S3 ETag checks (default 300)
 """
-import base64, hashlib, html, json, os, sys, time
+import base64, hashlib, html, json, os, re, sys, time
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode
 
@@ -108,8 +108,19 @@ summary{color:var(--muted)}
     font-size:.85rem}
 a.expand svg{transition:transform .15s}
 a.expand[data-open] svg{transform:rotate(180deg)}
+a.busy{opacity:.4}
 .inline-expand>*{margin-left:.6rem}
 .inline-expand article{border-style:dashed}
+.chip-s{display:inline-block;padding:.1rem .6rem;border-radius:1rem;
+        border:1px solid var(--line);background:var(--card);
+        color:var(--muted);font-size:.78rem}
+.turn.user{background:#2563eb12}
+.add{color:#16a34a}
+.del{color:#dc2626}
+.err{color:#dc2626}
+@media(prefers-color-scheme:dark){
+ .turn.user{background:#8ab4f814}
+ .add{color:#4ade80}.del{color:#f87171}.err{color:#f87171}}
 svg{width:1em;height:1em;vertical-align:-.12em}
 .note{display:flex;gap:.5rem;align-items:center;background:var(--warn-bg);
       border:1px solid var(--warn-line);color:var(--warn-fg);
@@ -244,21 +255,44 @@ _SCRIPT_LIVE = (
     "subm()})})(qps[j]);"
     "}"
     "var open=null;"
-    "function collapse(a){var n=a.closest('article').nextElementSibling;"
-    "if(n&&n.className==='inline-expand')n.remove();"
+    "function host(a){return a.closest('article')||a.closest('table')}"
+    "function frag(a){var h=host(a);var n=h?h.nextElementSibling:null;"
+    "return n&&n.classList.contains('inline-expand')?n:null}"
+    "function collapse(a){var n=frag(a);if(n)n.hidden=true;"
     "a.removeAttribute('data-open');if(open===a)open=null}"
+    "function show(a,n){n.hidden=false;a.setAttribute('data-open','1');"
+    "open=a;var t=n.querySelector('.target');"
+    "if(t)t.scrollIntoView({block:'nearest'})}"
     "document.addEventListener('click',function(e){"
-    "var a=e.target&&e.target.closest?e.target.closest('a.expand'):null;"
+    "var c=e.target&&e.target.closest;"
+    "var m=c?e.target.closest('a.morectx'):null;"
+    "if(m){var box=m.closest('.inline-expand');"
+    "if(!box)return;"        # full-page morectx: navigate normally
+    "e.preventDefault();m.classList.add('busy');"
+    "fetch(m.getAttribute('href')+'&fragment=1')"
+    ".then(function(r){if(!r.ok)throw 0;return r.text()})"
+    ".then(function(h){box.innerHTML=h})"
+    ".catch(function(){location.href=m.getAttribute('href')});"
+    "return}"
+    "var a=c?e.target.closest('a.expand'):null;"
     "if(!a)return;"
     "e.preventDefault();"
     "if(a.hasAttribute('data-open')){collapse(a);return}"
     "if(open)collapse(open);"
+    "var kept=frag(a);"
+    "if(kept){show(a,kept);return}"      # collapsed once: no refetch
+    "a.classList.add('busy');"
     "fetch(a.getAttribute('href')+'&fragment=1')"
     ".then(function(r){if(!r.ok)throw 0;return r.text()})"
-    ".then(function(h){var d=document.createElement('div');"
+    ".then(function(h){a.classList.remove('busy');"
+    "var d=document.createElement('div');"
     "d.className='inline-expand';d.innerHTML=h;"
-    "a.closest('article').after(d);a.setAttribute('data-open','1');open=a})"
+    "host(a).after(d);show(a,d)})"
     ".catch(function(){location.href=a.getAttribute('href')})});"
+    "var dead=document.querySelectorAll('a.expand[data-noctx]');"
+    "for(var q=0;q<dead.length;q++)(function(l){"
+    "var h=l.closest('article');var p=h?h.querySelector('.clamp'):null;"
+    "if(p&&p.scrollHeight<=p.clientHeight+1)l.remove()})(dead[q]);"
     "})();")
 
 _SCRIPTS = [_SCRIPT_SUBMIT, _SCRIPT_LIVE]
@@ -418,6 +452,61 @@ def _back_qs(g) -> str:
                               "undated", "k", "offset") if g(n)}
     return urlencode(keep)
 
+# ── card renderers: chunk text is the embedded prose; render the meta's
+# structure where it's richer. Fallback (None or an error) is the plain
+# clamped <pre>, so unformatted sources lose nothing.
+
+def _card_shell(r):
+    return f'<pre class="clamp mono">{_esc(r["text"])}</pre>'
+
+def _card_git(r):
+    subject, _, body = r["text"].partition("\n")
+    out = f"<b>{_esc(subject)}</b>"
+    if body.strip():
+        out += f"\n{_esc(body.strip())}"
+    return f'<pre class="clamp">{out}</pre>'
+
+def _card_calendar(r):
+    out = f'<pre class="clamp">{_esc(r["text"])}</pre>'
+    att = (r.get("meta") or {}).get("attendees") or []
+    if att:
+        out += f'<p class="health">with {_esc(", ".join(att[:8]))}</p>'
+    return out
+
+def _card_appusage(r):
+    m = r.get("meta") or {}
+    if "first" not in m:
+        return None                     # per-app chunk: plain text card
+    stat = (f"active {m.get('first', '')}–{m.get('last', '')} · "
+            f"{_dur(m.get('active_seconds', 0))} · "
+            f"{m.get('switches', 0)} switches")
+    if m.get("breaks"):
+        away = sum(b.get("minutes", 0) for b in m["breaks"])
+        stat += f" · {len(m['breaks'])} breaks ({_dur(away * 60)})"
+    parts = [f'<p class="health">{_esc(stat)}</p>']
+    if m.get("focus"):
+        parts.append('<p class="health">focus: ' + " · ".join(
+            f"{_dur(f.get('minutes', 0) * 60)} {_esc(f.get('app') or '')}"
+            for f in m["focus"]) + "</p>")
+    if m.get("calls"):
+        parts.append('<p class="health">calls: ' + " · ".join(
+            f"{_dur(c.get('minutes', 0) * 60)}"
+            + (f" ({_esc(c['app'])})" if c.get("app") else "")
+            for c in m["calls"]) + "</p>")
+    if m.get("categories"):
+        parts.append('<div class="chips">' + "".join(
+            f'<span class="chip-s">{_esc(cat)} {_dur(secs)}</span>'
+            for cat, secs in m["categories"].items()) + "</div>")
+    return "".join(parts)
+
+_CARD_RENDERERS = {"shell": _card_shell, "git": _card_git,
+                   "calendar": _card_calendar, "appusage": _card_appusage}
+
+# Sources whose expanders read live local stores absent on the Lambda —
+# their expand adds nothing remotely, so short cards drop the link (the
+# script measures actual clamping; JS-off keeps the link, harmlessly).
+_NOCTX = {"shell", "appusage"}
+
 def _result_article(r, bq: str = "") -> str:
     head = _badge(r["source"])
     ts = _fmt_ts(r.get("timestamp") or "")
@@ -425,14 +514,27 @@ def _result_article(r, bq: str = "") -> str:
         head += f"<span>{_esc(ts)}</span>"
     if r.get("location"):
         head += f"<span>{_esc(r['location'])}</span>"
-    url = (r.get("meta") or {}).get("url") if r["source"] == "browser" else None
-    text = _esc(r["text"])
-    if url:
-        text = f'<a class="out" href="{_esc(url)}">{text}</a>'
+    role = (r.get("meta") or {}).get("role") if r["source"] == "claude" else None
+    if role:
+        head += f"<span>{_esc(role)}</span>"
+    body = None
+    renderer = _CARD_RENDERERS.get(r["source"])
+    if renderer:
+        try:
+            body = renderer(r)
+        except Exception:
+            body = None
+    if body is None:
+        url = ((r.get("meta") or {}).get("url")
+               if r["source"] == "browser" else None)
+        text = _esc(r["text"])
+        if url:
+            text = f'<a class="out" href="{_esc(url)}">{text}</a>'
+        body = f'<pre class="clamp">{text}</pre>'
     href = f"search?expand={r['id']}" + (f"&{bq}" if bq else "")
-    return (f"<article><header>{head}</header>"
-            f'<pre class="clamp">{text}</pre>'
-            f'<a class="expand" href="{_esc(href)}">'
+    noctx = " data-noctx" if r["source"] in _NOCTX else ""
+    return (f"<article><header>{head}</header>{body}"
+            f'<a class="expand"{noctx} href="{_esc(href)}">'
             f'{_icon("expand")} expand</a></article>')
 
 def _render_results(g, chrome: str, tail: str = "") -> str:
@@ -528,10 +630,14 @@ def _stats_panel(stats: dict) -> str:
 # exists, and absorbs shape drift — a renderer error must not take down
 # the reading view.
 
-def _ctx_claude(ctx):
+def _ctx_claude(ctx, bq=""):
     parts = []
     for t in ctx.get("turns") or []:
-        cls = "turn target" if t.get("target") else "turn"
+        cls = "turn"
+        if (t.get("role") or "") == "user":
+            cls += " user"
+        if t.get("target"):
+            cls += " target"
         head = _esc(t.get("role") or "?")
         ts = _fmt_ts(t.get("timestamp") or "")
         if ts:
@@ -540,31 +646,49 @@ def _ctx_claude(ctx):
                      f"<pre>{_esc(t.get('text') or '')}</pre></article>")
     return "".join(parts)
 
-def _timeline(items, day=""):
+def _timeline(items, day="", bq=""):
     rows = []
     for v in items:
         cls = ' class="target"' if v.get("target") else ""
+        text = _esc(v.get("text") or "")
+        if v.get("id"):        # rows are chunks — let them expand too
+            href = f"search?expand={v['id']}" + (f"&{bq}" if bq else "")
+            text = f'<a class="expand" href="{_esc(href)}">{text}</a>'
         rows.append(f"<tr{cls}>"
                     f"<td>{_esc(_time_only(v.get('timestamp') or ''))}</td>"
-                    f"<td>{_esc(v.get('text') or '')}</td></tr>")
+                    f"<td>{text}</td></tr>")
     head = f'<h2 class="day">{_esc(_day_label(day))}</h2>' if day else ""
     return f'{head}<table class="ctx">{"".join(rows)}</table>'
 
-def _ctx_browser(ctx):
-    return _timeline(ctx.get("visits") or [], ctx.get("day", ""))
+def _ctx_browser(ctx, bq=""):
+    return _timeline(ctx.get("visits") or [], ctx.get("day", ""), bq)
 
-def _ctx_calendar(ctx):
-    return _timeline(ctx.get("agenda") or [], ctx.get("day", ""))
+def _ctx_calendar(ctx, bq=""):
+    return _timeline(ctx.get("agenda") or [], ctx.get("day", ""), bq)
 
-def _ctx_appusage(ctx):
+def _ctx_appusage(ctx, bq=""):
     rows = "".join(f"<tr><td>{_esc(_dur(s))}</td><td>{_esc(app)}</td></tr>"
                    for app, s in (ctx.get("seconds_by_app") or {}).items())
     return f'<table class="ctx">{rows}</table>'
 
-def _ctx_git(ctx):
-    return f'<pre class="mono">{_esc(ctx.get("show") or "")}</pre>'
+_DIFFSTAT = re.compile(r"^(.*\|\s*\d+ )(\+*)(-*)$")
 
-def _ctx_obsidian(ctx):
+def _ctx_git(ctx, bq=""):
+    out = []
+    for line in (ctx.get("show") or "").splitlines():
+        m = _DIFFSTAT.match(line)
+        if m:                       # tint the +/- bars; else leave untouched
+            line = (_esc(m.group(1))
+                    + (f'<span class="add">{m.group(2)}</span>'
+                       if m.group(2) else "")
+                    + (f'<span class="del">{m.group(3)}</span>'
+                       if m.group(3) else ""))
+        else:
+            line = _esc(line)
+        out.append(line)
+    return '<pre class="mono">' + "\n".join(out) + "</pre>"
+
+def _ctx_obsidian(ctx, bq=""):
     if ctx.get("note_text") is not None:
         return f"<pre>{_esc(ctx['note_text'])}</pre>"
     return "".join(
@@ -572,42 +696,123 @@ def _ctx_obsidian(ctx):
         f"<pre>{_esc(s.get('text') or '')}</pre></article>"
         for s in ctx.get("sections") or [])
 
-def _ctx_shell(ctx):
+def _ctx_shell(ctx, bq=""):
     rows = []
     for c in ctx.get("commands") or []:
         cls = ' class="target"' if c.get("target") else ""
-        where = c.get("cwd") or ""
-        if c.get("exit"):
-            where += f"  exit {c['exit']}"
+        extra = (f' <span class="err">exit {_esc(str(c["exit"]))}</span>'
+                 if c.get("exit") else "")
         rows.append(f"<tr{cls}>"
                     f"<td>{_esc(_time_only(c.get('timestamp') or ''))}</td>"
                     f'<td class="mono">{_esc(c.get("command") or "")}'
-                    f"<br><small>{_esc(where)}</small></td></tr>")
+                    f"<br><small>{_esc(c.get('cwd') or '')}{extra}</small>"
+                    "</td></tr>")
     return f'<table class="ctx">{"".join(rows)}</table>'
+
+def _ctx_digest(ctx, bq=""):
+    r = ctx.get("rollup") or {}
+    parts, stats = [], []
+    if r.get("visits"):
+        stats.append(f"{r['visits']} visits")
+    if r.get("total_turns"):
+        stats.append(f"{r['total_turns']} turns")
+    if r.get("runs"):
+        stats.append(f"{r['runs']} commands")
+    if stats:
+        parts.append(f'<p class="health">{_esc(" · ".join(stats))}</p>')
+    def table(title, rows):
+        parts.append(f'<h2 class="day">{title}</h2>'
+                     f'<table class="ctx">{rows}</table>')
+    if r.get("domains"):
+        table("sites", "".join(
+            f"<tr><td>{_esc(n)}</td><td>{_esc(d)}</td></tr>"
+            for d, n in r["domains"].items()))
+    if r.get("searches"):
+        table("searches", "".join(
+            f"<tr><td></td><td>{_esc(s)}</td></tr>" for s in r["searches"]))
+    if r.get("top_titles"):
+        table("pages", "".join(
+            f"<tr><td>{_esc(t.get('visits') or '')}</td>"
+            f"<td>{_esc(t.get('title') or '')}</td></tr>"
+            for t in r["top_titles"]))
+    if r.get("sessions"):
+        table("sessions", "".join(
+            f"<tr><td>{_esc(s.get('turns') or '')}</td>"
+            f"<td>{_esc(s.get('project') or '')}<br>"
+            f"<small>{_esc(s.get('first_prompt') or '')}</small></td></tr>"
+            for s in r["sessions"]))
+    if r.get("by_cwd"):
+        table("runs by directory", "".join(
+            f"<tr><td>{_esc(n)}</td><td>{_esc(c)}</td></tr>"
+            for c, n in r["by_cwd"].items()))
+    if r.get("top_commands"):
+        table("top commands", "".join(
+            f"<tr><td>x{_esc(c.get('runs') or '')}</td>"
+            f'<td class="mono">{_esc(c.get("command") or "")}</td></tr>'
+            for c in r["top_commands"]))
+    if not parts:                   # unknown rollup stream: honest fallback
+        return ("<pre>"
+                + _esc(json.dumps(r, indent=2, ensure_ascii=False)) + "</pre>")
+    return "".join(parts)
 
 _CONTEXT_RENDERERS = {
     "claude": _ctx_claude, "browser": _ctx_browser,
     "calendar": _ctx_calendar, "appusage": _ctx_appusage,
     "git": _ctx_git, "obsidian": _ctx_obsidian, "shell": _ctx_shell,
+    "digest": _ctx_digest,
 }
 
-def _context_html(source: str, ctx) -> str:
+def _context_html(source: str, ctx, bq="") -> str:
     if isinstance(ctx, dict) and "note" in ctx and set(ctx) <= {"note",
                                                                 "scope"}:
         return f"<p>{_esc(ctx['note'])}</p>"      # git-gone, expand-degrade
     renderer = _CONTEXT_RENDERERS.get(source)
     if renderer and isinstance(ctx, dict):
         try:
-            return renderer(ctx)
+            return renderer(ctx, bq)
         except Exception:
             pass
     return ("<pre>"
             + _esc(json.dumps(ctx, indent=2, ensure_ascii=False)) + "</pre>")
 
-def _expand_articles(cid: str) -> str:
+def _meta_line(source: str, meta: dict) -> str:
+    """The chunk meta fields worth reading, one muted line per source;
+    empty fields render nothing."""
+    bits = []
+    if source == "browser":
+        if meta.get("visit_count"):
+            bits.append(_esc(f"{meta['visit_count']} visits"))
+        if meta.get("url"):
+            bits.append(f'<a class="out" href="{_esc(meta["url"])}">'
+                        f'{_esc(str(meta["url"])[:80])}</a>')
+    elif source == "shell":
+        if meta.get("count"):
+            bits.append(_esc(f"{meta['count']} runs"))
+        if meta.get("cwd"):
+            bits.append(_esc(meta["cwd"]))
+        if meta.get("exit"):
+            bits.append(f'<span class="err">exit {_esc(str(meta["exit"]))}'
+                        "</span>")
+    elif source == "git":
+        if meta.get("sha"):
+            bits.append(_esc(str(meta["sha"])[:12]))
+        if (meta.get("count") or 0) > 1:
+            bits.append(_esc(f"{meta['count']} copies"))
+    elif source == "calendar":
+        if meta.get("attendees"):
+            bits.append(_esc("with " + ", ".join(meta["attendees"][:8])))
+    elif source == "appusage":
+        if meta.get("category"):
+            bits.append(_esc(meta["category"]))
+    elif source == "claude":
+        if meta.get("role"):
+            bits.append(_esc(meta["role"]))
+    return f'<p class="health">{" · ".join(bits)}</p>' if bits else ""
+
+def _expand_articles(cid: str, n: int = 5, bq: str = "") -> str:
     """The expand view's content, chrome-free — served whole to the full
     page and as the fragment the inline-expand script fetches."""
-    data = json.loads(server.expand(cid))
+    data = json.loads(server.expand(cid, context=n))
     if "error" in data:
         return f"<p>{_esc(data['error'])}</p>"
     c = data["chunk"]
@@ -618,19 +823,25 @@ def _expand_articles(cid: str) -> str:
     if c.get("location"):
         head += f"<span>{_esc(c['location'])}</span>"
     parts = [f"<article><header>{head}</header>"
+             f"{_meta_line(c['source'], c.get('meta') or {})}"
              f"<pre>{_esc(c['text'])}</pre></article>"]
     if data.get("context") is not None:
         label = "context"
         if data.get("context_source"):
             label += f" ({_esc(data['context_source'])})"
         parts.append(f'<h2 class="day">{label}</h2>')
-        parts.append(_context_html(c["source"], data["context"]))
+        parts.append(_context_html(c["source"], data["context"], bq))
+        if n < 25:
+            href = (f"search?expand={cid}&context={min(max(n * 2, 10), 25)}"
+                    + (f"&{bq}" if bq else ""))
+            parts.append(f'<p><a class="morectx" href="{_esc(href)}">'
+                         "show more context</a></p>")
     return "".join(parts)
 
-def _render_expand(cid: str, bq: str = "") -> str:
+def _render_expand(cid: str, n: int = 5, bq: str = "") -> str:
     back_href = "search" + (f"?{bq}" if bq else "")
     back = f'<p><a href="{_esc(back_href)}">&larr; search</a></p>'
-    return _page(back + _expand_articles(cid))
+    return _page(back + _expand_articles(cid, n, bq))
 
 async def _send_html(send, body: str):
     data = body.encode()
@@ -648,10 +859,12 @@ async def _search_page(scope, send):
         return (qs.get(name) or [""])[0].strip()
 
     if g("expand"):
+        n = _int(g("context"), 5, 0, 25)
         if g("fragment"):
-            await _send_html(send, _expand_articles(g("expand")))
+            await _send_html(send, _expand_articles(g("expand"), n,
+                                                    _back_qs(g)))
             return
-        body = _render_expand(g("expand"), _back_qs(g))
+        body = _render_expand(g("expand"), n, _back_qs(g))
     else:
         stats = _stats()
         chrome = _banner(stats) + _form(g, stats)

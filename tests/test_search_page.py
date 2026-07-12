@@ -228,7 +228,7 @@ def test_bad_k_falls_back_to_default(monkeypatch):
 def test_expand_roundtrip(monkeypatch):
     seen = []
 
-    def fake_expand(cid):
+    def fake_expand(cid, context=5):
         seen.append(cid)
         return json.dumps({"chunk": {"id": cid, "source": "git",
                                      "timestamp": "2026-07-01T00:00:00+00:00",
@@ -246,7 +246,8 @@ def test_expand_roundtrip(monkeypatch):
 
 def test_tool_error_renders_as_text(monkeypatch):
     monkeypatch.setattr(app.server, "expand",
-                        lambda cid: json.dumps({"error": "no chunk with id 'z'"}))
+                        lambda cid, context=5: json.dumps(
+                            {"error": "no chunk with id 'z'"}))
     status, _, body = _get("/s3cr3t/search", "expand=z")
     assert status == 200
     assert "no chunk with id" in body
@@ -269,11 +270,12 @@ def test_mcp_paths_still_fall_through(monkeypatch):
 # ── rendering pass (wip/SPEC-search-page-rendering.md) ───────────────────────
 
 def _expand_with(monkeypatch, source, context, ctx_src="index", text="body"):
-    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+    payload = json.dumps(
         {"chunk": {"id": "x1", "source": source,
                    "timestamp": "2026-07-02T17:00:00+00:00",
                    "location": "loc", "text": text, "meta": {}},
-         "context": context, "context_source": ctx_src}))
+         "context": context, "context_source": ctx_src})
+    monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
     _, _, body = _get("/s3cr3t/search", "expand=x1")
     return body
 
@@ -285,7 +287,7 @@ def test_claude_turns_render_as_conversation(monkeypatch):
         {"lineno": 2, "role": "assistant", "text": "the answer",
          "target": True}]})
     assert '{"turns"' not in body                       # no raw JSON
-    assert 'class="turn"' in body and 'class="turn target"' in body
+    assert 'class="turn user"' in body and 'class="turn target"' in body
     assert "user ·" in body and "the answer" in body
 
 
@@ -300,7 +302,8 @@ def test_appusage_context_renders_durations(monkeypatch):
 def test_git_show_renders_unquoted(monkeypatch):
     body = _expand_with(monkeypatch, "git",
                         {"show": "commit abc\n file | 2 +-"})
-    assert '<pre class="mono">commit abc\n file | 2 +-</pre>' in body
+    assert ('commit abc\n file | 2 <span class="add">+</span>'
+            '<span class="del">-</span>') in body
     assert "\\n" not in body
 
 
@@ -322,7 +325,7 @@ def test_result_cards_clamped_with_badges(monkeypatch):
                                 {"rank": 1, "id": "r1", "source": "shell",
                                  "distance": 0.5, "text": "cmd"}]}))
     _, _, body = _get("/s3cr3t/search", "q=x")
-    assert 'class="clamp"' in body
+    assert 'class="clamp mono"' in body           # shell cards render mono
     assert 'class="badge s-shell"' in body and "<svg" in body
     assert 'src="http' not in body                      # no external assets
 
@@ -416,7 +419,8 @@ def test_csp_lists_every_script_hash():
 
 
 def test_fragment_returns_articles_only(monkeypatch):
-    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+    monkeypatch.setattr(app.server, "expand",
+                        lambda cid, context=5: json.dumps(
         {"chunk": {"id": cid, "source": "shell", "timestamp": "",
                    "location": "", "text": "<script>x</script>", "meta": {}},
          "context": None, "context_source": None}))
@@ -428,7 +432,8 @@ def test_fragment_returns_articles_only(monkeypatch):
 
 
 def test_expand_back_link_restores_the_search(monkeypatch):
-    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+    monkeypatch.setattr(app.server, "expand",
+                        lambda cid, context=5: json.dumps(
         {"chunk": {"id": cid, "source": "shell", "timestamp": "",
                    "location": "", "text": "t", "meta": {}},
          "context": None, "context_source": None}))
@@ -444,3 +449,124 @@ def test_quickpicks_hidden_server_side():
     _, _, body = _get("/s3cr3t/search")
     assert body.count('class="qp" hidden') == 4       # JS-off: no dead controls
     assert 'data-days="0"' in body and 'data-days=""' in body
+
+
+# ── expand v2 (wip/SPEC-expand-v2.md) ────────────────────────────────────────
+
+def test_digest_context_renders_sections(monkeypatch):
+    body = _expand_with(monkeypatch, "digest", {
+        "day": "2026-07-02", "digest_of": "browser",
+        "rollup": {"visits": 41, "domains": {"github.com": 12},
+                   "searches": ["sqlite vec"],
+                   "top_titles": [{"title": "sqlite-vec README",
+                                   "visits": 5}]}})
+    assert "41 visits" in body
+    assert ">sites</h2>" in body and "github.com" in body
+    assert ">searches</h2>" in body and "sqlite vec" in body
+    assert '{"rollup"' not in body                     # no raw JSON
+
+
+def test_timeline_rows_expand_with_back_params(monkeypatch):
+    payload = json.dumps(
+        {"chunk": {"id": "x1", "source": "browser",
+                   "timestamp": "2026-07-02T17:00:00+00:00",
+                   "location": "chrome:Default", "text": "t", "meta": {}},
+         "context": {"day": "2026-07-02", "profile": "chrome:Default",
+                     "visits": [{"id": "v2",
+                                 "timestamp": "2026-07-02T18:00:00+00:00",
+                                 "text": "Other page"}]},
+         "context_source": "index"})
+    monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
+    _, _, body = _get("/s3cr3t/search", "expand=x1&q=hello")
+    assert 'class="expand" href="search?expand=v2&amp;q=hello"' in body
+
+
+def test_show_more_context_link(monkeypatch):
+    body = _expand_with(monkeypatch, "claude",
+                        {"turns": [{"role": "user", "text": "long enough"}]})
+    assert 'class="morectx" href="search?expand=x1&amp;context=10"' in body
+    # at the cap: no link
+    payload = json.dumps(
+        {"chunk": {"id": "x1", "source": "claude", "timestamp": "",
+                   "location": "", "text": "t", "meta": {}},
+         "context": {"turns": []}, "context_source": "index"})
+    monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
+    _, _, body = _get("/s3cr3t/search", "expand=x1&context=25")
+    assert 'class="morectx"' not in body
+
+
+def test_context_param_passes_through(monkeypatch):
+    seen = []
+
+    def fake(cid, context=5):
+        seen.append(context)
+        return json.dumps({"chunk": {"id": cid, "source": "shell",
+                                     "timestamp": "", "location": "",
+                                     "text": "t", "meta": {}},
+                           "context": None, "context_source": None})
+
+    monkeypatch.setattr(app.server, "expand", fake)
+    _get("/s3cr3t/search", "expand=e1&context=15")
+    _get("/s3cr3t/search", "expand=e1&context=99")     # clamped
+    assert seen == [15, 25]
+
+
+def test_meta_line_per_source(monkeypatch):
+    payload = json.dumps(
+        {"chunk": {"id": "x1", "source": "shell", "timestamp": "",
+                   "location": "", "text": "make deploy",
+                   "meta": {"count": 7, "cwd": "~/dev/x", "exit": 2}},
+         "context": None, "context_source": None})
+    monkeypatch.setattr(app.server, "expand", lambda cid, context=5: payload)
+    _, _, body = _get("/s3cr3t/search", "expand=x1")
+    assert "7 runs · ~/dev/x" in body
+    assert '<span class="err">exit 2</span>' in body
+
+
+def test_meta_line_omits_empty(monkeypatch):
+    body = _expand_with(monkeypatch, "obsidian", None, ctx_src=None)
+    assert 'class="health"' not in body                # no meta, no line
+
+
+def test_shell_context_exit_warns(monkeypatch):
+    body = _expand_with(monkeypatch, "shell", {"scope": "session",
+        "commands": [{"timestamp": "2026-07-02T17:00:00+00:00",
+                      "cwd": "~/dev", "exit": 1, "command": "make"},
+                     {"timestamp": "2026-07-02T17:01:00+00:00",
+                      "cwd": "~/dev", "exit": 0, "command": "ls",
+                      "target": True}]})
+    assert body.count('class="err"') == 1              # only nonzero exits
+
+
+def test_dayshape_card_renders_structure(monkeypatch):
+    meta = {"date": "2026-07-02", "first": "08:42", "last": "18:30",
+            "switches": 12, "active_seconds": 21000,
+            "breaks": [{"start": "12:00", "minutes": 45}],
+            "focus": [{"app": "Xcode", "start": "09:00", "minutes": 52}],
+            "calls": [{"start": "14:00", "minutes": 19, "app": "zoom.us"}],
+            "categories": {"developer-tools": 17700, "other": 3300}}
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 1, "results": [
+                                {"rank": 1, "id": "d1", "source": "appusage",
+                                 "distance": 0.5, "text": "On 2026-07-02…",
+                                 "meta": meta}]}))
+    _, _, body = _get("/s3cr3t/search", "q=x")
+    assert "active 08:42–18:30 · 5h 50m · 12 switches · 1 breaks (45m)" in body
+    assert "focus: 52m Xcode" in body
+    assert "calls: 19m (zoom.us)" in body
+    assert '<span class="chip-s">developer-tools 4h 55m</span>' in body
+    assert "On 2026-07-02…" not in body                # structure, not prose
+
+
+def test_noctx_marker_on_the_right_sources(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 2, "results": [
+                                {"rank": 1, "id": "a", "source": "shell",
+                                 "distance": 0.5, "text": "x"},
+                                {"rank": 2, "id": "b", "source": "claude",
+                                 "distance": 0.6, "text": "y"}]}))
+    _, _, body = _get("/s3cr3t/search", "q=x")
+    assert 'class="expand" data-noctx href="search?expand=a' in body
+    assert 'class="expand" href="search?expand=b' in body   # claude: none

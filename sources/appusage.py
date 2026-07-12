@@ -62,6 +62,9 @@ def _dayshape_chunk(store, db, day: str, weekday: str, rollup=None):
                       for s, e, app in shape["calls"]],
             "focus": [{"app": app, "start": clock(s), "minutes": int(secs // 60)}
                       for app, s, _, secs in shape["focus"]]}
+    if rollup:
+        meta["categories"] = {cat: int(secs) for cat, secs in
+                              sorted(rollup.items(), key=lambda kv: -kv[1])}
     return _chunk(day, f"day:{day}", " ".join(parts), meta)
 
 def iter_chunks():

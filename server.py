@@ -135,7 +135,8 @@ def _expand_claude(db, chunk, n):
         before, target, after = deque(maxlen=n), None, []
         for ln, role, text, ts, _cwd in claude_src.iter_turns(fp):
             turn = {"lineno": ln, "role": role, "timestamp": ts,
-                    "text": text[:2000]}
+                    "text": text[:2000] + ("… [truncated]"
+                                           if len(text) > 2000 else "")}
             if ln < lineno:
                 before.append(turn)
             elif ln == lineno:
@@ -254,6 +255,18 @@ def _expand_shell(db, chunk, n):
     ctx = atuin_context(chunk["text"], n)
     return (ctx, "live") if ctx else (None, None)
 
+def _expand_digest(db, chunk, n):
+    """The chunk's own meta IS the day's rollup (per-site counts, searches,
+    session topics, runs by cwd) — surface it as context so callers get the
+    structure the templated text summarizes. Index-backed by definition."""
+    meta = chunk.get("meta") or {}
+    rollup = {k: v for k, v in meta.items() if k not in ("date", "digest_of")}
+    if not rollup:
+        return None, None
+    return {"day": meta.get("date", ""),
+            "digest_of": meta.get("digest_of", ""),
+            "rollup": rollup}, "index"
+
 _EXPANDERS = {
     "claude": _expand_claude,
     "git": _expand_git,
@@ -262,6 +275,7 @@ _EXPANDERS = {
     "appusage": _expand_appusage,
     "shell": _expand_shell,
     "calendar": _expand_calendar,
+    "digest": _expand_digest,
 }
 
 # ── tools ────────────────────────────────────────────────────────────────────
