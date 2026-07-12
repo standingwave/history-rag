@@ -36,7 +36,11 @@ jobs:
         # Cold-starts the new bundle: import errors surface as FunctionError;
         # a healthy gate 404s a secret-less path.
         run: |
-          printf '%s' '{"version":"2.0","rawPath":"/","requestContext":{"http":{"method":"GET","path":"/"}}}' > event.json
+          printf '%s' '{"version":"2.0","routeKey":"$default","rawPath":"/",
+            "rawQueryString":"","headers":{},"isBase64Encoded":false,
+            "requestContext":{"stage":"$default","http":{"method":"GET",
+            "path":"/","protocol":"HTTP/1.1","sourceIp":"127.0.0.1",
+            "userAgent":"deploy-smoke"}}}' | tr -d '\n ' > event.json
           aws lambda invoke --function-name "${{ vars.LAMBDA_FUNCTION }}" \
             --payload fileb://event.json out.json \
             --query FunctionError --output text > function-error.txt
