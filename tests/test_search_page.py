@@ -262,3 +262,136 @@ def test_mcp_paths_still_fall_through(monkeypatch):
     monkeypatch.setattr(app, "_inner", fake_inner)
     status, _, _ = _get("/s3cr3t/mcp")
     assert status == 200 and seen == ["/mcp"]
+
+
+# ── rendering pass (wip/SPEC-search-page-rendering.md) ───────────────────────
+
+def _expand_with(monkeypatch, source, context, ctx_src="index", text="body"):
+    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+        {"chunk": {"id": "x1", "source": source,
+                   "timestamp": "2026-07-02T17:00:00+00:00",
+                   "location": "loc", "text": text, "meta": {}},
+         "context": context, "context_source": ctx_src}))
+    _, _, body = _get("/s3cr3t/search", "expand=x1")
+    return body
+
+
+def test_claude_turns_render_as_conversation(monkeypatch):
+    body = _expand_with(monkeypatch, "claude", {"turns": [
+        {"lineno": 1, "role": "user", "timestamp": "2026-07-02T16:59:00+00:00",
+         "text": "the question"},
+        {"lineno": 2, "role": "assistant", "text": "the answer",
+         "target": True}]})
+    assert '{"turns"' not in body                       # no raw JSON
+    assert 'class="turn"' in body and 'class="turn target"' in body
+    assert "user ·" in body and "the answer" in body
+
+
+def test_appusage_context_renders_durations(monkeypatch):
+    body = _expand_with(monkeypatch, "appusage",
+                        {"date": "2026-07-02",
+                         "seconds_by_app": {"Figma": 8040, "Slack": 300}})
+    assert "2h 14m" in body and "5m" in body
+    assert "8040" not in body
+
+
+def test_git_show_renders_unquoted(monkeypatch):
+    body = _expand_with(monkeypatch, "git",
+                        {"show": "commit abc\n file | 2 +-"})
+    assert '<pre class="mono">commit abc\n file | 2 +-</pre>' in body
+    assert "\\n" not in body
+
+
+def test_unknown_context_shape_falls_back_to_json(monkeypatch):
+    body = _expand_with(monkeypatch, "newsrc", {"weird": [1, 2]})
+    assert '&quot;weird&quot;' in body                  # escaped JSON pre
+
+
+def test_context_note_renders_as_text(monkeypatch):
+    body = _expand_with(monkeypatch, "claude",
+                        {"note": "context unavailable: x"}, ctx_src=None)
+    assert "<p>context unavailable: x</p>" in body
+
+
+def test_result_cards_clamped_with_badges(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 1, "results": [
+                                {"rank": 1, "id": "r1", "source": "shell",
+                                 "distance": 0.5, "text": "cmd"}]}))
+    _, _, body = _get("/s3cr3t/search", "q=x")
+    assert 'class="clamp"' in body
+    assert 'class="badge s-shell"' in body and "<svg" in body
+    assert 'src="http' not in body                      # no external assets
+
+
+def test_browser_titles_link_their_url(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 1, "results": [
+                                {"rank": 1, "id": "r1", "source": "browser",
+                                 "distance": 0.5, "text": "Title — url",
+                                 "meta": {"url": "https://ex.com/p?a=1&b=2"}}]}))
+    _, _, body = _get("/s3cr3t/search", "q=x")
+    assert '<a class="out" href="https://ex.com/p?a=1&amp;b=2">' in body
+
+
+def test_window_groups_by_day(monkeypatch):
+    monkeypatch.setattr(app.server, "list_window",
+                        lambda **kw: json.dumps(
+                            {"count": 3, "total": 3, "window": {}, "results": [
+                                {"id": "a", "source": "shell", "location": "",
+                                 "timestamp": "2026-07-02T17:00:00+00:00",
+                                 "text": "x"},
+                                {"id": "b", "source": "shell", "location": "",
+                                 "timestamp": "2026-07-02T16:00:00+00:00",
+                                 "text": "y"},
+                                {"id": "c", "source": "git", "location": "",
+                                 "timestamp": "2026-07-01T17:00:00+00:00",
+                                 "text": "z"}]}))
+    _, _, body = _get("/s3cr3t/search", "since=2026-07-01&until=2026-07-02")
+    assert body.count('<h2 class="day">') == 2          # two local days
+    assert "Thu Jul 2" in body and "Wed Jul 1" in body
+
+
+def test_empty_state_line(monkeypatch):
+    monkeypatch.setattr(app.server, "history_stats",
+                        lambda locations=False: json.dumps(
+                            {"total_chunks": 36727,
+                             "sources": {"shell": {"chunks": 1,
+                                                   "earliest": "2023-05-07T00:00:00+00:00"},
+                                         "git": {"chunks": 2,
+                                                 "earliest": "2018-09-18T00:00:00+00:00"}}}))
+    _, _, body = _get("/s3cr3t/search")
+    assert "36,727 chunks across 2 sources, 2018 → today" in body
+
+
+def test_stats_panel_renders_index_and_sources(monkeypatch):
+    monkeypatch.setattr(app.server, "history_stats",
+                        lambda locations=False: json.dumps(
+                            {"total_chunks": 100,
+                             "embedding": {"model": "mxbai-embed-large",
+                                           "dim": 1024},
+                             "db": {"bytes": 174_000_000,
+                                    "freelist_bytes": 30_000_000},
+                             "health": {"status": "ok", "age_minutes": 17,
+                                        "replica": {"synced_age_minutes": 12}},
+                             "sources": {"shell": {"chunks": 100,
+                                                   "earliest": "2026-06-12T07:00:00+00:00",
+                                                   "latest": "2026-07-12T07:00:00+00:00"}}}))
+    _, _, body = _get("/s3c" + "r3t/search")
+    panel = body[body.index('class="stats"'):]
+    assert "mxbai-embed-large/1024" in panel
+    assert "replica synced</dt><dd>12m ago" in panel
+    assert "174 MB (30 MB reclaimable)" in panel
+    assert "<td>shell</td><td>100</td>" in panel
+
+
+def test_stats_panel_omits_absent_replica(monkeypatch):
+    monkeypatch.setattr(app.server, "history_stats",
+                        lambda locations=False: json.dumps(
+                            {"total_chunks": 1,
+                             "health": {"status": "ok", "age_minutes": 5},
+                             "sources": {"shell": {"chunks": 1}}}))
+    _, _, body = _get("/s3cr3t/search")
+    assert "replica" not in body
