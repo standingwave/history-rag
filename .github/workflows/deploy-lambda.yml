@@ -2,6 +2,15 @@
 # function's env secrets — keep aws lambda stdout out of this public log.
 name: deploy-lambda
 on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/lambda/app.py
+      - deploy/lambda/requirements.txt
+      - deploy/lambda/build.sh
+      - server.py
+      - config.py
+      - .github/workflows/deploy-lambda.yml
   workflow_dispatch:
 concurrency:
   group: deploy-lambda

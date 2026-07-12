@@ -122,11 +122,55 @@ Two thin clients ride the same endpoint (design: `wip/SPEC-direct-access.md`):
   query string, so they land in the phone browser's history — acceptable
   for a personal tool, noted in the page footer.
 
-## Deploy loop
+## Deploys
+
+Pushes to main touching the shipped files (`app.py`, `requirements.txt`,
+`build.sh`, `server.py`, `config.py`, or the workflow itself) deploy
+automatically via `.github/workflows/deploy-lambda.yml`: tests → build →
+OIDC role assumption → code update → a secret-less smoke invoke (the gate
+must 404 a path outside the secret) → a `deployed-sha` tag on the
+function. "What's live?" is `aws lambda list-tags`; manual runs are
+`gh workflow run deploy-lambda`.
+
+Fallback (first deploy, CI outage, offline work):
 
 ```sh
 ./build.sh && aws lambda update-function-code --function-name history-rag \
   --zip-file fileb://history-rag-lambda.zip --region "$REGION"
+```
+
+### One-time CI setup
+
+GitHub-OIDC federation — no AWS keys stored in the repo. Trust is scoped
+to this repo's main branch, because `UpdateFunctionCode` is effectively
+read access to the index and the embed key (deployed code sees both):
+
+```sh
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1  # skip if the account has one
+cat > trust.json <<EOF
+{"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
+  "Principal": {"Federated": "arn:aws:iam::$ACCOUNT:oidc-provider/token.actions.githubusercontent.com"},
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {"StringEquals": {
+    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+    "token.actions.githubusercontent.com:sub": "repo:standingwave/history-rag:ref:refs/heads/main"}}}]}
+EOF
+aws iam create-role --role-name history-rag-deploy \
+  --assume-role-policy-document file://trust.json
+cat > deploy-policy.json <<EOF
+{"Version": "2012-10-17", "Statement": [{"Effect": "Allow",
+  "Action": ["lambda:UpdateFunctionCode", "lambda:GetFunction",
+             "lambda:InvokeFunction", "lambda:TagResource", "lambda:ListTags"],
+  "Resource": "arn:aws:lambda:$REGION:$ACCOUNT:function:history-rag"}]}
+EOF
+aws iam put-role-policy --role-name history-rag-deploy \
+  --policy-name deploy-function-code --policy-document file://deploy-policy.json
+gh secret set AWS_DEPLOY_ROLE_ARN   # the role's ARN, via stdin
+gh variable set AWS_REGION --body "$REGION"
+gh variable set LAMBDA_FUNCTION --body history-rag
 ```
 
 ## Secrets
