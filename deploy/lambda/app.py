@@ -95,6 +95,21 @@ summary{color:var(--muted)}
                color:var(--muted)}
 .filters .check{flex-direction:row;align-items:center;gap:.4rem;
                 grid-column:1/-1}
+.chips{display:flex;gap:.4rem;overflow-x:auto;padding:.3rem 0;
+       -webkit-overflow-scrolling:touch}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip span{display:inline-block;padding:.25rem .8rem;border-radius:1rem;
+           border:1px solid var(--line);background:var(--card);
+           color:var(--muted);white-space:nowrap;font-size:.85rem}
+.chip input:checked+span{background:var(--acc);color:var(--bg);
+                         border-color:var(--acc)}
+.qp{padding:.25rem .8rem;border-radius:1rem;border:1px solid var(--line);
+    background:var(--card);color:var(--muted);white-space:nowrap;
+    font-size:.85rem}
+a.expand svg{transition:transform .15s}
+a.expand[data-open] svg{transform:rotate(180deg)}
+.inline-expand>*{margin-left:.6rem}
+.inline-expand article{border-style:dashed}
 svg{width:1em;height:1em;vertical-align:-.12em}
 .note{display:flex;gap:.5rem;align-items:center;background:var(--warn-bg);
       border:1px solid var(--warn-line);color:var(--warn-fg);
@@ -191,19 +206,69 @@ def _badge(source: str) -> str:
     return (f'<span class="badge s-{cls}">{_icon(source)}'
             f"{_esc(source)}</span>")
 
-# The page's single scripted enhancement: disable the button + show
-# progress during submit, re-enable on bfcache back-navigation. ASCII-only
-# (\\u2026 escape) so the hashed bytes are unambiguous; the CSP pins this
-# exact script, so injected chunk text still cannot execute.
-_SCRIPT = ("(function(){var f=document.querySelector('form');if(!f)return;"
-           "var b=f.querySelector('button');"
-           "f.addEventListener('submit',function(){b.disabled=true;"
-           "b.textContent='Searching\\u2026'});"
-           "window.addEventListener('pageshow',function(){b.disabled=false;"
-           "b.textContent='Search'})})();")
-_CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-"
-        + base64.b64encode(hashlib.sha256(_SCRIPT.encode()).digest()).decode()
-        + "'").encode()
+# Scripts are ASCII-only static constants (\\u escapes) so the hashed
+# bytes are unambiguous; the CSP lists exactly their hashes, so injected
+# chunk text still cannot execute. All HTML the scripts insert is
+# server-rendered (fetched fragments) — JS never builds markup from data.
+
+# Submit feedback: disable the button + show progress, re-enable on
+# bfcache back-navigation.
+_SCRIPT_SUBMIT = (
+    "(function(){var f=document.querySelector('form');if(!f)return;"
+    "var b=f.querySelector('button');"
+    "f.addEventListener('submit',function(){b.disabled=true;"
+    "b.textContent='Searching\\u2026'});"
+    "window.addEventListener('pageshow',function(){b.disabled=false;"
+    "b.textContent='Search'})})();")
+
+# Live form (chips auto-submit, date quick-picks) + inline expand
+# (fragment fetch; failures fall through to plain navigation).
+_SCRIPT_LIVE = (
+    "(function(){var f=document.querySelector('form');"
+    "if(f){"
+    "var subm=function(){f.requestSubmit?f.requestSubmit():f.submit()};"
+    "var act=function(){return f.q.value.trim()||f.since.value"
+    "||f.until.value};"
+    "var srcs=f.querySelectorAll('input[name=source]');"
+    "for(var i=0;i<srcs.length;i++)srcs[i].addEventListener('change',"
+    "function(){if(act())subm()});"
+    "var iso=function(d){var p=function(n){return(n<10?'0':'')+n};"
+    "return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())};"
+    "var qps=f.querySelectorAll('.qp');"
+    "for(var j=0;j<qps.length;j++)(function(b){b.hidden=false;"
+    "b.addEventListener('click',function(){"
+    "var v=b.getAttribute('data-days');"
+    "if(v===''){f.since.value='';f.until.value=''}"
+    "else{var s=new Date();s.setDate(s.getDate()-parseInt(v,10));"
+    "f.since.value=iso(s);f.until.value=iso(new Date())}"
+    "subm()})})(qps[j]);"
+    "}"
+    "var open=null;"
+    "function collapse(a){var n=a.closest('article').nextElementSibling;"
+    "if(n&&n.className==='inline-expand')n.remove();"
+    "a.removeAttribute('data-open');if(open===a)open=null}"
+    "document.addEventListener('click',function(e){"
+    "var a=e.target&&e.target.closest?e.target.closest('a.expand'):null;"
+    "if(!a)return;"
+    "e.preventDefault();"
+    "if(a.hasAttribute('data-open')){collapse(a);return}"
+    "if(open)collapse(open);"
+    "fetch(a.getAttribute('href')+'&fragment=1')"
+    ".then(function(r){if(!r.ok)throw 0;return r.text()})"
+    ".then(function(h){var d=document.createElement('div');"
+    "d.className='inline-expand';d.innerHTML=h;"
+    "a.closest('article').after(d);a.setAttribute('data-open','1');open=a})"
+    ".catch(function(){location.href=a.getAttribute('href')})});"
+    "})();")
+
+_SCRIPTS = [_SCRIPT_SUBMIT, _SCRIPT_LIVE]
+
+def _sha(s: str) -> str:
+    return base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()
+
+_CSP = ("default-src 'none'; style-src 'unsafe-inline'; "
+        "connect-src 'self'; script-src "
+        + " ".join(f"'sha256-{_sha(s)}'" for s in _SCRIPTS)).encode()
 
 def _esc(v) -> str:
     return html.escape(str(v))
@@ -213,8 +278,9 @@ def _page(inner: str, tail: str = "") -> str:
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             f"<title>history</title><style>{_STYLE}</style></head><body>"
             f"{inner}<footer>queries travel in the URL — they stay in this "
-            f"browser's history</footer>{tail}<script>{_SCRIPT}</script>"
-            "</body></html>")
+            f"browser's history</footer>{tail}"
+            + "".join(f"<script>{s}</script>" for s in _SCRIPTS)
+            + "</body></html>")
 
 def _local(ts: str):
     try:
@@ -297,29 +363,39 @@ def _form(g, stats: dict) -> str:
     source, since, until = g("source"), g("since"), g("until")
     location, undated = g("location"), bool(g("undated"))
     k = _int(g("k"), 5, 1, 25)
-    active = any([source, since, until, location, undated, k != 5])
+    active = any([since, until, location, undated, k != 5])
     names = sorted(stats.get("sources", {}))
     if source and source not in names:
         names.append(source)   # keep an active out-of-catalog filter visible
-    opts = [f'<option value=""{"" if source else " selected"}>All</option>']
+    chips = ['<label class="chip"><input type="radio" name="source" '
+             f'value=""{"" if source else " checked"}><span>All</span>'
+             "</label>"]
     for s in names:
-        sel = " selected" if s == source else ""
-        opts.append(f'<option value="{_esc(s)}"{sel}>{_esc(s)}</option>')
+        chk = " checked" if s == source else ""
+        chips.append('<label class="chip"><input type="radio" name="source" '
+                     f'value="{_esc(s)}"{chk}><span>{_esc(s)}</span></label>')
+    # Quick-picks compute dates client-side, so they're JS-only: rendered
+    # hidden, un-hidden by the script — JS-off never sees dead controls.
+    qps = "".join(f'<button type="button" class="qp" hidden '
+                  f'data-days="{d}">{t}</button>'
+                  for d, t in (("0", "Today"), ("6", "7d"), ("29", "30d"),
+                               ("", "All time")))
     return (
         '<form method="get">'
         '<div class="row">'
         f'<input type="search" name="q" value="{_esc(g("q"))}" '
         'placeholder="search history" autofocus>'
         "<button>Search</button></div>"
+        f'<div class="chips">{"".join(chips)}</div>'
+        f'<div class="chips">{qps}</div>'
         f'<details{" open" if active else ""}><summary>filters</summary>'
         '<div class="filters">'
-        f'<label>source <select name="source">{"".join(opts)}</select></label>'
-        f'<label>results <input type="number" name="k" min="1" max="25" '
-        f'value="{k}"></label>'
         f'<label>since <input type="date" name="since" value="{_esc(since)}">'
         "</label>"
         f'<label>until <input type="date" name="until" value="{_esc(until)}">'
         "</label>"
+        f'<label>results <input type="number" name="k" min="1" max="25" '
+        f'value="{k}"></label>'
         f'<label>location <input name="location" value="{_esc(location)}" '
         'placeholder="prefix, e.g. chrome:"></label>'
         f'<label class="check"><input type="checkbox" name="undated" '
@@ -335,7 +411,14 @@ def _filter_args(g) -> dict:
         args["include_undated"] = True
     return args
 
-def _result_article(r) -> str:
+def _back_qs(g) -> str:
+    """The originating search, as a query string — carried on expand links
+    so the expand page's back link restores the search, not the homepage."""
+    keep = {n: g(n) for n in ("q", "source", "location", "since", "until",
+                              "undated", "k", "offset") if g(n)}
+    return urlencode(keep)
+
+def _result_article(r, bq: str = "") -> str:
     head = _badge(r["source"])
     ts = _fmt_ts(r.get("timestamp") or "")
     if ts:
@@ -346,9 +429,10 @@ def _result_article(r) -> str:
     text = _esc(r["text"])
     if url:
         text = f'<a class="out" href="{_esc(url)}">{text}</a>'
+    href = f"search?expand={r['id']}" + (f"&{bq}" if bq else "")
     return (f"<article><header>{head}</header>"
             f'<pre class="clamp">{text}</pre>'
-            f'<a class="expand" href="search?expand={_esc(r["id"])}">'
+            f'<a class="expand" href="{_esc(href)}">'
             f'{_icon("expand")} expand</a></article>')
 
 def _render_results(g, chrome: str, tail: str = "") -> str:
@@ -357,9 +441,9 @@ def _render_results(g, chrome: str, tail: str = "") -> str:
                                             **_filter_args(g)))
     if "error" in data:
         return _page(chrome + f"<p>{_esc(data['error'])}</p>", tail)
-    parts = [chrome]
+    parts, bq = [chrome], _back_qs(g)
     for r in data.get("results", []):
-        parts.append(_result_article(r))
+        parts.append(_result_article(r, bq))
     if not data.get("results"):
         parts.append("<p>no matches</p>")
     return _page("".join(parts), tail)
@@ -372,13 +456,13 @@ def _render_window(g, chrome: str, tail: str = "") -> str:
     data = json.loads(server.list_window(**args))
     if "error" in data:
         return _page(chrome + f"<p>{_esc(data['error'])}</p>", tail)
-    parts, day = [chrome], None
+    parts, day, bq = [chrome], None, _back_qs(g)
     for r in data.get("results", []):
         label = _day_label(r.get("timestamp") or "")
         if label != day:
             parts.append(f'<h2 class="day">{_esc(label)}</h2>')
             day = label
-        parts.append(_result_article(r))
+        parts.append(_result_article(r, bq))
     count, total = data.get("count", 0), data.get("total", 0)
     if not count:
         parts.append("<p>nothing in this window</p>")
@@ -520,11 +604,12 @@ def _context_html(source: str, ctx) -> str:
     return ("<pre>"
             + _esc(json.dumps(ctx, indent=2, ensure_ascii=False)) + "</pre>")
 
-def _render_expand(cid: str) -> str:
+def _expand_articles(cid: str) -> str:
+    """The expand view's content, chrome-free — served whole to the full
+    page and as the fragment the inline-expand script fetches."""
     data = json.loads(server.expand(cid))
-    back = '<p><a href="search">&larr; search</a></p>'
     if "error" in data:
-        return _page(back + f"<p>{_esc(data['error'])}</p>")
+        return f"<p>{_esc(data['error'])}</p>"
     c = data["chunk"]
     head = _badge(c["source"])
     ts = _fmt_ts(c.get("timestamp") or "")
@@ -532,15 +617,20 @@ def _render_expand(cid: str) -> str:
         head += f"<span>{_esc(ts)}</span>"
     if c.get("location"):
         head += f"<span>{_esc(c['location'])}</span>"
-    parts = [back, f"<article><header>{head}</header>"
-                   f"<pre>{_esc(c['text'])}</pre></article>"]
+    parts = [f"<article><header>{head}</header>"
+             f"<pre>{_esc(c['text'])}</pre></article>"]
     if data.get("context") is not None:
         label = "context"
         if data.get("context_source"):
             label += f" ({_esc(data['context_source'])})"
         parts.append(f'<h2 class="day">{label}</h2>')
         parts.append(_context_html(c["source"], data["context"]))
-    return _page("".join(parts))
+    return "".join(parts)
+
+def _render_expand(cid: str, bq: str = "") -> str:
+    back_href = "search" + (f"?{bq}" if bq else "")
+    back = f'<p><a href="{_esc(back_href)}">&larr; search</a></p>'
+    return _page(back + _expand_articles(cid))
 
 async def _send_html(send, body: str):
     data = body.encode()
@@ -558,7 +648,10 @@ async def _search_page(scope, send):
         return (qs.get(name) or [""])[0].strip()
 
     if g("expand"):
-        body = _render_expand(g("expand"))
+        if g("fragment"):
+            await _send_html(send, _expand_articles(g("expand")))
+            return
+        body = _render_expand(g("expand"), _back_qs(g))
     else:
         stats = _stats()
         chrome = _banner(stats) + _form(g, stats)

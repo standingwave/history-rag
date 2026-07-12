@@ -65,7 +65,8 @@ def test_form_renders_with_security_headers():
     assert status == 200
     assert "<form" in body and 'name="q"' in body
     assert headers["content-security-policy"].startswith(
-        "default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-")
+        "default-src 'none'; style-src 'unsafe-inline'; "
+        "connect-src 'self'; script-src 'sha256-")
     assert headers["x-content-type-options"] == "nosniff"
 
 
@@ -85,11 +86,12 @@ def test_form_controls_default_to_all(monkeypatch):
                             {"total_chunks": 2,
                              "sources": {"claude": {}, "browser": {}}}))
     _, _, body = _get("/s3cr3t/search")
-    assert '<option value="" selected>All</option>' in body
+    assert '<input type="radio" name="source" value="" checked>' in body
     assert body.index(">browser<") < body.index(">claude<")   # sorted
     assert "<details><summary>filters" in body                # collapsed
     assert 'type="date" name="since"' in body
     assert 'type="number" name="k" min="1" max="25"' in body
+    assert "onclick" not in body                # script wires by selector
 
 
 def test_filters_map_to_kwargs_and_details_open(monkeypatch):
@@ -105,7 +107,7 @@ def test_filters_map_to_kwargs_and_details_open(monkeypatch):
     assert seen == {"query": "x", "k": 7, "source": "claude",
                     "since": "2026-07-01", "include_undated": True}
     assert "<details open>" in body                           # filter active
-    assert 'value="claude" selected' in body                  # echoed
+    assert 'value="claude" checked' in body                   # echoed
 
 
 def test_empty_filter_params_produce_no_kwargs(monkeypatch):
@@ -137,7 +139,7 @@ def test_bounds_without_q_call_list_window(monkeypatch):
     monkeypatch.setattr(app.server, "search_history", no_search)
     _, _, body = _get("/s3cr3t/search", "since=2026-07-01&until=2026-07-02")
     assert seen == {"since": "2026-07-01", "until": "2026-07-02"}
-    assert 'href="search?expand=w1"' in body
+    assert 'href="search?expand=w1&amp;since=2026-07-01' in body
     assert "1–50 of 120" in body
     assert "offset=50" in body and "since=2026-07-01" in body  # older link
 
@@ -210,7 +212,7 @@ def test_results_render_escaped_with_expand_link(monkeypatch):
     assert "&lt;script&gt;alert(1)&lt;/script&gt; &amp; more" in body
     assert "<script>alert" not in body
     assert "chrome:&lt;Default&gt;" in body
-    assert 'href="search?expand=abc123"' in body
+    assert 'href="search?expand=abc123&amp;q=hello' in body   # back params
     assert 'value="hello"' in body                  # query echoed, escaped
 
 
@@ -395,3 +397,50 @@ def test_stats_panel_omits_absent_replica(monkeypatch):
                              "sources": {"shell": {"chunks": 1}}}))
     _, _, body = _get("/s3cr3t/search")
     assert "replica" not in body
+
+
+# ── JS layer (wip/SPEC-search-page-js.md) ────────────────────────────────────
+
+def test_csp_lists_every_script_hash():
+    _, headers, body = _get("/s3cr3t/search")
+    csp = headers["content-security-policy"]
+    scripts = [seg.split("</script>")[0]
+               for seg in body.split("<script>")[1:]]
+    assert len(scripts) == 2
+    for script in scripts:
+        digest = base64.b64encode(
+            hashlib.sha256(script.encode()).digest()).decode()
+        assert f"'sha256-{digest}'" in csp
+    assert csp.count("sha256-") == len(scripts)   # nothing else allowed
+    assert "unsafe-inline'" not in csp.split("script-src")[1]
+
+
+def test_fragment_returns_articles_only(monkeypatch):
+    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+        {"chunk": {"id": cid, "source": "shell", "timestamp": "",
+                   "location": "", "text": "<script>x</script>", "meta": {}},
+         "context": None, "context_source": None}))
+    status, headers, body = _get("/s3cr3t/search", "expand=f1&fragment=1")
+    assert status == 200
+    assert "<article>" in body
+    assert "<form" not in body and "<script>" not in body
+    assert "&lt;script&gt;x&lt;/script&gt;" in body   # still escaped
+
+
+def test_expand_back_link_restores_the_search(monkeypatch):
+    monkeypatch.setattr(app.server, "expand", lambda cid: json.dumps(
+        {"chunk": {"id": cid, "source": "shell", "timestamp": "",
+                   "location": "", "text": "t", "meta": {}},
+         "context": None, "context_source": None}))
+    _, _, body = _get("/s3cr3t/search",
+                      "expand=e1&q=proxy+bug&source=claude&k=7")
+    assert '<a href="search?q=proxy+bug&amp;source=claude&amp;k=7">' in body
+    # bare expand (bookmark) still gets a plain back link
+    _, _, body = _get("/s3cr3t/search", "expand=e1")
+    assert '<a href="search">' in body
+
+
+def test_quickpicks_hidden_server_side():
+    _, _, body = _get("/s3cr3t/search")
+    assert body.count('class="qp" hidden') == 4       # JS-off: no dead controls
+    assert 'data-days="0"' in body and 'data-days=""' in body
