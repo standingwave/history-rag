@@ -85,6 +85,8 @@ def test_openai_roundtrip(cfg, monkeypatch):
     assert first["headers"]["Authorization"] == "Bearer sk-one"
     assert first["json"]["tools"][0]["type"] == "function"
     assert first["json"]["messages"][0]["role"] == "system"
+    assert first["json"]["max_tokens"] == 2048    # gateways credit-check
+    # against the model max when unbounded
     tool_msg = second["json"]["messages"][-1]
     assert tool_msg == {"role": "tool", "tool_call_id": "c1",
                         "content": searched and json.dumps(

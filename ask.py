@@ -120,6 +120,9 @@ class _OpenAI:
             headers["Authorization"] = f"Bearer {self.preset['_key']}"
         data = _http(self.url, headers, {
             "model": self.preset["model"], "messages": self.messages,
+            # bound the output like the Anthropic adapter: gateways
+            # (OpenRouter) credit-check against the model max otherwise
+            "max_tokens": int(self.preset.get("max_tokens", 2048)),
             "tools": [{"type": "function",
                        "function": {"name": t["name"],
                                     "description": t["description"],
