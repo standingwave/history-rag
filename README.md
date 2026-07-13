@@ -48,11 +48,19 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
 - `server.py` — the MCP server. Four tools forming a disclosure ladder:
   `history_stats` (orient; `locations=true` reveals filterable prefixes) →
   `search_history` / `list_window` (relevance-ranked vs exhaustive
-  chronological pointers, both returning chunk ids; `list_window` also
-  aggregates with `group_by=day|source|location|domain`) → `expand` (the
-  reading view: full chunk + source-aware context, live from the backing
-  store when it still exists — surrounding conversation turns, `git show
-  --stat`, the whole note, the profile's same-day visits).
+  pointers; `list_window` lists newest local day first with each day's
+  summary chunks leading, aggregates with
+  `group_by=day|source|location|domain`, and takes `include_meta` /
+  `summaries` opt-ins) → `expand` (the reading view: full chunk +
+  source-aware context, live from the backing store when it still exists —
+  surrounding conversation turns, `git show --stat`, the whole note, the
+  profile's same-day visits, the calendar day's agenda, the digest's full
+  rollup).
+- `ask.py` — the ask-mode agent loop: a model works the four tools
+  in-process and returns a cited answer. Provider-agnostic via two
+  adapters (`openai-compatible` covers OpenAI/OpenRouter/Groq/Ollama-style
+  endpoints; `anthropic` the Messages API), configured as named presets in
+  `[ask.models]`. Used by the remote replica's Ask mode.
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
@@ -66,7 +74,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   `backup.py` (daily dated copies of the sole-copy DBs), `sync-s3.py` (push
   the index to S3 for the optional remote replica),
   `hist.py` (stdlib-only terminal client for that replica: `hist search
-  "the proxy bug" -k 5` from any machine holding the secret URL; suggested
+  "the proxy bug" -k 5`, `hist ask "when did I…?"` from any machine
+  holding the secret URL; suggested
   `alias hist='python3 <repo>/tools/hist.py'`),
   `eval-model.py` / `migrate-model.py` (embedding-model evaluation and
   archive-safe switching), `eval-embed-parity.py` (verify a hosted embedding
@@ -502,10 +511,24 @@ Everything above is local-only. `deploy/lambda/` adds a read-only replica
 on AWS Lambda: the Mac stays the single writer, the scheduled refresh
 pushes the index to S3 on change, and the function serves the same four
 MCP tools behind a secret-path URL usable as a claude.ai custom connector
-(phone/web/desktop). The same endpoint serves `/search` — an HTML search
-page sized for phones — and `tools/hist.py` gives terminal search from any
-machine holding the URL. Code deploys ride GitHub Actions on pushes to
-main (OIDC role, no stored keys). Setup, secrets, and runbook:
+(phone/web/desktop).
+
+The same endpoint serves `/search`, an HTML page sized for phones with
+three modes behind one tab bar:
+- **Search** — semantic search with source chips and date/location
+  filters; results render as cards (source badges, native per-source
+  formatting), each expanding inline into the full chunk + context.
+- **Ask** — a prompt to a model that works the history tools and answers
+  with citations linking into the reading views. Models are named presets
+  (`[ask.models]`, any OpenAI-compatible or Anthropic endpoint); the
+  picker offers whichever presets have keys in the function env.
+- **Browse** — the window listing with date presets (Today · 7d · 30d)
+  and a **Summaries | Everything** toggle: Summaries is a diary view of
+  just the day-shape and digest rollups, day by day.
+
+`tools/hist.py` gives the same search and ask from any terminal holding
+the URL. Code deploys ride GitHub Actions on pushes to main (OIDC role,
+no stored keys). Setup, secrets, ask presets, and runbook:
 [`deploy/lambda/README.md`](deploy/lambda/README.md).
 
 ## Notes

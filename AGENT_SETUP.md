@@ -162,8 +162,11 @@ Verify: `launchctl list | grep com.user.appusage` shows a PID;
 `/tmp/appusage-daemon.log` clean. Data → `~/.claude/appusage.db`;
 `appusage/report.py` shows totals; days flow into the index on the next run.
 
-A remote replica (phone access via AWS Lambda) also exists but is its own
-setup — `deploy/lambda/README.md`. Don't set it up unless explicitly asked.
+A remote replica (phone access via AWS Lambda, with a three-mode /search
+page including a model-powered Ask mode) also exists but is its own setup —
+`deploy/lambda/README.md`. Don't set it up unless explicitly asked; its ask
+presets and provider keys live in the function env, never in the repo or
+the TOML.
 
 ## Guardrails — do not violate
 - **Never disable secret redaction** — the shared regex in `sources/common.py`

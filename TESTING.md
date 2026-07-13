@@ -12,7 +12,8 @@ shared plumbing consolidated into `tests/helpers.py` behind a real `tests/`
 package, `test_driver.py` renamed `test_indexer.py` (the "driver" name now
 belongs to tools/refresh.py), category resolution pinned via one conftest
 fixture, and this file refreshed to cover the nine post-2026-07-07 test
-files.
+files. (The suite has since grown to 267 tests, ~1.2s — the ask mode,
+expand v2, and form-rebuild entries below.)
 
 ## Bugs found in review that tests must pin (fix alongside their test)
 1. ✅ FIXED `index.py --rebuild --source X` drops BOTH tables then reindexes
@@ -127,14 +128,30 @@ Each driver case below reproduces something that actually happened this week:
   meta / day-shape sentence / report line.
 - **hist CLI** (`test_hist_cli.py`): flag→arguments mapping, endpoint
   resolution precedence (env beats lpass), tool-error exit codes, human vs
-  `--json` rendering — faked urlopen, no network.
-- **/search page** (`test_search_page.py`): secret gate, escaping (the
-  index holds attacker-influenceable text), CSP hash pinning, filters →
-  kwargs, window mode + paging, health line/banners — app.py imported with
-  Lambda deps stubbed.
+  `--json` rendering, `hist ask` riding the /search JSON mode — faked
+  urlopen, no network.
+- **/search page** (`test_search_page.py`, the largest file): secret gate,
+  escaping (the index holds attacker-influenceable text), CSP hash
+  registry (every rendered script pinned, `connect-src 'self'`), the
+  three-mode form (mode-inference matrix, per-mode contents, tab-state
+  preservation, server-computed range presets), context + card renderers
+  (claude conversations, duration tables, diffstat tinting, JSON
+  fallback), summary bands + the Summaries view, fragments + inline
+  expand back-links, ask answer card / JSON mode / error card, health
+  line/banners/stats panel — app.py imported with Lambda deps stubbed.
 - **Refresh driver** (`test_refresh.py`): step isolation incl. SystemExit,
   one runs row per tick, prune validation + argv, `synced_at` stamping
   rules, notify debounce, summary line, `health.replica` derivation.
+- **Ask mode** (`test_ask.py`): preset availability by key presence (+
+  env-JSON presets for the Lambda), tool defs derived from the MCP
+  registry, both provider adapters' wire shapes round-tripped against
+  scripted responses, loop caps (max_turns, result truncation), provider
+  error mapping, unknown-tool rejection, citation extraction — no
+  network.
+- **Server tool growth** (in `test_server_tools.py`): digest expander
+  surfaces the meta rollup, claude turn truncation marker, expand
+  survives a broken context handler, `list_window` meta opt-in +
+  pointer ellipsis + summaries tier + summaries-first day ordering.
 
 Shared plumbing lives in `tests/helpers.py` (script loading for non-package
 tools, the fabricated-source index harness, appusage store builders); the
