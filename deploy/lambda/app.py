@@ -423,10 +423,13 @@ def _mode_of(g) -> str:
 
 def _tabs(mode: str, g, has_ask: bool) -> str:
     def href(m, keys):
+        # tab=1: tabs switch forms and carry prefill state — they never
+        # execute. Bookmarks, back links, and paging links (no tab=1)
+        # keep executing as always.
         params = ({} if m == "search" else {"mode": m})
         params.update({k: g(k) for k in keys if g(k)})
-        qs = urlencode(params)
-        return "search" + (f"?{qs}" if qs else "")
+        params["tab"] = "1"
+        return f"search?{urlencode(params)}"
 
     entries = [("search", "Search", ("q", "since", "until", "source", "k",
                                      "location"))]
@@ -1073,7 +1076,11 @@ async def _search_page(scope, send):
         chrome = _banner(stats) + _form(g, stats)
         tail = _stats_panel(stats)
         mode = _mode_of(g)
-        if mode == "ask" and g("q") and g("go"):
+        if g("tab"):                       # tab navigation: form only
+            body = _page(chrome + (_empty_state(stats)
+                                   if mode == "search" and not g("q")
+                                   else ""), tail)
+        elif mode == "ask" and g("q") and g("go"):
             result = ask.ask(g("q"), g("model"))
             if g("json"):
                 await _send_json(send, result)

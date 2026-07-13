@@ -685,11 +685,12 @@ def test_mode_inference_matrix(monkeypatch):
                             {"count": 0, "total": 0, "window": {},
                              "results": []}))
     _, _, body = _get("/s3cr3t/search")
-    assert 'class="on" href="search"' in body            # default: Search
+    assert 'class="on" href="search?tab=1"' in body      # default: Search
     _, _, body = _get("/s3cr3t/search", "since=2026-07-01")
     assert ">Browse</a>" in body.split('class="on"')[1]  # legacy shape
     _, _, body = _get("/s3cr3t/search", "mode=bogus&q=x")
     assert 'class="on" href="search?q=x' in body         # unknown → search
+    assert "tab=1" in body.split('class="on"')[1].split('"')[1]
 
 
 def test_per_mode_forms():
@@ -807,3 +808,26 @@ def test_autofocus_only_on_the_landing_page(monkeypatch):
     assert "autofocus" not in body              # results: no iOS scroll yank
     _, _, body = _get("/s3cr3t/search", "mode=ask&q=x")
     assert "autofocus" not in body
+
+
+def test_tabs_never_execute_any_mode(monkeypatch):
+    """The general principle behind the Ask-tab bug: tabs switch forms and
+    carry prefill, but only a submit executes — for every mode."""
+    boom = lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("tab navigation executed"))
+    monkeypatch.setattr(app.server, "search_history", boom)
+    monkeypatch.setattr(app.server, "list_window", boom)
+    monkeypatch.setattr(app.ask, "ask", boom)
+    status, _, body = _get("/s3cr3t/search", "q=proxy+bug&tab=1")
+    assert status == 200 and 'value="proxy bug"' in body   # search prefilled
+    status, _, body = _get("/s3cr3t/search",
+                           "mode=browse&since=2026-07-01&tab=1")
+    assert status == 200 and 'value="2026-07-01"' in body  # browse prefilled
+    status, _, _ = _get("/s3cr3t/search", "mode=ask&q=x&go=1&tab=1")
+    assert status == 200                                   # tab wins even v go
+    # and the executing shapes still execute (no tab=1): unchanged
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+    _, _, body = _get("/s3cr3t/search", "q=proxy+bug")
+    assert "no matches" in body
