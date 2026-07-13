@@ -82,7 +82,7 @@ def ask_request(url: str, question: str, model: str) -> str:
     """GET the page's ask handler in JSON mode — same base URL, /search
     instead of /mcp (wip/SPEC-ask-mode.md)."""
     base = url[:-len("/mcp")] if url.endswith("/mcp") else url
-    params = {"q": question, "mode": "ask", "json": "1"}
+    params = {"q": question, "mode": "ask", "json": "1", "go": "1"}
     if model:
         params["model"] = model
     req = urllib.request.Request(

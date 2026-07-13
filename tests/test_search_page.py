@@ -649,7 +649,7 @@ def test_ask_mode_renders_answer_card(monkeypatch):
     monkeypatch.setattr(app.server, "search_history",
                         lambda *a, **k: (_ for _ in ()).throw(
                             AssertionError("search must not run in ask mode")))
-    _, _, body = _get("/s3cr3t/search", "q=why&mode=ask&model=haiku")
+    _, _, body = _get("/s3cr3t/search", "q=why&mode=ask&model=haiku&go=1")
     assert seen == {"q": "why", "model": "haiku"}
     assert "Found &lt;it&gt;" in body                     # escaped
     assert 'href="search?expand=abc123&amp;q=why&amp;model=haiku">[1]</a>' \
@@ -660,7 +660,7 @@ def test_ask_mode_renders_answer_card(monkeypatch):
 def test_ask_json_mode(monkeypatch):
     payload = {"answer": "A.", "citations": [], "usage": {"turns": 1}}
     monkeypatch.setattr(app.ask, "ask", lambda q, model="": payload)
-    status, headers, body = _get("/s3cr3t/search", "q=x&mode=ask&json=1")
+    status, headers, body = _get("/s3cr3t/search", "q=x&mode=ask&json=1&go=1")
     assert status == 200
     assert headers["content-type"] == "application/json"
     assert json.loads(body) == payload
@@ -670,7 +670,7 @@ def test_ask_error_renders_as_note(monkeypatch):
     monkeypatch.setattr(app.ask, "ask",
                         lambda q, model="": {"error": "ask mode isn't "
                                              "configured — add presets"})
-    _, _, body = _get("/s3cr3t/search", "q=x&mode=ask")
+    _, _, body = _get("/s3cr3t/search", "q=x&mode=ask&go=1")
     assert 'class="note"' in body and "isn&#x27;t configured" in body
 
 
@@ -782,3 +782,28 @@ def test_undated_renders_once_a_date_is_set(monkeypatch):
                             {"query": query, "count": 0, "results": []}))
     _, _, body = _get("/s3cr3t/search", "q=x&since=2026-07-01")
     assert 'name="undated"' in body
+
+
+def test_ask_tab_navigation_never_executes(monkeypatch):
+    """The regression behind 'the Ask tab re-submits the form': tab links
+    carry q for prefill, so navigation must render the form, never run a
+    paid ask — only the form's go=1 submit executes."""
+    monkeypatch.setattr(app.ask, "ask",
+                        lambda q, model="": (_ for _ in ()).throw(
+                            AssertionError("tab navigation ran an ask")))
+    status, _, body = _get("/s3cr3t/search", "mode=ask&q=proxy+bug")
+    assert status == 200
+    assert 'value="proxy bug"' in body          # prefilled, not executed
+    assert '<input type="hidden" name="go" value="1">' in body
+
+
+def test_autofocus_only_on_the_landing_page(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+    _, _, body = _get("/s3cr3t/search")
+    assert "autofocus" in body                  # bare form: convenient
+    _, _, body = _get("/s3cr3t/search", "q=x")
+    assert "autofocus" not in body              # results: no iOS scroll yank
+    _, _, body = _get("/s3cr3t/search", "mode=ask&q=x")
+    assert "autofocus" not in body

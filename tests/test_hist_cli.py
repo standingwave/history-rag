@@ -165,7 +165,7 @@ def test_ask_rides_the_search_endpoint(monkeypatch, capsys):
     monkeypatch.setenv("HISTORY_RAG_URL", URL)
     hist.main(["ask", "what did I do tuesday", "--model", "m1"])
     assert seen["url"].startswith("https://host.example/s3cr3t/search?")
-    for part in ("mode=ask", "json=1", "model=m1",
+    for part in ("mode=ask", "json=1", "model=m1", "go=1",
                  "q=what+did+I+do+tuesday"):
         assert part in seen["url"]
     assert seen["timeout"] == 120

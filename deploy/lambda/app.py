@@ -467,11 +467,14 @@ def _form_search(g, stats: dict) -> str:
                        f'name="undated" value="1"'
                        f'{" checked" if undated else ""}> include undated'
                        "</label>")
+    # autofocus only on the bare landing page: iOS Safari applies deferred
+    # focus on first touch, yanking scroll back up to the input otherwise
+    af = "" if (g("q") or since or until) else " autofocus"
     return (
         '<form method="get">'
         '<div class="row">'
         f'<input type="search" name="q" value="{_esc(g("q"))}" '
-        'placeholder="search history" autofocus>'
+        f'placeholder="search history"{af}>'
         "<button>Search</button></div>"
         f"{_source_chips(g, stats)}"
         f'<details{" open" if active else ""}><summary>more filters</summary>'
@@ -499,12 +502,16 @@ def _form_ask(g) -> str:
                           f'<span>{_esc(p["name"])}</span></label>')
         picker = ('<div class="group"><div class="group-label">model</div>'
                   f'<div class="chips">{"".join(mchips)}</div></div>')
+    af = "" if g("q") else " autofocus"
     return (
         '<form method="get">'
         '<input type="hidden" name="mode" value="ask">'
+        # go=1 is the explicit submit marker: the Ask tab link carries q
+        # for prefill, and must never execute a paid ask by navigation
+        '<input type="hidden" name="go" value="1">'
         '<div class="row">'
         f'<input type="search" name="q" value="{_esc(g("q"))}" '
-        'placeholder="ask your history" autofocus>'
+        f'placeholder="ask your history"{af}>'
         "<button>Ask</button></div>"
         f"{picker}"
         '<p class="health">the model works your history tools and cites '
@@ -1066,7 +1073,7 @@ async def _search_page(scope, send):
         chrome = _banner(stats) + _form(g, stats)
         tail = _stats_panel(stats)
         mode = _mode_of(g)
-        if mode == "ask" and g("q"):
+        if mode == "ask" and g("q") and g("go"):
             result = ask.ask(g("q"), g("model"))
             if g("json"):
                 await _send_json(send, result)
