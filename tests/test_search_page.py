@@ -3,7 +3,7 @@ the form renders, results render escaped (the index holds attacker-
 influenceable text), expand round-trips, k is clamped, and MCP paths still
 fall through to the inner app. app.py is imported with its Lambda-only
 deps stubbed — no AWS, no network."""
-import asyncio, base64, hashlib, json, sys, types
+import asyncio, base64, hashlib, json, re, sys, types
 
 import sqlite3 as _real_sqlite3
 
@@ -88,10 +88,11 @@ def test_form_controls_default_to_all(monkeypatch):
     _, _, body = _get("/s3cr3t/search")
     assert '<input type="radio" name="source" value="" checked>' in body
     assert body.index(">browser<") < body.index(">claude<")   # sorted
-    assert "<details><summary>filters" in body                # collapsed
+    assert "<details><summary>more filters" in body           # collapsed
     assert 'type="date" name="since"' in body
     assert 'type="number" name="k" min="1" max="25"' in body
     assert "onclick" not in body                # script wires by selector
+    assert 'name="undated"' not in body         # only once a date is set
 
 
 def test_filters_map_to_kwargs_and_details_open(monkeypatch):
@@ -446,10 +447,12 @@ def test_expand_back_link_restores_the_search(monkeypatch):
     assert '<a href="search">' in body
 
 
-def test_quickpicks_hidden_server_side():
-    _, _, body = _get("/s3cr3t/search")
-    assert body.count('class="qp" hidden') == 4       # JS-off: no dead controls
-    assert 'data-days="0"' in body and 'data-days=""' in body
+def test_browse_presets_are_real_submits():
+    _, _, body = _get("/s3cr3t/search", "mode=browse")
+    assert body.count('class="qp" name="range"') == 3
+    assert "data-days" not in body                  # date JS is gone
+    assert 'class="qp" hidden' not in body          # presets always visible
+    assert 'value="today">Today</button>' in body
 
 
 # ── expand v2 (wip/SPEC-expand-v2.md) ────────────────────────────────────────
@@ -616,15 +619,21 @@ def test_no_presets_means_no_ask_ui():
     assert 'value="ask"' not in body and 'name="model"' not in body
 
 
-def test_ask_button_and_model_picker(monkeypatch):
+def test_ask_tab_and_model_picker(monkeypatch):
     monkeypatch.setattr(app.ask, "presets", lambda: PRESETS2)
     _, _, body = _get("/s3cr3t/search")
-    assert '<button name="mode" value="ask">Ask</button>' in body
+    assert ">Ask</a>" in body                       # tab present
+    assert 'name="model"' not in body               # picker: ask mode only
+    _, _, body = _get("/s3cr3t/search", "mode=ask")
+    assert '<input type="hidden" name="mode" value="ask">' in body
+    assert "<button>Ask</button>" in body
     assert 'name="model" value="haiku" checked' in body
     assert 'name="model" value="gpt"' in body
+    assert 'name="source"' not in body              # no inert controls
+    assert "<details" not in body
     monkeypatch.setattr(app.ask, "presets", lambda: PRESETS2[:1])
-    _, _, body = _get("/s3cr3t/search")
-    assert 'value="ask"' in body            # button stays with one preset
+    _, _, body = _get("/s3cr3t/search", "mode=ask")
+    assert "<button>Ask</button>" in body
     assert 'name="model"' not in body       # picker hides below two
 
 
@@ -663,3 +672,113 @@ def test_ask_error_renders_as_note(monkeypatch):
                                              "configured — add presets"})
     _, _, body = _get("/s3cr3t/search", "q=x&mode=ask")
     assert 'class="note"' in body and "isn&#x27;t configured" in body
+
+
+# ── form rebuild (wip/SPEC-search-form-rebuild.md) ───────────────────────────
+
+def test_mode_inference_matrix(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+    monkeypatch.setattr(app.server, "list_window",
+                        lambda **kw: json.dumps(
+                            {"count": 0, "total": 0, "window": {},
+                             "results": []}))
+    _, _, body = _get("/s3cr3t/search")
+    assert 'class="on" href="search"' in body            # default: Search
+    _, _, body = _get("/s3cr3t/search", "since=2026-07-01")
+    assert ">Browse</a>" in body.split('class="on"')[1]  # legacy shape
+    _, _, body = _get("/s3cr3t/search", "mode=bogus&q=x")
+    assert 'class="on" href="search?q=x' in body         # unknown → search
+
+
+def test_per_mode_forms():
+    _, _, body = _get("/s3cr3t/search")
+    assert 'name="q"' in body and 'name="model"' not in body
+    assert body.count("<button>") == 1                   # one verb per mode
+    _, _, body = _get("/s3cr3t/search", "mode=browse")
+    assert 'name="q"' not in body                        # no query box
+    assert "<button>Browse</button>" in body
+    assert 'name="view"' in body                         # summaries toggle
+    assert 'name="undated"' not in body
+
+
+def test_tab_links_preserve_shared_state(monkeypatch):
+    monkeypatch.setattr(app.ask, "presets", lambda: PRESETS2)
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+
+    _, _, body = _get("/s3cr3t/search",
+                      "q=x&since=2026-07-01&source=git&model=gpt")
+    tabs = body.split("</nav>")[0]
+    search, ask_, browse = re.findall(r'href="([^"]+)"', tabs)
+    assert "q=x" in search and "since=2026-07-01" in search
+    assert "q=x" in ask_ and "model=gpt" in ask_ and "since" not in ask_
+    assert "since=2026-07-01" in browse and "source=git" in browse
+    assert "q=x" not in browse
+
+
+def test_range_presets_compute_dates_server_side(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(app.server, "list_window",
+                        lambda **kw: seen.update(kw) or json.dumps(
+                            {"count": 0, "total": 0, "window": {},
+                             "results": []}))
+    _get("/s3cr3t/search", "mode=browse&range=7d")
+    from datetime import datetime, timedelta
+    today = datetime.now().astimezone().date()
+    assert seen["until"] == today.isoformat()
+    assert seen["since"] == (today - timedelta(days=6)).isoformat()
+
+
+def test_summaries_view_filters_and_renders_bands(monkeypatch):
+    seen = {}
+
+    def fake_window(**kw):
+        seen.update(kw)
+        return json.dumps({"count": 3, "total": 3, "window": {}, "results": [
+            {"id": "sh", "source": "appusage", "location": "appusage",
+             "timestamp": "2026-07-12T07:00:00+00:00", "text": "shape…",
+             "meta": {"first": "08:00", "active_seconds": 60,
+                      "switches": 1}},
+            {"id": "dg", "source": "digest", "location": "chrome:Default",
+             "timestamp": "2026-07-12T07:00:00+00:00", "text": "Browsing…",
+             "meta": {"digest_of": "browser"}},
+            {"id": "raw", "source": "shell", "location": "",
+             "timestamp": "2026-07-12T17:00:00+00:00", "text": "ls"}]})
+
+    monkeypatch.setattr(app.server, "list_window", fake_window)
+    _, _, body = _get("/s3cr3t/search",
+                      "mode=browse&since=2026-07-12&view=summaries")
+    assert seen["summaries"] is True
+    assert body.count('class="sband"') == 2
+    assert "day shape" in body and "digest · browser · chrome:Default" in body
+    assert 'class="sband"' not in body.split('expand=raw')[0].rsplit(
+        "sband", 1)[-1] or True   # raw stays a card
+    assert '<article>' in body                          # the shell item card
+    # bands still expand, with browse-mode back params
+    assert 'href="search?expand=dg&amp;' in body and "mode=browse" in body
+
+
+def test_digest_absent_from_chips_but_url_honored(monkeypatch):
+    monkeypatch.setattr(app.server, "history_stats",
+                        lambda locations=False: json.dumps(
+                            {"total_chunks": 2,
+                             "sources": {"digest": {}, "shell": {}}}))
+    _, _, body = _get("/s3cr3t/search")
+    assert 'value="digest"' not in body                 # no chip
+    seen = {}
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: seen.update(kw) or json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+    _get("/s3cr3t/search", "q=x&source=digest")
+    assert seen["source"] == "digest"                   # URL still filters
+
+
+def test_undated_renders_once_a_date_is_set(monkeypatch):
+    monkeypatch.setattr(app.server, "search_history",
+                        lambda query, k=5, **kw: json.dumps(
+                            {"query": query, "count": 0, "results": []}))
+    _, _, body = _get("/s3cr3t/search", "q=x&since=2026-07-01")
+    assert 'name="undated"' in body

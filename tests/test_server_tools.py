@@ -286,3 +286,21 @@ def test_list_window_summaries_lead_their_day(scratch_db, fake_embed,
     assert ids[:3] == ["shape", "dig", "raw2"]
     assert ids[-1] == "prev"                      # older day after
     assert "perapp" in ids[3:]                    # per-app is detail, not summary
+
+def test_list_window_summaries_tier(scratch_db, fake_embed, monkeypatch):
+    seed(monkeypatch, {
+        "shell": [("raw", "a command", rec("shell", ts=f"{D}22:00:00+00:00"))],
+        "digest": [("dig", "Shell digest…",
+                    rec("digest", ts=f"{D}07:00:00+00:00",
+                        meta={"date": "2026-07-02", "runs": 3}))],
+        "appusage": [("shape", "On 2026-07-02…",
+                      rec("appusage", ts=f"{D}07:00:00+00:00",
+                          meta={"first": "08:00", "active_seconds": 60})),
+                     ("perapp", "spent 2m in Figma",
+                      rec("appusage", ts=f"{D}07:00:00+00:00",
+                          meta={"app": "Figma", "seconds": 120}))]})
+    import server
+    out = json.loads(server.list_window(since="2026-07-02",
+                                        until="2026-07-02", summaries=True))
+    assert {r["id"] for r in out["results"]} == {"dig", "shape"}
+    assert out["total"] == 2                      # count respects the tier

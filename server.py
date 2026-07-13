@@ -551,7 +551,7 @@ def _group_value(dim, src, ts, loc, meta_json):
 def list_window(since: str = "", until: str = "", source: str = "",
                 location: str = "", limit: int = 50, offset: int = 0,
                 include_undated: bool = False, group_by: str = "",
-                include_meta: bool = False) -> str:
+                include_meta: bool = False, summaries: bool = False) -> str:
     """Exhaustive listing of everything in a time window — no semantic
     ranking, no sampling. Newest local day first; within each day the
     summary chunks lead (appusage day-shape, then digests), then raw
@@ -562,7 +562,9 @@ def list_window(since: str = "", until: str = "", source: str = "",
     pointers {id, source, timestamp, location, text (truncated)} — pass an id
     to expand() to read one in full. `total` is the full match count; page
     with offset (limit caps at 200). include_meta=true adds each chunk's
-    meta to the pointers (heavier; default off).
+    meta to the pointers (heavier; default off). summaries=true keeps only
+    the summary tier — digests and appusage day-shape chunks — the
+    "what happened, day by day" diary view.
 
     group_by: comma-separated dimensions from day | source | location |
     domain — returns aggregate `groups` (sorted by count desc, each with
@@ -591,6 +593,10 @@ def list_window(since: str = "", until: str = "", source: str = "",
     offset = max(0, int(offset))
     where, params = _window_where(since, until, source, location,
                                   include_undated)
+    if summaries:
+        # the same tier the summaries-first ORDER BY ranks ahead
+        where += (" AND (source = 'digest' OR (source = 'appusage' AND "
+                  "json_extract(meta, '$.first') IS NOT NULL))")
     db = _db()
     total = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
                        params).fetchone()[0]

@@ -16,7 +16,7 @@ Optional env:
   CLAUDE_RAG_DB_FRESHNESS  seconds between S3 ETag checks (default 300)
 """
 import base64, hashlib, html, json, os, re, sys, time
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlencode
 
 # The managed runtime's sqlite3 is built without loadable-extension support
@@ -81,6 +81,20 @@ _STYLE = """
 body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0 auto;
      max-width:40rem;padding:1rem;background:var(--bg);color:var(--fg)}
 form{margin-bottom:1rem}
+.tabs{display:flex;background:var(--card);border:1px solid var(--line);
+      border-radius:.8rem;padding:.2rem;gap:.2rem;margin-bottom:.9rem}
+.tabs a{flex:1;text-align:center;font-size:.88rem;padding:.42rem 0;
+        border-radius:.6rem;color:var(--muted);text-decoration:none}
+.tabs a.on{background:var(--acc);color:var(--bg);font-weight:600}
+.group{margin:.65rem 0}
+.group-label{font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;
+             color:var(--muted);margin-bottom:.35rem}
+.sband{border-left:3px solid var(--muted);border-radius:0 .5rem .5rem 0;
+       background:rgba(128,128,140,.09);padding:.5rem .7rem;
+       margin:.35rem 0;font-size:.9rem}
+.sband-label{font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+             color:var(--muted);margin-bottom:.15rem}
+.sband p{margin:.1rem 0}
 .row{display:flex;gap:.5rem}
 .row input{flex:1;min-width:0}
 input,select{font:inherit;padding:.5rem;border:1px solid var(--line);
@@ -223,42 +237,35 @@ def _badge(source: str) -> str:
 # chunk text still cannot execute. All HTML the scripts insert is
 # server-rendered (fetched fragments) — JS never builds markup from data.
 
-# Submit feedback: disable both submit buttons, label the one that was
-# clicked, re-enable on bfcache back-navigation.
+# Submit feedback: disable the form's buttons, label the clicked one by
+# the form's mode, restore originals on bfcache back-navigation.
 _SCRIPT_SUBMIT = (
     "(function(){var f=document.querySelector('form');if(!f)return;"
-    "var bs=f.querySelectorAll('button:not(.qp)');"
-    "function reset(){for(var i=0;i<bs.length;i++){bs[i].disabled=false;"
-    "bs[i].textContent=bs[i].getAttribute('value')==='ask'?'Ask':'Search'}}"
+    "var bs=f.querySelectorAll('button');"
+    "var mi=f.querySelector('input[name=mode]');"
+    "var label={ask:'Asking\\u2026',browse:'Loading\\u2026'}"
+    "[mi?mi.value:'search']||'Searching\\u2026';"
+    "var orig=[];for(var i=0;i<bs.length;i++)orig.push(bs[i].textContent);"
     "f.addEventListener('submit',function(e){"
-    "var b=(e&&e.submitter&&e.submitter.getAttribute('value')==='ask')"
-    "?e.submitter:bs[0];"
+    "var b=(e&&e.submitter)?e.submitter:bs[0];"
     "for(var i=0;i<bs.length;i++)bs[i].disabled=true;"
-    "b.textContent=b.getAttribute('value')==='ask'"
-    "?'Asking\\u2026':'Searching\\u2026'});"
-    "window.addEventListener('pageshow',reset)})();")
+    "b.textContent=label});"
+    "window.addEventListener('pageshow',function(){"
+    "for(var i=0;i<bs.length;i++){bs[i].disabled=false;"
+    "bs[i].textContent=orig[i]}})})();")
 
-# Live form (chips auto-submit, date quick-picks) + inline expand
-# (fragment fetch; failures fall through to plain navigation).
+# Live form (source/view chips auto-submit — the hidden mode input rides
+# along, so a chip tap can never switch modes) + inline expand (fragment
+# fetch; failures fall through to plain navigation).
 _SCRIPT_LIVE = (
     "(function(){var f=document.querySelector('form');"
     "if(f){"
     "var subm=function(){f.requestSubmit?f.requestSubmit():f.submit()};"
-    "var act=function(){return f.q.value.trim()||f.since.value"
-    "||f.until.value};"
-    "var srcs=f.querySelectorAll('input[name=source]');"
-    "for(var i=0;i<srcs.length;i++)srcs[i].addEventListener('change',"
+    "var act=function(){return(f.q&&f.q.value.trim())"
+    "||(f.since&&f.since.value)||(f.until&&f.until.value)};"
+    "var rs=f.querySelectorAll('input[name=source],input[name=view]');"
+    "for(var i=0;i<rs.length;i++)rs[i].addEventListener('change',"
     "function(){if(act())subm()});"
-    "var iso=function(d){var p=function(n){return(n<10?'0':'')+n};"
-    "return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())};"
-    "var qps=f.querySelectorAll('.qp');"
-    "for(var j=0;j<qps.length;j++)(function(b){b.hidden=false;"
-    "b.addEventListener('click',function(){"
-    "var v=b.getAttribute('data-days');"
-    "if(v===''){f.since.value='';f.until.value=''}"
-    "else{var s=new Date();s.setDate(s.getDate()-parseInt(v,10));"
-    "f.since.value=iso(s);f.until.value=iso(new Date())}"
-    "subm()})})(qps[j]);"
     "}"
     "var open=null;"
     "function host(a){return a.closest('article')||a.closest('table')}"
@@ -399,12 +406,45 @@ def _banner(stats: dict) -> str:
                      f'· refreshed {_age(int(h["age_minutes"]))} ago</p>')
     return "".join(parts)
 
-def _form(g, stats: dict) -> str:
-    source, since, until = g("source"), g("since"), g("until")
-    location, undated = g("location"), bool(g("undated"))
-    k = _int(g("k"), 5, 1, 25)
-    active = any([since, until, location, undated, k != 5])
-    names = sorted(stats.get("sources", {}))
+# ── the three-mode form (wip/SPEC-search-form-rebuild.md) ──────────────────
+# One intent per mode, one verb-labeled submit, only the controls that
+# apply. Tabs are links (no-JS safe, bookmarkable); auto-submit carries
+# the mode via a per-form hidden input.
+
+_MODES = ("search", "ask", "browse")
+
+def _mode_of(g) -> str:
+    m = g("mode")
+    if m in _MODES:
+        return m
+    if not g("q") and (g("since") or g("until")):
+        return "browse"           # legacy bookmark shape
+    return "search"               # incl. unknown modes: never an error
+
+def _tabs(mode: str, g, has_ask: bool) -> str:
+    def href(m, keys):
+        params = ({} if m == "search" else {"mode": m})
+        params.update({k: g(k) for k in keys if g(k)})
+        qs = urlencode(params)
+        return "search" + (f"?{qs}" if qs else "")
+
+    entries = [("search", "Search", ("q", "since", "until", "source", "k",
+                                     "location"))]
+    if has_ask:
+        entries.append(("ask", "Ask", ("q", "model")))
+    entries.append(("browse", "Browse", ("since", "until", "source",
+                                         "view")))
+    out = ['<nav class="tabs">']
+    for m, label, keys in entries:
+        cls = ' class="on"' if m == mode else ""
+        out.append(f'<a{cls} href="{_esc(href(m, keys))}">{label}</a>')
+    return "".join(out) + "</nav>"
+
+def _source_chips(g, stats: dict) -> str:
+    source = g("source")
+    # digest is a summary tier, not a content type — no chip (the
+    # source=digest URL shape stays honored)
+    names = sorted(n for n in stats.get("sources", {}) if n != "digest")
     if source and source not in names:
         names.append(source)   # keep an active out-of-catalog filter visible
     chips = ['<label class="chip"><input type="radio" name="source" '
@@ -414,12 +454,39 @@ def _form(g, stats: dict) -> str:
         chk = " checked" if s == source else ""
         chips.append('<label class="chip"><input type="radio" name="source" '
                      f'value="{_esc(s)}"{chk}><span>{_esc(s)}</span></label>')
-    # Quick-picks compute dates client-side, so they're JS-only: rendered
-    # hidden, un-hidden by the script — JS-off never sees dead controls.
-    qps = "".join(f'<button type="button" class="qp" hidden '
-                  f'data-days="{d}">{t}</button>'
-                  for d, t in (("0", "Today"), ("6", "7d"), ("29", "30d"),
-                               ("", "All time")))
+    return ('<div class="group"><div class="group-label">source</div>'
+            f'<div class="chips">{"".join(chips)}</div></div>')
+
+def _form_search(g, stats: dict) -> str:
+    since, until, location = g("since"), g("until"), g("location")
+    undated, k = bool(g("undated")), _int(g("k"), 5, 1, 25)
+    active = any([since, until, location, undated, k != 5])
+    undated_ctl = ""
+    if since or until:            # only meaningful once a bound is set
+        undated_ctl = (f'<label class="check"><input type="checkbox" '
+                       f'name="undated" value="1"'
+                       f'{" checked" if undated else ""}> include undated'
+                       "</label>")
+    return (
+        '<form method="get">'
+        '<div class="row">'
+        f'<input type="search" name="q" value="{_esc(g("q"))}" '
+        'placeholder="search history" autofocus>'
+        "<button>Search</button></div>"
+        f"{_source_chips(g, stats)}"
+        f'<details{" open" if active else ""}><summary>more filters</summary>'
+        '<div class="filters">'
+        f'<label>since <input type="date" name="since" value="{_esc(since)}">'
+        "</label>"
+        f'<label>until <input type="date" name="until" value="{_esc(until)}">'
+        "</label>"
+        f'<label>results <input type="number" name="k" min="1" max="25" '
+        f'value="{k}"></label>'
+        f'<label>location <input name="location" value="{_esc(location)}" '
+        'placeholder="prefix, e.g. chrome:"></label>'
+        f"{undated_ctl}</div></details></form>")
+
+def _form_ask(g) -> str:
     ps = ask.presets()
     picker = ""
     if len(ps) >= 2:                    # a non-choice gets no UI
@@ -430,29 +497,54 @@ def _form(g, stats: dict) -> str:
             mchips.append('<label class="chip"><input type="radio" '
                           f'name="model" value="{_esc(p["name"])}"{chk}>'
                           f'<span>{_esc(p["name"])}</span></label>')
-        picker = f'<div class="chips">{"".join(mchips)}</div>'
-    ask_btn = ('<button name="mode" value="ask">Ask</button>' if ps else "")
+        picker = ('<div class="group"><div class="group-label">model</div>'
+                  f'<div class="chips">{"".join(mchips)}</div></div>')
     return (
         '<form method="get">'
+        '<input type="hidden" name="mode" value="ask">'
         '<div class="row">'
         f'<input type="search" name="q" value="{_esc(g("q"))}" '
-        'placeholder="search history" autofocus>'
-        f"<button>Search</button>{ask_btn}</div>"
-        f'<div class="chips">{"".join(chips)}</div>'
-        f'<div class="chips">{qps}</div>{picker}'
-        f'<details{" open" if active else ""}><summary>filters</summary>'
+        'placeholder="ask your history" autofocus>'
+        "<button>Ask</button></div>"
+        f"{picker}"
+        '<p class="health">the model works your history tools and cites '
+        "what it reads — takes 10–60s</p></form>")
+
+def _form_browse(g, stats: dict) -> str:
+    today = datetime.now().astimezone().date().isoformat()
+    since = g("since") or today
+    until = g("until") or today
+    view = g("view")
+    toggle = "".join(
+        '<label class="chip"><input type="radio" name="view" '
+        f'value="{v}"{" checked" if view == v else ""}>'
+        f"<span>{t}</span></label>"
+        for v, t in (("summaries", "Summaries"), ("", "Everything")))
+    qps = "".join(f'<button class="qp" name="range" value="{v}">{t}</button>'
+                  for v, t in (("today", "Today"), ("7d", "7d"),
+                               ("30d", "30d")))
+    return (
+        '<form method="get">'
+        '<input type="hidden" name="mode" value="browse">'
+        f'<div class="group"><div class="group-label">view</div>'
+        f'<div class="chips">{toggle}</div></div>'
+        f'<div class="chips">{qps}</div>'
         '<div class="filters">'
         f'<label>since <input type="date" name="since" value="{_esc(since)}">'
         "</label>"
         f'<label>until <input type="date" name="until" value="{_esc(until)}">'
-        "</label>"
-        f'<label>results <input type="number" name="k" min="1" max="25" '
-        f'value="{k}"></label>'
-        f'<label>location <input name="location" value="{_esc(location)}" '
-        'placeholder="prefix, e.g. chrome:"></label>'
-        f'<label class="check"><input type="checkbox" name="undated" '
-        f'value="1"{" checked" if undated else ""}> include undated</label>'
-        "</div></details></form>")
+        "</label></div>"
+        f"{_source_chips(g, stats)}"
+        '<div class="row"><button>Browse</button></div></form>')
+
+def _form(g, stats: dict) -> str:
+    mode = _mode_of(g)
+    tabs = _tabs(mode, g, has_ask=bool(ask.presets()))
+    if mode == "ask":
+        return tabs + _form_ask(g)
+    if mode == "browse":
+        return tabs + _form_browse(g, stats)
+    return tabs + _form_search(g, stats)
 
 def _filter_args(g) -> dict:
     args = {}
@@ -467,7 +559,10 @@ def _back_qs(g) -> str:
     """The originating search, as a query string — carried on expand links
     so the expand page's back link restores the search, not the homepage."""
     keep = {n: g(n) for n in ("q", "source", "location", "since", "until",
-                              "undated", "k", "offset", "model") if g(n)}
+                              "undated", "k", "offset", "model", "view")
+            if g(n)}
+    if _mode_of(g) == "browse":   # ask deliberately excluded: back from a
+        keep["mode"] = "browse"   # citation must never trigger a paid re-ask
     return urlencode(keep)
 
 # ── card renderers: chunk text is the embedded prose; render the meta's
@@ -571,10 +666,36 @@ def _render_results(g, chrome: str, tail: str = "") -> str:
         parts.append("<p>no matches</p>")
     return _page("".join(parts), tail)
 
+def _is_summary(r) -> bool:
+    return (r["source"] == "digest"
+            or (r["source"] == "appusage"
+                and "first" in (r.get("meta") or {})))
+
+def _summary_band(r, bq: str = "") -> str:
+    """Summary-tier chunks render as bands bound to their day header —
+    day → summary → detail, encoded in form."""
+    meta = r.get("meta") or {}
+    if r["source"] == "digest":
+        label = f"digest · {meta.get('digest_of', '')}"
+        loc = r.get("location") or ""
+        if loc and loc != meta.get("digest_of"):
+            label += f" · {loc}"
+        body = f"<p>{_esc(r['text'])}</p>"
+    else:
+        label = "day shape"
+        body = _card_appusage(r, clamp=False) or f"<p>{_esc(r['text'])}</p>"
+    href = f"search?expand={r['id']}" + (f"&{bq}" if bq else "")
+    return (f'<div class="sband"><div class="sband-label">{_esc(label)}'
+            f"</div>{body}"
+            f'<a class="expand" href="{_esc(href)}">'
+            f'{_icon("expand")} expand</a></div>')
+
 def _render_window(g, chrome: str, tail: str = "") -> str:
     offset = _int(g("offset"), 0, 0, 10**9)
     args = _filter_args(g)
     args["include_meta"] = True    # the card renderers feed on meta
+    if g("view") == "summaries":
+        args["summaries"] = True
     if offset:
         args["offset"] = offset
     data = json.loads(server.list_window(**args))
@@ -586,15 +707,18 @@ def _render_window(g, chrome: str, tail: str = "") -> str:
         if label != day:
             parts.append(f'<h2 class="day">{_esc(label)}</h2>')
             day = label
-        parts.append(_result_article(r, bq))
+        parts.append(_summary_band(r, bq) if _is_summary(r)
+                     else _result_article(r, bq))
     count, total = data.get("count", 0), data.get("total", 0)
     if not count:
         parts.append("<p>nothing in this window</p>")
     else:
         parts.append(f"<p>{offset + 1}–{offset + count} of {total}")
         if offset + count < total:
-            nxt = {n: g(n) for n in ("source", "location", "since", "until",
-                                     "undated") if g(n)}
+            nxt = {"mode": "browse"}
+            nxt.update({n: g(n) for n in ("source", "location", "since",
+                                          "until", "undated", "view")
+                        if g(n)})
             nxt["offset"] = offset + count
             parts.append(f' · <a href="search?{_esc(urlencode(nxt))}">'
                          "older &rarr;</a>")
@@ -923,6 +1047,13 @@ async def _search_page(scope, send):
     def g(name: str) -> str:
         return (qs.get(name) or [""])[0].strip()
 
+    if g("range") in ("today", "7d", "30d"):
+        # browse presets are plain submits; the server computes the dates
+        days = {"today": 0, "7d": 6, "30d": 29}[g("range")]
+        until = datetime.now().astimezone().date()
+        qs["until"] = [until.isoformat()]
+        qs["since"] = [(until - timedelta(days=days)).isoformat()]
+
     if g("expand"):
         n = _int(g("context"), 5, 0, 25)
         if g("fragment"):
@@ -934,18 +1065,21 @@ async def _search_page(scope, send):
         stats = _stats()
         chrome = _banner(stats) + _form(g, stats)
         tail = _stats_panel(stats)
-        if g("q") and g("mode") == "ask":
+        mode = _mode_of(g)
+        if mode == "ask" and g("q"):
             result = ask.ask(g("q"), g("model"))
             if g("json"):
                 await _send_json(send, result)
                 return
             body = _render_answer(result, g, chrome, tail)
-        elif g("q"):
-            body = _render_results(g, chrome, tail)
-        elif g("since") or g("until"):
+        elif mode == "browse" and (g("since") or g("until")):
             body = _render_window(g, chrome, tail)
-        else:
+        elif mode == "search" and g("q"):
+            body = _render_results(g, chrome, tail)
+        elif mode == "search":
             body = _page(chrome + _empty_state(stats), tail)
+        else:
+            body = _page(chrome, tail)     # ask/browse form, nothing run yet
     await _send_html(send, body)
 
 _inner = None
