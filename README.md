@@ -65,7 +65,7 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
 - `deploy/lambda/` — optional read-only replica on AWS Lambda: phone access
-  via a claude.ai connector plus a `/search` page. See "Remote replica".
+  via a claude.ai connector plus a browser UI. See "Remote replica".
 - `tools/` — dev loop and maintenance: `refresh.py` (the scheduled chain:
   index → prune → backup → sync, each step isolated, outcomes recorded in
   the `runs` table), `smoke.py` (exercise every tool path
@@ -513,18 +513,26 @@ pushes the index to S3 on change, and the function serves the same four
 MCP tools behind a secret-path URL usable as a claude.ai custom connector
 (phone/web/desktop).
 
-The same endpoint serves `/search`, an HTML page sized for phones with
-three modes behind one tab bar:
-- **Search** — semantic search with source chips and date/location
-  filters; results render as cards (source badges, native per-source
-  formatting), each expanding inline into the full chunk + context.
+The same endpoint serves a browser UI — a static client (`ui.html` +
+`ui.js`, no framework) that calls the MCP tools from the page, sized for
+phones, with three stateful tabs:
+- **Search** — semantic search with source chips and one date-range
+  idiom (Any time · 7d · 30d · Custom); results are ledger rows with
+  match highlighting, each expanding in place into the full chunk,
+  meta, and per-source context.
 - **Ask** — a prompt to a model that works the history tools and answers
-  with citations linking into the reading views. Models are named presets
-  (`[ask.models]`, any OpenAI-compatible or Anthropic endpoint); the
-  picker offers whichever presets have keys in the function env.
-- **Browse** — the window listing with date presets (Today · 7d · 30d)
-  and a **Summaries | Everything** toggle: Summaries is a diary view of
-  just the day-shape and digest rollups, day by day.
+  with typed source-chip citations that reveal their excerpt in place.
+  Ask is an explicit POST — it can never run from a link or navigation.
+  Models are named presets (`[ask.models]`, any OpenAI-compatible or
+  Anthropic endpoint); the picker offers whichever presets have keys in
+  the function env. An answer that cites nothing is flagged as
+  ungrounded, with a sources-required retry.
+- **Browse** — the window listing by day with range presets and a
+  summaries-only view of the day-shape and digest rollups.
+
+Auth for the page is a one-time `/login?token=<secret>` that sets a
+cookie, so page URLs and browser history never carry the credential;
+the secret-path URL keeps working for MCP clients and `hist`.
 
 `tools/hist.py` gives the same search and ask from any terminal holding
 the URL. Code deploys ride GitHub Actions on pushes to main (OIDC role,

@@ -181,3 +181,16 @@ def test_presets_from_env_json(monkeypatch):
     assert [p["name"] for p in ask.presets()] == ["env-model"]
     monkeypatch.setenv("CLAUDE_RAG_ASK_MODELS", "not json")
     assert ask.presets() == []
+
+
+def test_strict_hardens_the_system_prompt(cfg, monkeypatch):
+    calls = fake_provider(monkeypatch, [
+        {"choices": [{"message": {"role": "assistant", "content": "A."}}],
+         "usage": {}}])
+    ask.ask("q", "m1")
+    ask.ask("q", "m1", strict=True)
+    base = calls[0]["json"]["messages"][0]["content"]
+    hard = calls[1]["json"]["messages"][0]["content"]
+    assert "general knowledge" not in base
+    assert hard.startswith(base)
+    assert "Do not answer from general knowledge" in hard

@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - deploy/lambda/app.py
+      - deploy/lambda/ui.html
+      - deploy/lambda/ui.js
       - deploy/lambda/requirements.txt
       - deploy/lambda/build.sh
       - server.py

@@ -81,9 +81,10 @@ aws logs put-retention-policy --log-group-name /aws/lambda/history-rag \
 The MCP endpoint is `https://<function-url-host>/$SECRET/mcp` — treat the
 whole URL as a credential.
 
-Also set `TZ` (e.g. `America/Los_Angeles`) in the function env: the
-`/search` page renders times in the function's local zone, and bare-date
-window bounds are interpreted as local days — without it, both mean UTC.
+Also set `TZ` (e.g. `America/Los_Angeles`) in the function env: bare-date
+window bounds are interpreted as the function's local days — without it,
+they mean UTC. (The browser UI renders times client-side, so display is
+unaffected either way.)
 
 ## Smoke test
 
@@ -120,23 +121,34 @@ Two thin clients ride the same endpoint (design: `wip/SPEC-direct-access.md`):
   overrides the name). `hist search "that proxy bug" -k 5`, `hist stats`,
   `hist window --since 2026-07-01 --group-by day`, `hist expand <id>`;
   `--json` for piping.
-- **Browser page** — `https://<function-url-host>/$SECRET/search`, served
-  by the Lambda itself: a no-JS search form sized for phones, behind the
-  same secret gate. Bookmark it on the home screen. Queries ride the URL
-  query string, so they land in the phone browser's history — acceptable
-  for a personal tool, noted in the page footer.
+- **Browser UI** — `ui.html` + `ui.js`, a static client served by the
+  Lambda that calls the MCP endpoint from the page
+  (`wip/SPEC-ui-rebuild.md`). Three tabs (Search / Ask / Browse), phone-
+  sized, dark. Set it up once per device: open
+  `https://<function-url-host>/login?token=$SECRET` — that mints a
+  year-long auth cookie and lands on `/`, which you bookmark on the home
+  screen. Page URLs never carry the secret and queries never ride a URL;
+  shareable links are explicit (`copy link`, hash fragment — invisible to
+  server logs). `https://<function-url-host>/$SECRET/` serves the same UI
+  without the cookie; old `/$SECRET/search?...` bookmarks redirect into
+  the client and never execute anything by navigation.
 
 ## Ask mode
 
-The `/search` page's Ask button runs a model over the four tools
-in-process and renders a cited answer (`wip/SPEC-ask-mode.md`); `hist ask`
-rides the same handler with `json=1`. Configure named presets as JSON in
-the function env (there's no TOML on Lambda), plus each preset's key:
+The UI's Ask tab runs a model over the four tools in-process and renders
+a cited answer (`wip/SPEC-ask-mode.md`). Ask is `POST /ask` only — a GET
+can never trigger a paid call — and `hist ask` posts the same endpoint.
+Configure named presets as JSON in the function env (there's no TOML on
+Lambda), plus each preset's key. Presets may carry two optional display
+strings the picker shows: `latency` (e.g. `"~10–20s"`) and `est_cost`
+(e.g. `"$0.004"`) — nothing else about a preset ever crosses the wire
+(`GET /config` returns name + those two fields only).
 
 ```sh
 python3 set-env.py CLAUDE_RAG_ASK_MODELS - <<'EOF'
 [{"name": "haiku", "backend": "anthropic",
-  "model": "claude-haiku-4-5", "key_env": "ANTHROPIC_API_KEY"}]
+  "model": "claude-haiku-4-5", "key_env": "ANTHROPIC_API_KEY",
+  "latency": "~10-20s", "est_cost": "$0.004"}]
 EOF
 pbpaste | python3 set-env.py ANTHROPIC_API_KEY -
 ```
@@ -148,8 +160,9 @@ function timeout for the agent loop:
 
 ## Deploys
 
-Pushes to main touching the shipped files (`app.py`, `requirements.txt`,
-`build.sh`, `server.py`, `config.py`, or the workflow itself) deploy
+Pushes to main touching the shipped files (`app.py`, `ui.html`, `ui.js`,
+`requirements.txt`, `build.sh`, `server.py`, `config.py`, or the workflow
+itself) deploy
 automatically via `.github/workflows/deploy-lambda.yml`: tests → build →
 OIDC role assumption → code update → a secret-less smoke invoke (the gate
 must 404 a path outside the secret) → a `deployed-sha` tag on the
@@ -214,7 +227,9 @@ pbpaste | python3 set-env.py MXBAI_API_KEY -        # key via clipboard
 Rotate on exposure (URL or key visible in a transcript, log, or screen
 share) and otherwise on whatever calendar cadence you rotate the AWS access
 key itself. Env updates recycle warm containers, so old values die
-immediately; after a URL rotation, update the claude.ai connector.
+immediately; after a URL rotation, update the claude.ai connector and
+re-run `/login?token=<new>` on each device — the auth cookie holds the
+secret, so rotation invalidates it everywhere at once.
 
 ## Runbook
 - **Staleness:** Lambda re-checks the S3 ETag at most every 5 min

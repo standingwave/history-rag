@@ -152,22 +152,23 @@ def test_human_vs_json_rendering(transport, capsys):
     assert json.loads(capsys.readouterr().out) == result
 
 
-def test_ask_rides_the_search_endpoint(monkeypatch, capsys):
+def test_ask_posts_the_ask_endpoint(monkeypatch, capsys):
     seen = {}
     payload = {"answer": "It was Tuesday.", "citations": ["abc"],
                "usage": {"model": "m1", "turns": 2, "in": 5, "out": 7}}
 
     def fake_urlopen(req, timeout=None):
         seen["url"], seen["timeout"] = req.full_url, timeout
+        seen["method"], seen["body"] = req.get_method(), req.data
         return _FakeResponse(payload)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setenv("HISTORY_RAG_URL", URL)
     hist.main(["ask", "what did I do tuesday", "--model", "m1"])
-    assert seen["url"].startswith("https://host.example/s3cr3t/search?")
-    for part in ("mode=ask", "json=1", "model=m1", "go=1",
-                 "q=what+did+I+do+tuesday"):
-        assert part in seen["url"]
+    assert seen["url"] == "https://host.example/s3cr3t/ask"
+    assert seen["method"] == "POST"
+    assert json.loads(seen["body"]) == {"q": "what did I do tuesday",
+                                        "model": "m1"}
     assert seen["timeout"] == 120
     out = capsys.readouterr().out
     assert "It was Tuesday." in out

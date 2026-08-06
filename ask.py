@@ -71,9 +71,9 @@ def run_tool(name: str, args: dict) -> str:
     return result
 
 
-def _system_prompt() -> str:
+def _system_prompt(strict: bool = False) -> str:
     now = datetime.now().astimezone()
-    return (
+    prompt = (
         "You answer questions from the user's own indexed history — their "
         "Claude Code sessions, shell commands, browsing, git commits, "
         "notes, calendar, and app usage — using the provided tools.\n"
@@ -87,6 +87,14 @@ def _system_prompt() -> str:
         "Answer concisely in plain text. If the history doesn't contain "
         "the answer, say so plainly."
     )
+    if strict:
+        prompt += (
+            "\nDo not answer from general knowledge: search the history "
+            "first, and every claim must cite a chunk it rests on as "
+            "[id:<chunk id>]. If the history has nothing relevant, say "
+            "exactly that instead of answering."
+        )
+    return prompt
 
 
 def _http(url: str, headers: dict, payload: dict) -> dict:
@@ -200,8 +208,11 @@ def citations(text: str) -> list:
     return out
 
 
-def ask(question: str, preset_name: str = "") -> dict:
-    """One question, one answer: {answer, citations, usage} or {error}."""
+def ask(question: str, preset_name: str = "", strict: bool = False) -> dict:
+    """One question, one answer: {answer, citations, usage} or {error}.
+    strict=True hardens the system prompt to refuse tool-free answers —
+    the page's "ask again, sources required" retry after an answer came
+    back with zero citations."""
     ps = presets()
     if not ps:
         return {"error": "ask mode isn't configured — add [[ask.models]] "
@@ -221,7 +232,7 @@ def ask(question: str, preset_name: str = "") -> dict:
     max_turns = int(config.get("ask", "max_turns",
                                "CLAUDE_RAG_ASK_MAX_TURNS", 8))
     tools = tool_defs()
-    adapter.start(_system_prompt(), question)
+    adapter.start(_system_prompt(strict), question)
     usage = {"in": 0, "out": 0, "turns": 0, "model": preset["name"]}
     text = ""
     for _ in range(max_turns):

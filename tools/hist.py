@@ -20,7 +20,7 @@ handle it carefully.
 Suggested: alias hist='python3 <repo>/tools/hist.py'
 """
 import argparse, json, os, subprocess, sys
-import urllib.error, urllib.parse, urllib.request
+import urllib.error, urllib.request
 
 TIMEOUT = 60        # first request after idle pays the cold start (~2-5s)
 ASK_TIMEOUT = 120   # the agent loop runs multiple model calls
@@ -79,14 +79,15 @@ def call_tool(url: str, tool: str, arguments: dict) -> str:
     return envelope["result"]["content"][0]["text"]
 
 def ask_request(url: str, question: str, model: str) -> str:
-    """GET the page's ask handler in JSON mode — same base URL, /search
-    instead of /mcp (wip/SPEC-ask-mode.md)."""
+    """POST the ask endpoint — same base URL, /ask instead of /mcp. Ask is
+    POST-only server-side so a paid model call can never ride a GET."""
     base = url[:-len("/mcp")] if url.endswith("/mcp") else url
-    params = {"q": question, "mode": "ask", "json": "1", "go": "1"}
+    payload = {"q": question}
     if model:
-        params["model"] = model
+        payload["model"] = model
     req = urllib.request.Request(
-        base + "/search?" + urllib.parse.urlencode(params))
+        base + "/ask", data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
     return _fetch(req, ASK_TIMEOUT)
 
 
