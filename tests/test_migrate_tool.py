@@ -18,7 +18,8 @@ def prod_with_archive(scratch_db, fake_embed, monkeypatch):
     db = open_db(scratch_db)
     db.execute("INSERT INTO chunks VALUES ('arch1', 'archive-only text', "
                "'alpha', '', 'gone', '{}')")
-    db.execute("INSERT INTO vec_chunks(id, embedding) VALUES ('arch1', ?)",
+    db.execute("INSERT INTO vec_chunks(id, source, embedding) "
+               "VALUES ('arch1', 'alpha', ?)",
                (sqlite_vec.serialize_float32(fake_embed("archive-only text")),))
     db.commit()
     db.close()

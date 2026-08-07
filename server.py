@@ -18,8 +18,16 @@ import config
 mcp = FastMCP("claude-history")
 
 # Windowed subsets up to this size are ranked exhaustively by true distance;
-# beyond it we fall back to KNN-pool sampling. Purely a latency knob.
+# beyond it we fall back to a KNN candidate pool cut at _pool_size(k) and
+# post-filtered. Purely a latency knob.
 EXACT_WINDOW_MAX = 4000
+
+def _pool_size(k: int) -> int:
+    """Candidate-pool size when time/location filters must be applied after
+    the KNN: those filters can match a thin slice of the pool, so over-fetch
+    hard. (Source never needs this — it's pushed into the KNN itself as a
+    vec0 partition key.)"""
+    return max(k * 64, 400)
 
 # ── connection, embedding, and query helpers ────────────────────────────────
 
@@ -95,20 +103,22 @@ def _parse_bounds(since: str, until: str):
 
 def _window_where(since, until, source, location, include_undated):
     """WHERE clause + params for a time/source/location slice of chunks.
-    Bounds must already be UTC-normalized."""
+    Bounds must already be UTC-normalized. Columns are qualified `c.` (both
+    chunks and vec_chunks carry `source`), so consumers must alias chunks
+    as c."""
     conds, params = [], []
     if since:
-        conds.append("timestamp >= ?"); params.append(since)
+        conds.append("c.timestamp >= ?"); params.append(since)
     if until:
-        conds.append("timestamp <= ?"); params.append(until)
+        conds.append("c.timestamp <= ?"); params.append(until)
     sql = " AND ".join(conds) or "1=1"
     if conds:
-        sql = f"(timestamp = '' OR ({sql}))" if include_undated \
-            else f"{sql} AND timestamp != ''"
+        sql = f"(c.timestamp = '' OR ({sql}))" if include_undated \
+            else f"{sql} AND c.timestamp != ''"
     if source:
-        sql += " AND source = ?"; params.append(source)
+        sql += " AND c.source = ?"; params.append(source)
     if location:
-        sql += " AND substr(location, 1, ?) = ?"
+        sql += " AND substr(c.location, 1, ?) = ?"
         params += [len(location), location]
     return sql, params
 
@@ -333,7 +343,11 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
 
     Returns JSON {query, count, results[]}, results ranked best-first. Each has
     rank (1=best), id, source, distance (lower=closer), text, and — when
-    present — timestamp, location, and meta. A missing timestamp just means
+    present — timestamp, location, and meta. `exact: true` means every chunk
+    matching the filters was ranked, so a short result IS the whole answer;
+    a `truncated` object instead means the candidate pool ran out before k
+    results matched — follow its hint (usually: raise k) rather than
+    concluding the history holds nothing. A missing timestamp just means
     that row isn't dated (common for shell). Results are pointers: pass an id
     to expand() for the full chunk plus its surrounding context. For an
     exhaustive chronological listing of a time window, use list_window —
@@ -351,18 +365,32 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     db = _db()
     qblob = sqlite_vec.serialize_float32(vec)
 
-    # Any filter can select a slice too small for KNN sampling to reach (147
-    # chunks of one day, or git's ~500 among 34k, won't crack a global
-    # top-pool for most queries). When the filtered subset is small, rank ALL
-    # of it by true distance instead — exhaustive, no sampling loss.
-    rows, exact = None, False
-    if since or until or source or location:
+    # `exact` = the response ranks everything the filters match (envelope
+    # flag); `filtered` = rows already satisfy every filter (SQL did the
+    # work), so the Python loop below must not re-filter.
+    rows, exact, filtered, pool = None, False, False, 0
+    if source and not (since or until or location):
+        # Source-scoped KNN: `source` is a vec0 partition key, so this scans
+        # exactly that source's vectors — the true per-source top-k however
+        # large the source, at KNN speed. (Post-filtering a global pool here
+        # returned 0 browser hits: other sources crowded the near field.)
+        exact = filtered = True
+        rows = db.execute("""
+            SELECT v.distance, c.id, c.text, c.source, c.timestamp, c.location, c.meta
+            FROM vec_chunks v JOIN chunks c ON c.id = v.id
+            WHERE v.embedding MATCH ? AND k = ? AND v.source = ?
+            ORDER BY v.distance
+        """, (qblob, k, source)).fetchall()
+    elif since or until or location:
+        # Time/location filters can select a slice too thin for any KNN pool
+        # to reach. When the slice is small, rank ALL of it by true distance
+        # instead — exhaustive, nothing missed.
         where, params = _window_where(since, until, source, location,
                                       include_undated)
-        n_window = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
+        n_window = db.execute(f"SELECT COUNT(*) FROM chunks c WHERE {where}",
                               params).fetchone()[0]
         if n_window <= EXACT_WINDOW_MAX:
-            exact = True
+            exact = filtered = True
             rows = db.execute(f"""
                 SELECT vec_distance_l2(v.embedding, ?) AS distance, c.id,
                        c.text, c.source, c.timestamp, c.location, c.meta
@@ -371,23 +399,23 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
             """, (qblob, *params)).fetchall()
 
     if rows is None:
-        # Over-fetch, then filter in Python. Location and time filters can
-        # match a small slice, so they widen the candidate pool a lot.
-        pool = max(k * (8 if source else 4), 30)
-        if source or location or since or until:
-            pool = max(pool, k * 64, 400)
-        rows = db.execute("""
+        # Big time/location slice (or no filters at all): KNN a candidate
+        # pool — partition-scoped when a source is set — then filter the
+        # remaining conditions in Python.
+        pool = _pool_size(k) if since or until or location else k
+        src_cond, src_params = ("AND v.source = ?", [source]) if source else ("", [])
+        rows = db.execute(f"""
             SELECT v.distance, c.id, c.text, c.source, c.timestamp, c.location, c.meta
             FROM vec_chunks v JOIN chunks c ON c.id = v.id
-            WHERE v.embedding MATCH ? AND k = ?
+            WHERE v.embedding MATCH ? AND k = ? {src_cond}
             ORDER BY v.distance
-        """, (qblob, pool)).fetchall()
+        """, (qblob, pool, *src_params)).fetchall()
+        if (since or until or location) and len(rows) < pool:
+            exact = True    # the pool held every candidate there was
 
     results = []
     for dist, cid, text, src, ts, loc, meta_json in rows:
-        if not exact:                 # the exact path already filtered in SQL
-            if source and src != source:
-                continue
+        if not filtered:              # source is always filtered in SQL
             if location and not (loc or "").startswith(location):
                 continue
             if since or until:
@@ -415,9 +443,17 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         out["exact"] = True       # every chunk matching the filters was ranked
     if since or until:
         out["window"] = {"since": since or None, "until": until or None}
-    if (since or until or source or location) and not exact and len(results) < k:
-        out["note"] = (f"only {len(results)} of k={k} matched from a sampled "
-                       f"candidate pool; raise k to search deeper")
+    # Short of k with a full pool means deeper candidates exist unseen —
+    # unless the pool's tail already broke max_distance, in which case
+    # everything deeper would too (distances ascend) and the shortfall is
+    # genuine. Genuine shortfalls carry no marker; exact:true says the
+    # ranking missed nothing.
+    if (not exact and len(results) < k and len(rows) >= pool
+            and not (max_distance and rows and rows[-1][0] > max_distance)):
+        out["truncated"] = {"reason": "candidate_pool_exhausted",
+                            "pool_scanned": len(rows),
+                            "hint": "raise k (the pool scales with it) or "
+                                    "tighten since/until/location"}
     return json.dumps(out)
 
 @mcp.tool()
@@ -595,17 +631,17 @@ def list_window(since: str = "", until: str = "", source: str = "",
                                   include_undated)
     if summaries:
         # the same tier the summaries-first ORDER BY ranks ahead
-        where += (" AND (source = 'digest' OR (source = 'appusage' AND "
-                  "json_extract(meta, '$.first') IS NOT NULL))")
+        where += (" AND (c.source = 'digest' OR (c.source = 'appusage' AND "
+                  "json_extract(c.meta, '$.first') IS NOT NULL))")
     db = _db()
-    total = db.execute(f"SELECT COUNT(*) FROM chunks WHERE {where}",
+    total = db.execute(f"SELECT COUNT(*) FROM chunks c WHERE {where}",
                        params).fetchone()[0]
     window = {"since": since or None, "until": until or None}
 
     if dims:
         buckets = {}
         for src, ts, loc, meta_json in db.execute(
-                f"SELECT source, timestamp, location, meta FROM chunks "
+                f"SELECT source, timestamp, location, meta FROM chunks c "
                 f"WHERE {where}", params):
             key = tuple(_group_value(d, src, ts, loc, meta_json) for d in dims)
             b = buckets.get(key)
@@ -632,7 +668,7 @@ def list_window(since: str = "", until: str = "", source: str = "",
     # raw chunks newest-first. Day/week questions read the summaries
     # before the detail, matching the disclosure ladder.
     rows = db.execute(
-        f"""SELECT id, source, timestamp, location, text, meta FROM chunks
+        f"""SELECT id, source, timestamp, location, text, meta FROM chunks c
             WHERE {where}
             ORDER BY date(timestamp, 'localtime') DESC,
                      CASE WHEN source = 'appusage'

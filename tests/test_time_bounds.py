@@ -34,9 +34,9 @@ def test_parse_bounds_error_shape():
 
 def test_window_where_composition():
     sql, params = _window_where("S", "U", "git", "littlebird@", False)
-    assert "timestamp >= ?" in sql and "timestamp <= ?" in sql
-    assert "timestamp != ''" in sql
-    assert "source = ?" in sql and "substr(location, 1, ?)" in sql
+    assert "c.timestamp >= ?" in sql and "c.timestamp <= ?" in sql
+    assert "c.timestamp != ''" in sql
+    assert "c.source = ?" in sql and "substr(c.location, 1, ?)" in sql
     assert params == ["S", "U", "git", 11, "littlebird@"]
 
 def test_window_where_include_undated():

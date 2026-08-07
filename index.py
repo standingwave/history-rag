@@ -74,9 +74,32 @@ def setup(db):
     db.execute("""CREATE TABLE IF NOT EXISTS chunks(
         id TEXT PRIMARY KEY, text TEXT, source TEXT,
         timestamp TEXT, location TEXT, meta TEXT)""")
+    migrate_vec_partition(db)
     db.execute(f"""CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
-        id TEXT PRIMARY KEY, embedding FLOAT[{config.DIM}])""")
+        id TEXT PRIMARY KEY, source TEXT partition key,
+        embedding FLOAT[{config.DIM}])""")
     ensure_runs(db)
+
+def migrate_vec_partition(db):
+    """One-time rebuild of vec_chunks with `source` as a vec0 partition key,
+    so a source-filtered search KNNs over just that source's vectors instead
+    of post-filtering a global pool. Embeddings are copied, not recomputed.
+    Orphaned vectors (no chunks row) don't survive the copy."""
+    row = db.execute("SELECT sql FROM sqlite_master "
+                     "WHERE name = 'vec_chunks'").fetchone()
+    if not row or "partition key" in row[0]:
+        return
+    rows = db.execute("""SELECT v.id, c.source, v.embedding
+                         FROM vec_chunks v JOIN chunks c ON c.id = v.id""").fetchall()
+    db.execute("DROP TABLE vec_chunks")
+    db.execute(f"""CREATE VIRTUAL TABLE vec_chunks USING vec0(
+        id TEXT PRIMARY KEY, source TEXT partition key,
+        embedding FLOAT[{config.DIM}])""")
+    db.executemany("INSERT INTO vec_chunks(id, source, embedding) "
+                   "VALUES (?, ?, ?)", rows)
+    db.commit()
+    print(f"migrated vec_chunks to source-partitioned schema "
+          f"({len(rows)} vectors copied)")
 
 def ensure_runs(db):
     """Run health lives in the DB (durable, queryable, backed up): the MCP
@@ -238,8 +261,8 @@ def main():
                    (cid, text, rec["source"], rec.get("timestamp", ""),
                     rec.get("location", ""), json.dumps(rec.get("meta", {}))))
         db.execute("DELETE FROM vec_chunks WHERE id = ?", (cid,))
-        db.execute("INSERT INTO vec_chunks(id, embedding) VALUES (?, ?)",
-                   (cid, sqlite_vec.serialize_float32(vec)))
+        db.execute("INSERT INTO vec_chunks(id, source, embedding) VALUES (?, ?, ?)",
+                   (cid, rec["source"], sqlite_vec.serialize_float32(vec)))
 
     def flush(batch):
         """Embed and store a batch. On batch error, retry items individually

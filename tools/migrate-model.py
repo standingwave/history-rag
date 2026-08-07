@@ -67,7 +67,8 @@ def run_migration(model: str, dim: int, swap: bool = True) -> str:
     ndb.execute("CREATE TABLE IF NOT EXISTS chunks(id TEXT PRIMARY KEY, "
                 "text TEXT, source TEXT, timestamp TEXT, location TEXT, meta TEXT)")
     ndb.execute(f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0("
-                f"id TEXT PRIMARY KEY, embedding FLOAT[{dim}])")
+                f"id TEXT PRIMARY KEY, source TEXT partition key, "
+                f"embedding FLOAT[{dim}])")
     ndb.execute("CREATE TABLE IF NOT EXISTS index_meta(key TEXT PRIMARY KEY, value TEXT)")
     existing_stamp = read_stamp(ndb)
     if existing_stamp.get("model") not in (None, model):
@@ -93,14 +94,14 @@ def run_migration(model: str, dim: int, swap: bool = True) -> str:
         cstamp = read_stamp(cdb)
         if cstamp.get("model") == model and cstamp.get("dim") == str(dim):
             cand = {r[0]: r[1] for r in cdb.execute("SELECT id, text FROM chunks")}
-            for cid, text, *_ in rows:
+            for cid, text, src, *_ in rows:
                 if cid in done or cand.get(cid) != text:
                     continue
                 blob = cdb.execute("SELECT embedding FROM vec_chunks WHERE id=?",
                                    (cid,)).fetchone()
                 if blob:
-                    ndb.execute("INSERT INTO vec_chunks(id, embedding) VALUES (?,?)",
-                                (cid, blob[0]))
+                    ndb.execute("INSERT INTO vec_chunks(id, source, embedding) "
+                                "VALUES (?,?,?)", (cid, src, blob[0]))
                     done.add(cid)
                     reused += 1
             ndb.commit()
@@ -108,17 +109,18 @@ def run_migration(model: str, dim: int, swap: bool = True) -> str:
             print(f"candidate at {cand_file} has stamp {cstamp} — not reusing",
                   flush=True)
 
-    todo = [(cid, text) for cid, text, *_ in rows if cid not in done]
+    todo = [(cid, text, src) for cid, text, src, *_ in rows if cid not in done]
     print(f"{len(rows)} chunks: {reused} vectors reused from eval, "
           f"{len(done) - reused} already present, {len(todo)} to embed",
           flush=True)
     t0 = time.monotonic()
     for i in range(0, len(todo), BATCH):
         batch = todo[i:i + BATCH]
-        vecs = embed_batch(model, [t for _, t in batch])
-        ndb.executemany("INSERT INTO vec_chunks(id, embedding) VALUES (?,?)",
-                        [(cid, sqlite_vec.serialize_float32(v))
-                         for (cid, _), v in zip(batch, vecs)])
+        vecs = embed_batch(model, [t for _, t, _s in batch])
+        ndb.executemany("INSERT INTO vec_chunks(id, source, embedding) "
+                        "VALUES (?,?,?)",
+                        [(cid, src, sqlite_vec.serialize_float32(v))
+                         for (cid, _, src), v in zip(batch, vecs)])
         ndb.commit()
         if (i // BATCH) % 5 == 0:
             print(f"  embedded {min(i + BATCH, len(todo))}/{len(todo)} "

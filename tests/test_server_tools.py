@@ -46,8 +46,20 @@ def test_exact_vs_pool_branch(seeded, monkeypatch):
 
     monkeypatch.setattr(server, "EXACT_WINDOW_MAX", 1)   # force pool path
     r = json.loads(server.search_history("page", k=50, since="2026-07-02"))
+    assert r.get("exact") is True     # pool held the whole table -> exhaustive
+    assert "truncated" not in r
+
+def test_pool_truncation_reported_when_cut(seeded, monkeypatch):
+    """A pool that fills before k results pass the window filter must say so
+    in a structured way — silence here reads as 'the history is empty'."""
+    import server
+    monkeypatch.setattr(server, "EXACT_WINDOW_MAX", 1)   # force pool path
+    monkeypatch.setattr(server, "_pool_size", lambda k: 3)
+    r = json.loads(server.search_history("page", k=50, since="2026-07-02"))
     assert "exact" not in r
-    assert "note" in r                                   # short of k, sampled
+    assert r["truncated"]["reason"] == "candidate_pool_exhausted"
+    assert r["truncated"]["pool_scanned"] == 3
+    assert 0 < r["count"] <= 3
 
 def test_source_only_filter_ranks_exhaustively(seeded):
     """A small source must be fully ranked even without a time window —
@@ -57,6 +69,21 @@ def test_source_only_filter_ranks_exhaustively(seeded):
                                          source="claude"))
     assert r.get("exact") is True and "window" not in r
     assert r["count"] == 1 and r["results"][0]["id"] == "cl1"
+
+def test_source_scoped_search_is_partition_knn(seeded, monkeypatch):
+    """Source-scoped search KNNs inside the source's vec0 partition — the
+    browser count:0 regression, where a big near-field source crowded the
+    scoped source out of a global candidate pool. EXACT_WINDOW_MAX=0 proves
+    the exhaustive-window path isn't what rescues it."""
+    import server
+    monkeypatch.setattr(server, "EXACT_WINDOW_MAX", 0)
+    # exact chunk text -> distance 0 under the hash embedder -> must rank 1
+    r = json.loads(server.search_history(
+        "page number 2 about topic — https://x.com/2", k=3, source="browser"))
+    assert r.get("exact") is True
+    assert r["count"] == 3 and "truncated" not in r
+    assert {x["source"] for x in r["results"]} == {"browser"}
+    assert r["results"][0]["id"] == "b2"          # true in-source ranking
 
 def test_undated_rows_and_window(seeded):
     import server

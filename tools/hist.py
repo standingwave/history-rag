@@ -140,6 +140,10 @@ def human_search(data):
         print(head)
         print(f"    {_flat(r['text'], 300)}")
         print(f"    id {r['id']}  d={r['distance']}")
+    if data.get("truncated"):
+        t = data["truncated"]
+        print(f"(truncated: {t['reason']} after {t['pool_scanned']} "
+              f"candidates — {t['hint']})")
     if data.get("note"):
         print(data["note"])
 

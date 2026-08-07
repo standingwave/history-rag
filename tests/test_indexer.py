@@ -98,3 +98,32 @@ def test_prune_horizon_bounds_deletion(scratch_db, fake_embed, monkeypatch):
     assert {r[0] for r in db.execute("SELECT id FROM chunks")} == \
            {"keep", "old", "undated"}
     assert db.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == 3
+
+def test_vec_partition_migration(scratch_db, fake_embed, monkeypatch):
+    """A pre-partition DB is rebuilt in place with `source` as a vec0
+    partition key: embeddings copied byte-for-byte, nothing re-embedded,
+    orphaned vectors dropped."""
+    import sqlite_vec
+    import config, index
+    db = open_db(scratch_db)
+    db.execute("""CREATE TABLE chunks(id TEXT PRIMARY KEY, text TEXT,
+        source TEXT, timestamp TEXT, location TEXT, meta TEXT)""")
+    db.execute(f"CREATE VIRTUAL TABLE vec_chunks USING vec0("
+               f"id TEXT PRIMARY KEY, embedding FLOAT[{config.DIM}])")
+    blob = sqlite_vec.serialize_float32(fake_embed("old text"))
+    db.execute("INSERT INTO chunks VALUES ('o1','old text','alpha','','x','{}')")
+    db.execute("INSERT INTO vec_chunks(id, embedding) VALUES ('o1', ?)", (blob,))
+    db.execute("INSERT INTO vec_chunks(id, embedding) VALUES ('orphan', ?)",
+               (blob,))
+    db.commit()
+
+    index.setup(db)
+    sql = db.execute("SELECT sql FROM sqlite_master "
+                     "WHERE name='vec_chunks'").fetchone()[0]
+    assert "partition key" in sql
+    assert db.execute("SELECT id, source, embedding FROM vec_chunks").fetchall() \
+        == [("o1", "alpha", blob)]
+    assert fake_embed.calls == []                    # nothing re-embedded
+
+    index.setup(db)                                  # idempotent on new schema
+    assert db.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0] == 1
