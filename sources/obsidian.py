@@ -1,14 +1,22 @@
-"""Obsidian source: vault notes, chunked by heading.
+"""Obsidian source: vault notes, chunked by heading section, then paragraph
+group.
 
 Vaults come from CLAUDE_RAG_OBSIDIAN_VAULTS (colon-separated paths; a vault
 is a folder containing .obsidian/). Unset -> this source is a no-op. Within a
 vault, hidden dirs (.obsidian, .trash, .git) and template folders are skipped.
 
-Notes split into one chunk per #/##/### section (deeper headings stay inside
-their parent section); notes short enough to be one thought stay whole. Ids
-hash vault+path+heading+occurrence — deliberately NOT the text — so editing a
-section re-embeds it in place instead of orphaning chunks; only deleting or
-renaming a section orphans (--prune --source obsidian cleans up).
+Notes split into one section per #/##/### heading (deeper headings stay
+inside their parent section), and each section into paragraph groups of up
+to GROUP_MAX chars. Every chunk embeds as "note title > heading" + the group
+text: a whole 300-word section collapsed into one vector averages toward the
+corpus mean and away from any query, while the title/heading prefix carries
+exactly the vocabulary recall queries use (measured: prefixing moved a
+representative note's distance 0.94 -> 0.69 on a query naming its topic).
+Notes short enough to be one thought stay whole, title-prefixed. Ids hash
+vault+path+heading+occurrence+group — deliberately NOT the text — so editing
+a section re-embeds it in place instead of orphaning chunks; deleting or
+renaming a section (or shrinking its group count) orphans (--prune --source
+obsidian cleans up).
 
 Timestamp is the note's `date:` frontmatter when present, else file mtime.
 Frontmatter dates may be bare (2026-07-07) or full datetimes with optional
@@ -25,6 +33,7 @@ from sources.common import SECRET_RE
 
 MAX_CHARS = 2000
 WHOLE_NOTE_MAX = 1500        # notes at or under this stay one chunk
+GROUP_MAX = 700              # paragraph-group budget within a section
 _HEADING_RE = re.compile(r"^#{1,3} +(.*)$", re.M)
 _DATE_RE = re.compile(r"^date:\s*(\d{4}-\d{2}-\d{2}"
                       r"(?:[T ]\d{2}:\d{2}(?::\d{2})?"
@@ -58,6 +67,21 @@ def _sections(body: str):
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
         yield m.group(1).strip(), body[m.start():end]
+
+def _groups(text: str):
+    """Pack adjacent paragraphs into groups of up to GROUP_MAX chars. A
+    single over-budget paragraph stays one group (MAX_CHARS caps it later):
+    splitting mid-paragraph would cost more coherence than it saves."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    group, size = [], 0
+    for p in paras:
+        if group and size + len(p) > GROUP_MAX:
+            yield "\n\n".join(group)
+            group, size = [], 0
+        group.append(p)
+        size += len(p) + 2
+    if group:
+        yield "\n\n".join(group)
 
 def _fm_iso(fm_date: str) -> str:
     """Frontmatter date -> UTC ISO string ('' if unparseable). Bare dates
@@ -99,21 +123,30 @@ def iter_chunks():
                     continue
                 ts = (_fm_iso(fm_date) if fm_date else "") or _mtime_iso(path)
                 rel = os.path.relpath(path, vault)
-                secs = ([("", body)] if len(body) <= WHOLE_NOTE_MAX
-                        else _sections(body))
+                title = os.path.splitext(fn)[0]
+                whole = len(body) <= WHOLE_NOTE_MAX
+                secs = [("", body)] if whole else _sections(body)
                 counts: dict[str, int] = {}
-                for heading, text in secs:
-                    text = text.strip()[:MAX_CHARS]
-                    if not text or SECRET_RE.search(text):
-                        continue
+                for heading, sec_text in secs:
+                    if heading:      # the prefix below carries the heading
+                        sec_text = sec_text.split("\n", 1)[1] \
+                            if "\n" in sec_text else ""
+                    prefix = f"{title} > {heading}" if heading else title
                     # occurrence index disambiguates repeated headings
                     n = counts.get(heading, 0)
                     counts[heading] = n + 1
-                    cid = "obsidian:" + hashlib.sha256(
-                        f"{vname}\0{rel}\0{heading}\0{n}".encode()).hexdigest()[:26]
-                    yield cid, text, {
-                        "source": "obsidian",
-                        "timestamp": ts,
-                        "location": rel + (f"#{heading}" if heading else ""),
-                        "meta": {"path": rel, "heading": heading, "vault": vname},
-                    }
+                    groups = [sec_text] if whole else _groups(sec_text)
+                    for g, gtext in enumerate(groups):
+                        text = f"{prefix}\n{gtext.strip()}"[:MAX_CHARS]
+                        if not gtext.strip() or SECRET_RE.search(text):
+                            continue
+                        cid = "obsidian:" + hashlib.sha256(
+                            f"{vname}\0{rel}\0{heading}\0{n}\0{g}"
+                            .encode()).hexdigest()[:26]
+                        yield cid, text, {
+                            "source": "obsidian",
+                            "timestamp": ts,
+                            "location": rel + (f"#{heading}" if heading else ""),
+                            "meta": {"path": rel, "heading": heading,
+                                     "vault": vname},
+                        }

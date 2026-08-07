@@ -116,3 +116,33 @@ def test_sections_split():
     assert headings == ["", "Alpha", "Beta", "Beta"]          # preamble + dup Beta
     assert "#### Deep stays inside" in secs[2][1]             # h4 not split out
     assert secs[1][1].startswith("# Alpha")                   # heading line kept
+
+def test_groups_pack_paragraphs_to_budget():
+    p = lambda ch: ch * 300
+    gs = list(obsidian._groups(f"{p('a')}\n\n{p('b')}\n\n{p('c')}"))
+    assert gs == [f"{p('a')}\n\n{p('b')}", p("c")]
+    big = "x" * 900
+    assert list(obsidian._groups(big)) == [big]      # oversize para stays one
+
+def test_obsidian_chunks_are_prefixed_and_grouped(tmp_path, monkeypatch):
+    p = lambda ch: ch * 300
+    vault = tmp_path / "v"
+    vault.mkdir()
+    (vault / "My Topic.md").write_text(
+        "preamble thought\n\n"
+        f"# Alpha\n{p('a')}\n\n{p('b')}\n\n{p('c')}\n"
+        "# Secrets\nexport API_KEY=sk-abc123def456\n"
+        f"# Filler\n{'f' * 700}\n")
+    (vault / "Short.md").write_text("just one thought\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(vault))
+    chunks = list(obsidian.iter_chunks())
+    texts = [c[1] for c in chunks]
+    assert "Short\njust one thought" in texts         # whole note, title prefix
+    assert "My Topic\npreamble thought" in texts      # preamble: title only
+    alpha = [t for t in texts if t.startswith("My Topic > Alpha\n")]
+    assert len(alpha) == 2                            # packed to GROUP_MAX
+    assert alpha[0].endswith(p("b")) and alpha[1].endswith(p("c"))
+    assert not any("Secrets" in t for t in texts)     # credential group dropped
+    ids = [c[0] for c in chunks]
+    assert len(set(ids)) == len(ids)
+    assert [c[0] for c in obsidian.iter_chunks()] == ids   # deterministic
