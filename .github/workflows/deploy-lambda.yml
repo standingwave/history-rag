@@ -13,6 +13,7 @@ on:
       - server.py
       - config.py
       - ask.py
+      - rerank.py
       - sources/**
       - .github/workflows/deploy-lambda.yml
   workflow_dispatch:
