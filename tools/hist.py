@@ -139,7 +139,10 @@ def human_search(data):
             head += f"  {r['location']}"
         print(head)
         print(f"    {_flat(r['text'], 300)}")
-        print(f"    id {r['id']}  d={r['distance']}")
+        tail = f"    id {r['id']}  d={r['distance']}"
+        if "score" in r:
+            tail += f"  s={r['score']}"
+        print(tail)
     if data.get("truncated"):
         t = data["truncated"]
         print(f"(truncated: {t['reason']} after {t['pool_scanned']} "

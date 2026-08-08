@@ -1,3 +1,4 @@
 sqlite-vec
 requests
 mcp[cli]>=1.10,<2       # 2.0 removed mcp.server.fastmcp
+flashrank               # rerank stage, active only with [core] rerank="flashrank"

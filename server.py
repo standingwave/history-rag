@@ -13,7 +13,7 @@ from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 import sqlite_vec, requests
 from mcp.server.fastmcp import FastMCP
-import config
+import config, rerank
 
 mcp = FastMCP("claude-history")
 
@@ -28,6 +28,13 @@ def _pool_size(k: int) -> int:
     hard. (Source never needs this — it's pushed into the KNN itself as a
     vec0 partition key.)"""
     return max(k * 64, 400)
+
+# Rerank stage sizing: candidates offered to the cross-encoder (~120ms for
+# 64 pairs with the default model), and the per-source slice for unfiltered
+# searches — a global distance-cut pool would be dominated by the source
+# with the chattiest chunks, starving the reranker of cross-source material.
+RERANK_POOL = 64
+PER_SOURCE_POOL = 8
 
 # ── connection, embedding, and query helpers ────────────────────────────────
 
@@ -356,7 +363,10 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     matching the filters was ranked, so a short result IS the whole answer;
     a `truncated` object instead means the candidate pool ran out before k
     results matched — follow its hint (usually: raise k) rather than
-    concluding the history holds nothing. A missing timestamp just means
+    concluding the history holds nothing. With the optional rerank stage on
+    (`reranked: true`), results also carry `score` (cross-encoder relevance,
+    HIGHER = better) and order follows score — distance stays the vector-
+    stage value and is no longer the ranking key. A missing timestamp just means
     that row isn't dated (common for shell). Results are pointers: pass an id
     to expand() for the full chunk plus its surrounding context. For an
     exhaustive chronological listing of a time window, use list_window —
@@ -376,7 +386,10 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
 
     # `exact` = the response ranks everything the filters match (envelope
     # flag); `filtered` = rows already satisfy every filter (SQL did the
-    # work), so the Python loop below must not re-filter.
+    # work), so the Python loop below must not re-filter. When the rerank
+    # stage is on, every path fetches deeper so the cross-encoder has a
+    # pool to reorder.
+    rr = rerank.available()
     rows, exact, filtered, pool = None, False, False, 0
     if source and not (since or until or location):
         # Source-scoped KNN: `source` is a vec0 partition key, so this scans
@@ -389,7 +402,7 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
             FROM vec_chunks v JOIN chunks c ON c.id = v.id
             WHERE v.embedding MATCH ? AND k = ? AND v.source = ?
             ORDER BY v.distance
-        """, (qblob, k, source)).fetchall()
+        """, (qblob, max(k, RERANK_POOL) if rr else k, source)).fetchall()
     elif since or until or location:
         # Time/location filters can select a slice too thin for any KNN pool
         # to reach. When the slice is small, rank ALL of it by true distance
@@ -406,6 +419,21 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                 FROM vec_chunks v JOIN chunks c ON c.id = v.id
                 WHERE {where} ORDER BY distance
             """, (qblob, *params)).fetchall()
+
+    if rows is None and rr and not (since or until or location):
+        # Unfiltered search with rerank: per-source slices instead of one
+        # global cut, so every source gets to show the cross-encoder its
+        # best material.
+        filtered = True
+        rows = []
+        for (s,) in db.execute("SELECT DISTINCT source FROM chunks"):
+            rows += db.execute("""
+                SELECT v.distance, c.id, c.text, c.source, c.timestamp, c.location, c.meta
+                FROM vec_chunks v JOIN chunks c ON c.id = v.id
+                WHERE v.embedding MATCH ? AND k = ? AND v.source = ?
+                ORDER BY v.distance
+            """, (qblob, max(k, PER_SOURCE_POOL), s)).fetchall()
+        rows.sort(key=lambda r: r[0])
 
     if rows is None:
         # Big time/location slice (or no filters at all): KNN a candidate
@@ -445,9 +473,25 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
         if meta:
             item["meta"] = meta
         results.append(item)
-        if len(results) >= k:
+        if len(results) >= (max(k, RERANK_POOL) if rr else k):
             break
+
+    matched = len(results)
+    reranked = False
+    if rr and matched > 1:
+        scores = rerank.rerank(query, [r["text"] for r in results])
+        if scores is not None:
+            reranked = True
+            for r, s in zip(results, scores):
+                r["score"] = round(s, 4)
+            results.sort(key=lambda r: -r["score"])
+    del results[k:]
+    for i, r in enumerate(results):
+        r["rank"] = i + 1
+
     out = {"query": query, "count": len(results), "results": results}
+    if reranked:
+        out["reranked"] = True
     if exact:
         out["exact"] = True       # every chunk matching the filters was ranked
     if since or until:
@@ -457,7 +501,7 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     # everything deeper would too (distances ascend) and the shortfall is
     # genuine. Genuine shortfalls carry no marker; exact:true says the
     # ranking missed nothing.
-    if (not exact and len(results) < k and len(rows) >= pool
+    if (pool and not exact and matched < k and len(rows) >= pool
             and not (max_distance and rows and rows[-1][0] > max_distance)):
         out["truncated"] = {"reason": "candidate_pool_exhausted",
                             "pool_scanned": len(rows),

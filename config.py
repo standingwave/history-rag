@@ -16,7 +16,8 @@ _CONFIG_PATH = os.path.expanduser(
 
 _KNOWN = {
     "core": {"model", "dim", "db", "ollama", "embed_backend",
-             "nomic_task_type", "mxbai_query_prompt"},
+             "nomic_task_type", "mxbai_query_prompt", "rerank",
+             "rerank_model"},
     "sources": {"enabled"},
     "shell": {"histfiles", "atuin_db"},
     "browser": {"extra", "keep_params"},
@@ -95,6 +96,14 @@ MXBAI_API_MODEL = "mixedbread-ai/mxbai-embed-large-v1"
 MXBAI_QUERY_PROMPT = str(get("core", "mxbai_query_prompt",
                              "CLAUDE_RAG_MXBAI_QUERY_PROMPT", ""))
 MXBAI_API_KEY = os.environ.get("MXBAI_API_KEY", "")
+
+# Optional cross-encoder rerank stage over search results (rerank.py):
+# "none" (off) or "flashrank" (local ONNX cross-encoder, no torch; models
+# cache under ~/.claude/flashrank). Reranking only ever reorders candidates
+# the vector stage found — any failure falls back to distance order.
+RERANK_BACKEND = str(get("core", "rerank", "CLAUDE_RAG_RERANK", "none"))
+RERANK_MODEL = str(get("core", "rerank_model", "CLAUDE_RAG_RERANK_MODEL",
+                       "ms-marco-TinyBERT-L-2-v2"))
 
 # Remote replica (deploy/lambda): S3 destination for tools/sync-s3.py.
 # No bucket means no replica — the sync tool no-ops.
