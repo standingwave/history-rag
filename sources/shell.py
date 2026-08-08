@@ -1,16 +1,27 @@
-"""Shell history source: bash + zsh commands, deduped.
+"""Shell history source: working sessions from atuin, flat commands elsewhere.
 
 Reads atuin's SQLite store when present (every run dated, with cwd and exit
 code), plus ~/.bash_history and ~/.zsh_history (and archived files via
 `[shell] histfiles` / CLAUDE_RAG_HISTFILES). Handles zsh extended format
 (`: <epoch>:<elapsed>;<cmd>`) and bash `#<epoch>` timestamp lines.
 
-Identical commands collapse to one chunk carrying a run count and the latest
-run's timestamp and cwd (as `location`, so shell supports location-prefix
-filtering like the other sources). Commands atuin knows are skipped when read
-from live histfiles — atuin covers that era, and counting both would inflate.
-Trivial commands are dropped, and any command that looks like it contains a
-secret is skipped so it never gets embedded or surfaced back into a session.
+Dated atuin runs with a real cwd group into WORKING SESSIONS — same cwd,
+adjacent runs no more than SESSION_GAP apart — embedded as one narrative
+chunk: where, when, the command sequence with failures marked. A bare
+`npm test` line gives an embedder almost nothing; "in ~/dev/x: ran pytest
+(failed), edited the filter, ran pytest, committed" ranks. Session ids hash
+cwd + start time, so a still-open session grows and re-embeds in place; the
+per-run detail stays reachable via expand() (session_commands). Location is
+the abbreviated cwd, so location-prefix filtering works.
+
+Everything else stays one deduped chunk per command (count + latest run):
+histfile commands, and atuin's imported rows — cwd 'unknown', exit -1, and a
+timestamp that is the IMPORT moment, not the run, so they index undated
+rather than pile a thousand commands onto the day the import ran. Commands
+atuin knows are skipped when read from live histfiles — atuin covers that
+era, and counting both would inflate. Trivial commands are dropped, and any
+command that looks like it contains a secret is skipped so it never gets
+embedded or surfaced back into a session.
 """
 import os, re, glob, hashlib, sqlite3, sys
 from datetime import datetime, timezone
@@ -18,6 +29,8 @@ from sources.common import SECRET_RE, snapshot_db
 
 MAX_CHARS = 2000
 MIN_CHARS = 4
+SESSION_GAP = 30 * 60        # idle seconds that close a working session
+SESSION_MAX_LINES = 30       # narrative lines before the middle elides
 
 _ZSH_RE = re.compile(r"^: (\d+):\d+;(.*)$")
 
@@ -181,6 +194,81 @@ def _keep(cmd: str) -> bool:
     return (len(cmd) >= MIN_CHARS and cmd not in _STOP
             and not SECRET_RE.search(cmd) and not _FLAG_SECRET_RE.search(cmd))
 
+def _real_cwd(cwd: str) -> bool:
+    """atuin's imported rows carry cwd 'unknown' (and a timestamp that is
+    the import moment) — only rows with a real cwd are session material."""
+    return bool(cwd) and cwd != "unknown"
+
+def _sessions(rows):
+    """Group dated (epoch, cmd, cwd, exit) runs into working sessions: same
+    cwd, adjacent runs no more than SESSION_GAP apart. Yields
+    (cwd, [(epoch, cmd, exit), ...]) with runs time-ordered."""
+    by_cwd: dict[str, list] = {}
+    for epoch, cmd, cwd, exit_code in rows:
+        by_cwd.setdefault(cwd, []).append((epoch, cmd, exit_code))
+    for cwd, runs in by_cwd.items():
+        runs.sort(key=lambda r: r[0])
+        cur: list = []
+        for run in runs:
+            if cur and run[0] - cur[-1][0] > SESSION_GAP:
+                yield cwd, cur
+                cur = []
+            cur.append(run)
+        if cur:
+            yield cwd, cur
+
+def _session_text(cwd, runs):
+    """One session as a narrative: a header naming place, span, and size,
+    then the command sequence — consecutive repeats collapsed to ×n, nonzero
+    exits annotated, over-long sessions elided in the middle."""
+    entries: list = []                     # [line, repeat-count]
+    for _epoch, cmd, exit_code in runs:
+        line = " ".join(cmd.split())[:200] \
+            + (f" (exit {exit_code})" if exit_code else "")
+        if entries and entries[-1][0] == line:
+            entries[-1][1] += 1
+        else:
+            entries.append([line, 1])
+    lines = [l + (f" (×{n})" if n > 1 else "") for l, n in entries]
+    if len(lines) > SESSION_MAX_LINES:
+        head = SESSION_MAX_LINES // 2
+        tail = SESSION_MAX_LINES - head - 1
+        elided = len(lines) - head - tail
+        lines = lines[:head] + [f"… +{elided} more"] + lines[-tail:]
+    d0 = datetime.fromtimestamp(runs[0][0], tz=timezone.utc)
+    d1 = datetime.fromtimestamp(runs[-1][0], tz=timezone.utc)
+    end = f"{d1:%H:%M}" if d1.date() == d0.date() else f"{d1:%Y-%m-%d %H:%M}"
+    n = len(runs)
+    header = (f"Shell session in {_abbrev(cwd)} — {d0:%Y-%m-%d %H:%M}–{end} "
+              f"UTC ({n} command{'s' if n != 1 else ''})")
+    return "\n".join([header, *lines])[:MAX_CHARS]
+
+def session_commands(meta):
+    """Every atuin run inside a session chunk's cwd + time window — the
+    per-run detail the narrative summarizes, for expand(). None when atuin
+    is absent or the meta doesn't parse. Secret-looking commands stay out,
+    same as everywhere else."""
+    db, tmp = _atuin_snapshot()
+    if db is None:
+        return None
+    try:
+        lo = int(datetime.fromisoformat(meta["start"]).timestamp() * 1e9 - 1e9)
+        hi = int(datetime.fromisoformat(meta["end"]).timestamp() * 1e9 + 1e9)
+        rows = db.execute(
+            "SELECT timestamp, exit, command FROM history WHERE cwd = ? "
+            "AND timestamp BETWEEN ? AND ? AND deleted_at IS NULL "
+            "ORDER BY timestamp", (meta["cwd"], lo, hi)).fetchall()
+        cmds = [{"timestamp": datetime.fromtimestamp(
+                     t / 1e9, tz=timezone.utc).isoformat(),
+                 "exit": e, "command": c[:500]}
+                for t, e, c in rows
+                if not (SECRET_RE.search(c) or _FLAG_SECRET_RE.search(c))]
+        return {"cwd": _abbrev(meta["cwd"]), "commands": cmds} if cmds else None
+    except (sqlite3.Error, KeyError, ValueError, TypeError):
+        return None
+    finally:
+        os.unlink(tmp)
+
 def iter_dated_runs(since_epoch: float):
     """(epoch_seconds, cmd, cwd) for every dated run at/after `since_epoch`:
     atuin runs (cwd known) plus dated histfile entries for commands atuin
@@ -193,8 +281,10 @@ def iter_dated_runs(since_epoch: float):
         if not _keep(cmd):
             continue
         atuin_cmds.add(cmd)
+        if not _real_cwd(cwd or ""):
+            continue        # imported row: epoch is the import moment, not a run
         if epoch >= since_epoch:
-            yield epoch, cmd, _abbrev(cwd or "")
+            yield epoch, cmd, _abbrev(cwd)
     live, archived = _history_files()
     for path in live + archived:
         parse = _parse_zsh_extended if _looks_zsh_extended(path) else _parse_bash
@@ -207,21 +297,24 @@ def iter_dated_runs(since_epoch: float):
             yield epoch, cmd, ""
 
 def iter_chunks():
-    # command -> [count, latest_epoch, location, atuin_cwd, atuin_exit]
-    seen: dict[str, list] = {}
+    session_rows = []
+    flat: dict[str, list] = {}    # command -> [count, latest_epoch, location]
     atuin_cmds = set()
     for epoch, cmd, cwd, exit_code in _read_atuin():
         cmd = (cmd or "").strip()
         if not _keep(cmd):
             continue
         atuin_cmds.add(cmd)
-        rec = seen.get(cmd)
-        if rec is None:
-            seen[cmd] = [1, epoch, _abbrev(cwd or ""), cwd or "", exit_code]
+        if epoch and _real_cwd(cwd or ""):
+            session_rows.append((epoch, cmd, cwd, exit_code))
         else:
-            rec[0] += 1
-            if epoch > rec[1]:
-                rec[1:] = [epoch, _abbrev(cwd or ""), cwd or "", exit_code]
+            # imported row: its timestamp is the import moment, not the run
+            # — undated is the honest representation
+            rec = flat.get(cmd)
+            if rec is None:
+                flat[cmd] = [1, 0, ""]
+            else:
+                rec[0] += 1
 
     live, archived = _history_files()
     for path, is_live in [(p, True) for p in live] + [(p, False) for p in archived]:
@@ -233,26 +326,31 @@ def iter_chunks():
                 continue
             if is_live and cmd in atuin_cmds:
                 continue           # atuin already covers this command's runs
-            rec = seen.get(cmd)
+            rec = flat.get(cmd)
             if rec is None:
-                seen[cmd] = [1, epoch, fname, "", None]
+                flat[cmd] = [1, epoch, fname]
             else:
                 rec[0] += 1
                 if epoch > rec[1]:
-                    rec[1] = epoch
-                    if not rec[3]:     # never displace an atuin cwd-location
-                        rec[2] = fname
+                    rec[1:] = [epoch, fname]
 
-    for cmd, (count, epoch, loc, cwd, exit_code) in seen.items():
+    for cwd, runs in _sessions(session_rows):
+        t0, t1 = runs[0][0], runs[-1][0]
+        cid = "shell:" + hashlib.sha256(
+            f"session\0{cwd}\0{int(t0)}".encode()).hexdigest()[:26]
+        yield cid, _session_text(cwd, runs), {
+            "source": "shell",
+            "timestamp": _iso(t0),
+            "location": _abbrev(cwd),
+            "meta": {"kind": "session", "cwd": cwd, "commands": len(runs),
+                     "start": _iso(t0), "end": _iso(t1)},
+        }
+
+    for cmd, (count, epoch, loc) in flat.items():
         cid = "shell:" + hashlib.sha256(cmd.encode()).hexdigest()[:26]
-        meta = {"count": count}
-        if cwd:
-            meta["cwd"] = cwd
-            if exit_code is not None:
-                meta["exit"] = exit_code
         yield cid, cmd[:MAX_CHARS], {
             "source": "shell",
             "timestamp": _iso(epoch),
             "location": loc,
-            "meta": meta,
+            "meta": {"count": count},
         }

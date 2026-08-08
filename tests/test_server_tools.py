@@ -198,6 +198,24 @@ def test_expand_shell_no_atuin_is_null(seeded):
     x = json.loads(server.expand("sh1"))
     assert x["context"] is None and x["context_source"] is None
 
+def test_expand_shell_session_routes_to_window(scratch_db, fake_embed,
+                                               monkeypatch):
+    import server
+    from sources import shell as sh
+    seed(monkeypatch, {"shell": [
+        ("ss1", "Shell session in ~/dev/x — 2026-07-02 10:00–10:05 UTC (2 commands)",
+         rec("shell", ts=f"{D}10:00:00+00:00", loc="~/dev/x",
+             meta={"kind": "session", "cwd": "/Users/u/dev/x", "commands": 2,
+                   "start": f"{D}10:00:00+00:00", "end": f"{D}10:05:00+00:00"})),
+    ]})
+    detail = {"cwd": "~/dev/x", "commands": [{"command": "pytest -q"}]}
+    seen = {}
+    monkeypatch.setattr(sh, "session_commands",
+                        lambda meta: seen.setdefault("meta", meta) and detail)
+    x = json.loads(server.expand("ss1"))
+    assert x["context"] == detail and x["context_source"] == "live"
+    assert seen["meta"]["cwd"] == "/Users/u/dev/x"
+
 def test_expand_unknown_id(seeded):
     import server
     assert "error" in json.loads(server.expand("nope:0"))

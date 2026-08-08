@@ -261,8 +261,14 @@ def _expand_appusage(db, chunk, n):
         return None, None
 
 def _expand_shell(db, chunk, n):
-    from sources.shell import atuin_context
-    ctx = atuin_context(chunk["text"], n)
+    from sources.shell import atuin_context, session_commands
+    meta = chunk.get("meta") or {}
+    if meta.get("kind") == "session":
+        # session chunks summarize a cwd + time window; the context is that
+        # window's per-run detail
+        ctx = session_commands(meta)
+    else:
+        ctx = atuin_context(chunk["text"], n)
     return (ctx, "live") if ctx else (None, None)
 
 def _expand_digest(db, chunk, n):
@@ -299,8 +305,11 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
     guessing when a question refers to something they did, decided, ran, or used
     before. One shared index spans these sources:
       - claude:   past Claude Code conversation turns (their prompts + replies)
-      - shell:    bash/zsh commands they've run (deduped; dated + cwd-located
-                  where atuin or EXTENDED_HISTORY recorded the run)
+      - shell:    their shell activity. Recent dated runs (atuin era) are
+                  grouped into working-session chunks — cwd, time span, the
+                  command sequence with failures marked; expand() returns
+                  the session's per-run detail. Older/imported commands are
+                  one chunk per command, mostly undated.
       - appusage: daily per-app time on their Mac ("spent 2h 14m in Figma")
       - browser:  pages they've visited (Safari/Chrome/Helium; title + URL,
                   deduped per browser profile — location is "browser:profile"
