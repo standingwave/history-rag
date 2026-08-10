@@ -331,6 +331,11 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                   coming up Thursday" works; this source's timestamps can be
                   in the future). Location is "app:calendar name", e.g.
                   "apple:Work".
+      - email:    their email (Apple Mail's local store — coverage is
+                  whatever accounts and years Mail holds on disk). One
+                  envelope chunk per message (sender, recipients, date,
+                  subject) plus body chunks for longer messages. Location
+                  is "adapter:mailbox", e.g. "applemail:INBOX".
       - digest:   precomputed daily rollups, one chunk per (local day,
                   stream): browser-profile visits/searches, claude sessions,
                   shell runs. For "what did I do <day/week>" questions, list
@@ -341,7 +346,7 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
       query: natural-language description of what to recall.
       k: max results (default 5).
       source: restrict to 'claude' | 'shell' | 'appusage' | 'browser' | 'git'
-        | 'obsidian' | 'calendar' | 'digest' (default: all).
+        | 'obsidian' | 'calendar' | 'email' | 'digest' (default: all).
       location: case-sensitive prefix filter on each chunk's location, e.g.
         'chrome:First user' or 'chrome:' (browser profile), 'littlebird@'
         (git repo), 'projects/' (obsidian folder). Combine with source to
