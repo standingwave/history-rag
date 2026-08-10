@@ -22,6 +22,7 @@ _KNOWN = {
     "shell": {"histfiles", "atuin_db"},
     "browser": {"extra", "keep_params"},
     "calendar": {"apps", "exclude_calendars"},
+    "email": {"adapters", "exclude_mailboxes"},
     "git": {"roots", "author"},
     "obsidian": {"vaults"},
     "appusage": {"db"},
