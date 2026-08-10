@@ -60,6 +60,23 @@ def snapshot_db(path: str, lock_timeout: float = 2.0):
         os.unlink(tmp)
         raise
 
+def group_paragraphs(text: str, group_max: int):
+    """Pack adjacent paragraphs into groups of up to group_max chars. A
+    single over-budget paragraph stays one group (the caller's chunk cap
+    truncates it later): splitting mid-paragraph would cost more coherence
+    than it saves. Shared by sources that chunk free-form prose (obsidian
+    notes, email bodies)."""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    group, size = [], 0
+    for p in paras:
+        if group and size + len(p) > group_max:
+            yield "\n\n".join(group)
+            group, size = [], 0
+        group.append(p)
+        size += len(p) + 2
+    if group:
+        yield "\n\n".join(group)
+
 # Text that likely contains a credential -> drop the chunk entirely, so it is
 # never embedded or surfaced back into a session. Shared by every source that
 # ingests free-form text (shell commands, URLs, notes).

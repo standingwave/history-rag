@@ -29,7 +29,7 @@ hold passwords more often than you'd think.
 """
 import os, re, hashlib
 from datetime import datetime, timezone
-from sources.common import SECRET_RE
+from sources.common import SECRET_RE, group_paragraphs
 
 MAX_CHARS = 2000
 WHOLE_NOTE_MAX = 1500        # notes at or under this stay one chunk
@@ -69,19 +69,7 @@ def _sections(body: str):
         yield m.group(1).strip(), body[m.start():end]
 
 def _groups(text: str):
-    """Pack adjacent paragraphs into groups of up to GROUP_MAX chars. A
-    single over-budget paragraph stays one group (MAX_CHARS caps it later):
-    splitting mid-paragraph would cost more coherence than it saves."""
-    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    group, size = [], 0
-    for p in paras:
-        if group and size + len(p) > GROUP_MAX:
-            yield "\n\n".join(group)
-            group, size = [], 0
-        group.append(p)
-        size += len(p) + 2
-    if group:
-        yield "\n\n".join(group)
+    return group_paragraphs(text, GROUP_MAX)
 
 def _fm_iso(fm_date: str) -> str:
     """Frontmatter date -> UTC ISO string ('' if unparseable). Bare dates
