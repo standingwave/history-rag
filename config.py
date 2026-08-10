@@ -23,6 +23,8 @@ _KNOWN = {
     "browser": {"extra", "keep_params"},
     "calendar": {"apps", "exclude_calendars"},
     "email": {"adapters", "exclude_mailboxes"},
+    "gmail": {"user", "host", "backfill_days", "max_fetch",
+              "exclude_categories"},
     "git": {"roots", "author"},
     "obsidian": {"vaults"},
     "appusage": {"db"},

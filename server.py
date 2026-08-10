@@ -331,11 +331,12 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                   coming up Thursday" works; this source's timestamps can be
                   in the future). Location is "app:calendar name", e.g.
                   "apple:Work".
-      - email:    their email (Apple Mail's local store — coverage is
-                  whatever accounts and years Mail holds on disk). One
-                  envelope chunk per message (sender, recipients, date,
-                  subject) plus body chunks for longer messages. Location
-                  is "adapter:mailbox", e.g. "applemail:INBOX".
+      - email:    their email (adapters: Apple Mail's local store, Gmail
+                  over IMAP — coverage is whatever accounts each adapter
+                  reaches). One envelope chunk per message (sender,
+                  recipients, date, subject) plus body chunks for longer
+                  messages. Location is "adapter:mailbox", e.g.
+                  "applemail:INBOX" or "gmail:Sent".
       - digest:   precomputed daily rollups, one chunk per (local day,
                   stream): browser-profile visits/searches, claude sessions,
                   shell runs. For "what did I do <day/week>" questions, list

@@ -201,6 +201,13 @@ def main():
                  "source no longer yields, which for sources whose backing data "
                  "expires (claude, shell) means losing history the index has "
                  "outlived. Prune one source at a time, deliberately.")
+    if args.prune and args.source == "email" and "gmail" in (
+            config.get("email", "adapters", "", []) or []):
+        sys.exit("--prune --source email is unsafe while the gmail adapter "
+                 "is enabled: gmail fetches incrementally from a cursor, so "
+                 "every chunk it didn't re-yield this run would count as "
+                 "stale and be deleted. Remove gmail from [email].adapters "
+                 "for the prune run, or don't prune email.")
     if args.prune and args.source == "digest":
         sys.exit("--prune --source digest would delete every settled digest: "
                  "the source only yields recent days by design, so every older "

@@ -13,10 +13,11 @@ adapter with no new code — the adapter split is by store, not provider.
 
 Each reader returns normalized messages
     (msgid, ts, from_name, from_addr, to_names, subject, mailbox, account,
-     body)
-where `msgid` is the RFC Message-ID when the body file is readable, else a
+     body, extra)
+where `msgid` is the RFC Message-ID when the message is readable, else a
 hash of (from_addr, date, subject) — never Mail's ROWID, which renumbers on
-resync. `body` is cooked plain text or None (an unreadable/undownloaded
+resync — and `extra` is adapter-private state merged into meta (gmail's
+uid/uidv cursor). `body` is cooked plain text or None (an unreadable/undownloaded
 body degrades the message to an envelope-only chunk, not a failure).
 Cross-adapter and cross-mailbox dedup is by msgid, first wins (readers sort
 by date, so the earliest filing keeps the message).
@@ -42,11 +43,31 @@ anything older than the window is archive the index has outlived. Failure
 semantics copy calendar (shared source column + prune): one adapter
 erroring while another yielded raises; every configured store missing or
 unreadable yields nothing quietly (enabled before FDA is granted).
+
+The gmail adapter is the one networked reader: direct IMAP with an app
+password (GMAIL_APP_PASSWORD, env-only like every credential) against
+[Gmail]/All Mail, read-only. It is INCREMENTAL: a cursor derived from the
+index itself (max meta.uid for this account under the current UIDVALIDITY
+— the digest precedent of a source reading the DB) means each run fetches
+only new UIDs, capped at [gmail].max_fetch so a large backfill spreads
+across scheduled runs instead of hanging one. First contact fetches
+[gmail].backfill_days of history (0 = everything). A UIDVALIDITY change
+resets the cursor; ids come from the RFC Message-ID, so a re-fetch
+re-yields identical chunks and re-embeds nothing. Category noise
+(promotions/social by default) is dropped via X-GM-RAW category searches;
+labels map to the location mailbox (\\Inbox -> INBOX, \\Sent -> Sent,
+first user label, else "All Mail"). Because an incremental adapter cannot
+re-yield what it already indexed, --prune --source email is refused by
+index.py while gmail is enabled — pruning would read "not re-yielded this
+run" as "deleted". Misconfiguration (no user, no password) raises rather
+than yielding nothing: solo it's a stderr skip, next to a yielding
+adapter it fails the run where run health can see it.
 """
-import glob, hashlib, os, re, sqlite3, sys
+import glob, hashlib, imaplib, os, re, sqlite3, sys
 from email import message_from_bytes, policy
+from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 from sources.common import SECRET_RE, group_paragraphs, snapshot_db
 
@@ -55,6 +76,7 @@ GROUP_MAX = 700          # paragraph-group budget (obsidian's number)
 WHOLE_MAX = 1200         # bodies at or under this merge into the envelope
 RECIPIENTS_MAX = 8       # names shown in text; meta always carries all
 PRUNE_WINDOW_DAYS = 30   # prune bound: chunks older than this are archive
+RAW_MAX = 512 * 1024     # gmail: larger raw messages index envelope-only
 
 MAIL_ROOT = os.path.expanduser("~/Library/Mail")
 
@@ -230,13 +252,197 @@ def _read_applemail(excludes):
                     f"{addr}\0{ts}\0{subject}".encode()).hexdigest()[:32]
             out.append((msgid, ts or 0, name or "", addr or "",
                         rcpt.get(rowid, []), subject or "", mailbox,
-                        account, body))
+                        account, body, {}))
         return out
     finally:
         db.close()
         os.unlink(tmp)
 
-_READERS = {"applemail": _read_applemail}
+
+def _gmail_settings():
+    import config
+    user = str(config.get("gmail", "user", "CLAUDE_RAG_GMAIL_USER", "") or "")
+    host = str(config.get("gmail", "host", "", "imap.gmail.com"))
+    backfill = int(config.get("gmail", "backfill_days", "", 365))
+    max_fetch = int(config.get("gmail", "max_fetch", "", 2000))
+    cats = config.get("gmail", "exclude_categories", "",
+                      ["promotions", "social"])
+    return user, host, backfill, max_fetch, [str(c) for c in (cats or [])]
+
+def _gmail_cursor(account: str, uidv: int) -> int:
+    """Highest already-indexed UID for this account under this UIDVALIDITY,
+    read from the index itself — the source stays stateless (digest
+    precedent). 0 means backfill from scratch."""
+    import config
+    if not os.path.exists(config.DB_PATH):
+        return 0
+    db = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
+    try:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND name='chunks'").fetchone():
+            return 0
+        row = db.execute(
+            "SELECT MAX(CAST(json_extract(meta,'$.uid') AS INTEGER)) "
+            "FROM chunks WHERE source = 'email' "
+            "AND json_extract(meta,'$.adapter') = 'gmail' "
+            "AND json_extract(meta,'$.account') = ? "
+            "AND json_extract(meta,'$.uidv') = ?", (account, uidv)).fetchone()
+        return row[0] or 0
+    finally:
+        db.close()
+
+def _gmail_uid_search(conn, *criteria) -> list:
+    typ, data = conn.uid("SEARCH", None, *criteria)
+    if typ != "OK":
+        raise OSError(f"gmail: search {criteria[0]} failed")
+    return [int(u) for u in (data[0] or b"").split()]
+
+def _gmail_labels(raw: bytes) -> list:
+    return [(q or plain).decode("utf-8", "replace")
+            for q, plain in re.findall(rb'"((?:[^"\\]|\\.)*)"|(\S+)', raw)]
+
+def _gmail_mailbox(labels: list) -> str:
+    if "\\Inbox" in labels:
+        return "INBOX"
+    if "\\Sent" in labels:
+        return "Sent"
+    user_labels = [l for l in labels if not l.startswith("\\")]
+    return user_labels[0] if user_labels else "All Mail"
+
+def _internal_ts(idate: str) -> float:
+    try:
+        return datetime.strptime(idate, "%d-%b-%Y %H:%M:%S %z").timestamp()
+    except ValueError:
+        return 0
+
+def _gmail_fetch(conn, uids, account, uidv, excludes):
+    """Fetch and normalize a batch of UIDs. Two rounds: metadata + headers
+    for everything, full raw only for messages under RAW_MAX — BODY.PEEK[]
+    of a 20MB attachment mail would be pure waste (attachments are a
+    non-goal; its envelope still indexes)."""
+    if not uids:
+        return []
+    seqset = ",".join(map(str, uids))
+    typ, data = conn.uid(
+        "FETCH", seqset, "(UID X-GM-MSGID X-GM-LABELS INTERNALDATE "
+        "RFC822.SIZE BODY.PEEK[HEADER])")
+    if typ != "OK":
+        raise OSError("gmail: header fetch failed")
+    meta = {}
+    for item in data:
+        if not (isinstance(item, tuple) and len(item) >= 2):
+            continue
+        head, payload = item[0], item[1]
+        m = re.search(rb"UID (\d+)", head)
+        if not m:
+            continue
+        gm = re.search(rb"X-GM-MSGID (\d+)", head)
+        size = re.search(rb"RFC822\.SIZE (\d+)", head)
+        labels = re.search(rb"X-GM-LABELS \(([^)]*)\)", head)
+        idate = re.search(rb'INTERNALDATE "([^"]+)"', head)
+        meta[int(m.group(1))] = (
+            int(gm.group(1)) if gm else 0,
+            _gmail_labels(labels.group(1) if labels else b""),
+            int(size.group(1)) if size else 0,
+            idate.group(1).decode() if idate else "", payload)
+    small = sorted(u for u, v in meta.items() if v[2] <= RAW_MAX)
+    raws = {}
+    if small:
+        typ, data = conn.uid("FETCH", ",".join(map(str, small)),
+                             "(UID BODY.PEEK[])")
+        if typ != "OK":
+            raise OSError("gmail: body fetch failed")
+        for item in data:
+            if isinstance(item, tuple) and len(item) >= 2:
+                m = re.search(rb"UID (\d+)", item[0])
+                if m:
+                    raws[int(m.group(1))] = item[1]
+    out = []
+    for uid in sorted(meta):
+        gm_msgid, labels, size, idate, header = meta[uid]
+        mailbox = _gmail_mailbox(labels)
+        if ("\\Draft" in labels or mailbox.lower() in excludes
+                or any(l.lower() in excludes for l in labels
+                       if not l.startswith("\\"))):
+            continue
+        raw = raws.get(uid)
+        try:
+            msg = message_from_bytes(raw or header, policy=policy.default)
+        except Exception:
+            continue
+        addrs = getaddresses([str(msg.get("From", ""))])
+        from_name, from_addr = addrs[0] if addrs else ("", "")
+        to_names = []
+        for name, addr in getaddresses(
+                [str(h) for h in (msg.get_all("To", [])
+                                  + msg.get_all("Cc", []))]):
+            n = name or addr.split("@")[0]
+            if n:
+                to_names.append(n)
+        subject = str(msg.get("Subject", "") or "")
+        try:
+            ts = parsedate_to_datetime(msg.get("Date")).timestamp()
+        except (TypeError, ValueError):
+            ts = _internal_ts(idate)
+        msgid = ((msg.get("Message-ID") or "").strip().strip("<>")
+                 or (str(gm_msgid) if gm_msgid else "")
+                 or hashlib.sha256(
+                     f"{from_addr}\0{ts}\0{subject}".encode()).hexdigest()[:32])
+        body = _body_text(msg) if raw is not None else None
+        out.append((msgid, ts or 0, from_name, from_addr, to_names, subject,
+                    mailbox, account, body, {"uid": uid, "uidv": uidv}))
+    return out
+
+def _read_gmail(excludes):
+    user, host, backfill_days, max_fetch, excl_cats = _gmail_settings()
+    if not user:
+        raise OSError("gmail: [gmail].user not set")
+    password = os.environ.get("GMAIL_APP_PASSWORD", "")
+    if not password:
+        raise OSError("gmail: GMAIL_APP_PASSWORD not set")
+    conn = imaplib.IMAP4_SSL(host, timeout=60)
+    try:
+        try:
+            conn.login(user, password)
+            typ, data = conn.select('"[Gmail]/All Mail"', readonly=True)
+            if typ != "OK":
+                raise OSError(f"gmail: select failed: {data}")
+            uidv = int((conn.response("UIDVALIDITY")[1] or [b"0"])[0]
+                       or b"0")
+            cursor = _gmail_cursor(user, uidv)
+            if cursor:
+                # n:* returns the highest existing UID even when n exceeds
+                # it, so the > filter is load-bearing
+                uids = [u for u in _gmail_uid_search(
+                    conn, "UID", f"{cursor + 1}:*") if u > cursor]
+            elif backfill_days:
+                since = datetime.now(timezone.utc) - timedelta(
+                    days=backfill_days)
+                uids = _gmail_uid_search(conn, "SINCE",
+                                         since.strftime("%d-%b-%Y"))
+            else:
+                uids = _gmail_uid_search(conn, "ALL")
+            if uids and excl_cats:
+                drop = set()
+                for cat in excl_cats:
+                    drop |= set(_gmail_uid_search(
+                        conn, "X-GM-RAW", f'"category:{cat}"'))
+                uids = [u for u in uids if u not in drop]
+            uids = sorted(uids)[:max_fetch]
+            out = []
+            for i in range(0, len(uids), 50):
+                out.extend(_gmail_fetch(conn, uids[i:i + 50], user, uidv,
+                                        excludes))
+            return out
+        except imaplib.IMAP4.error as e:
+            raise OSError(f"gmail: {e}")
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+_READERS = {"applemail": _read_applemail, "gmail": _read_gmail}
 
 def _iso(ts) -> str:
     if not ts:
@@ -248,7 +454,7 @@ def _iso(ts) -> str:
 
 def _chunks(adapter, m):
     msgid, ts, from_name, from_addr, to_names, subject, mailbox, account, \
-        body = m
+        body, extra = m
     if subject and SECRET_RE.search(subject):
         return
     sender = (f"{from_name} ({from_addr})" if from_name and from_addr
@@ -271,7 +477,8 @@ def _chunks(adapter, m):
            "location": f"{adapter}:{mailbox}",
            "meta": {"adapter": adapter, "account": account,
                     "mailbox": mailbox, "msgid": msgid, "from": from_addr,
-                    "to": to_names, "subject": subject, "date": iso}}
+                    "to": to_names, "subject": subject, "date": iso,
+                    **(extra or {})}}
     if body and len(body) <= WHOLE_MAX:
         text, body = f"{text}\n{body}", None
     yield ("email:" + hashlib.sha256(
