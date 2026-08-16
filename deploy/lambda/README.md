@@ -29,8 +29,17 @@ aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
 aws s3api put-public-access-block --bucket "$BUCKET" \
   --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
+  --lifecycle-configuration file://s3-lifecycle.json
 aws s3 cp ~/.claude/history-rag.db "s3://$BUCKET/history-rag.db"
 ```
+
+The lifecycle rule aborts incomplete multipart uploads a day after they
+start. The index is large enough to upload in parts, so a sync that loses
+the network mid-transfer leaves those parts behind — and the client's own
+cleanup can't help, because aborting is itself a network call. Without the
+rule the abandoned parts are billed as storage forever. It only touches
+incomplete uploads; it never expires an object.
 
 Execution role (S3 read + CloudWatch logs):
 

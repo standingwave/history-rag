@@ -30,7 +30,7 @@ _KNOWN = {
     "appusage": {"db"},
     "digest": {"sources", "recompute_days", "backfill_days"},
     "backup": {"dir", "keep"},
-    "sync": {"bucket", "key", "region"},
+    "sync": {"bucket", "key", "region", "retries"},
     "health": {"notify"},
     "refresh": {"prune"},
     "ask": {"models", "max_turns"},
