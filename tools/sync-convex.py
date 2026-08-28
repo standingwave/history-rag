@@ -54,11 +54,12 @@ def local_day(ts: str) -> tuple[str, str]:
 
 def filter_values(source: str, day: str, month: str, location: str,
                   meta: dict) -> list:
-    out = [{"name": "day", "value": day}, {"name": "month", "value": month},
-           {"name": "locpfx", "value": loc_prefix(source, location)}]
-    if source == "tasks":
-        out.append({"name": "done", "value": "1" if meta.get("done") else "0"})
-    return out
+    # The RAG component requires every declared filter name on every add,
+    # so non-task sources carry an empty `done` that no filter matches.
+    done = ("1" if meta.get("done") else "0") if source == "tasks" else ""
+    return [{"name": "day", "value": day}, {"name": "month", "value": month},
+            {"name": "locpfx", "value": loc_prefix(source, location)},
+            {"name": "done", "value": done}]
 
 def content_hash(text: str, fvals: list) -> str:
     h = hashlib.sha256(text.encode())

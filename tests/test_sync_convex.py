@@ -25,7 +25,7 @@ def test_filter_values_carry_done_only_for_tasks():
     fv = sc.filter_values("obsidian", "2026-08-28", "2026-08",
                           "1-Projects/x.md#Plan", {})
     assert {"name": "locpfx", "value": "1-Projects/"} in fv
-    assert not any(f["name"] == "done" for f in fv)
+    assert {"name": "done", "value": ""} in fv      # every name, every add
 
 def test_content_hash_changes_with_filters_not_just_text():
     a = sc.content_hash("t", [{"name": "done", "value": "0"}])
