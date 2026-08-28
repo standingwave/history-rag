@@ -59,7 +59,11 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
 
 ## Run
 
+From the **repo root** (the Python tools live in `tools/`, not here):
+
 ```sh
+cd /path/to/history-rag
+
 # what would move (per source: chunks, upserts, removes)
 ~/.claude/rag-venv/bin/python tools/sync-convex.py --dry-run
 
