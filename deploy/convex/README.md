@@ -35,7 +35,7 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
    prompt as `[core] mxbai_query_prompt` (default empty — don't set it
    unless the Mac has it):
    ```sh
-   pbpaste | xargs npx convex env set MXBAI_API_KEY
+   npx convex env set MXBAI_API_KEY "$(pbpaste)"   # clipboard = the key alone
    ```
 
 5. **Deploy key for the Mac.** Dashboard → Settings → Deploy keys →
