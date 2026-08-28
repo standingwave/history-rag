@@ -34,8 +34,13 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
 4. **Query embeddings.** Same key the Lambda uses, and the same query
    prompt as `[core] mxbai_query_prompt` (default empty — don't set it
    unless the Mac has it):
+   The key already lives in the Lambda's env, so copy it across without
+   it touching a clipboard or terminal:
    ```sh
-   npx convex env set MXBAI_API_KEY "$(pbpaste)"   # clipboard = the key alone
+   npx convex env set MXBAI_API_KEY "$(~/.claude/rag-venv/bin/python -c "import boto3; \
+     print(boto3.client('lambda', region_name='us-west-2').get_function_configuration(\
+     FunctionName='history-rag')['Environment']['Variables']['MXBAI_API_KEY'])")"
+   npx convex env get MXBAI_API_KEY | awk '{print length($0)}'   # 32
    ```
 
 5. **Deploy key for the Mac.** Dashboard → Settings → Deploy keys →
