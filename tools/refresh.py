@@ -155,8 +155,12 @@ def main():
                                    else "current")
     if sres is not None:
         action = sres["action"]
+        pushed = f"pushed {sres.get('bytes', 0) / 1e6:.0f}MB"
+        if sres.get("mode") == "differential":
+            pushed += (f" differential ({sres.get('changed')}/"
+                       f"{sres.get('parts')} parts)")
         steps["sync"]["note"] = {
-            "pushed": f"pushed {sres.get('bytes', 0) / 1e6:.0f}MB",
+            "pushed": pushed,
             "unchanged": "confirmed current"}.get(action, action)
         # "The replica was confirmed current at this time" — the number
         # staleness questions need. Never stamped on the config/no-DB skips.

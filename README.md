@@ -117,6 +117,8 @@ apps = ["apple"]          # enables the calendar source; exclude_calendars = [..
 [backup]                  # dir (default ~/.claude/backups), keep (default 7)
 
 [sync]                    # bucket/key/region — S3 push for the remote replica
+                          # retries (5); differential (false) ships only the
+                          # changed parts, part_size_mb (8, min 5)
 
 [refresh]
 prune = ["calendar"]      # sources pruned on each scheduled refresh

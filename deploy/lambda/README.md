@@ -41,6 +41,17 @@ cleanup can't help, because aborting is itself a network call. Without the
 rule the abandoned parts are billed as storage forever. It only touches
 incomplete uploads; it never expires an object.
 
+The Mac pushes with its own credentials, scoped to that one object by
+`iam-mac-sync.json` — write, read (the sync HEADs the object, and with
+`[sync] differential` has S3 copy the unchanged parts of it), and abort for
+an interrupted multipart upload:
+
+```sh
+sed "s/__BUCKET__/$BUCKET/" iam-mac-sync.json | \
+  aws iam put-user-policy --user-name <sync-user> \
+    --policy-name history-rag-sync --policy-document file:///dev/stdin
+```
+
 Execution role (S3 read + CloudWatch logs):
 
 ```sh

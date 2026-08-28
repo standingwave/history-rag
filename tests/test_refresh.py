@@ -170,6 +170,20 @@ def test_summary_line_format(scratch_db, monkeypatch, capsys):
         r"· sync pushed 174MB · \d+s", summary)
 
 
+def test_differential_push_reports_its_part_counts(scratch_db, monkeypatch,
+                                                   capsys):
+    """The summary line is where a human notices the push got small — and
+    notices if it quietly stopped being differential."""
+    fake_index(monkeypatch, embedded=2)
+    stub_steps(monkeypatch, sync_ret={"action": "pushed", "bytes": 75_000_000,
+                                      "mode": "differential", "changed": 9,
+                                      "parts": 144})
+    refresh.main()
+    steps = json.loads(rows(scratch_db)[-1][2])
+    assert steps["sync"]["note"] == "pushed 75MB differential (9/144 parts)"
+    assert "sync pushed 75MB differential (9/144 parts)" in capsys.readouterr().out
+
+
 # ── replica health (server side) ─────────────────────────────────────────────
 
 def _tick_row(path, sync_step):

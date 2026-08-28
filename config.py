@@ -30,7 +30,8 @@ _KNOWN = {
     "appusage": {"db"},
     "digest": {"sources", "recompute_days", "backfill_days"},
     "backup": {"dir", "keep"},
-    "sync": {"bucket", "key", "region", "retries"},
+    "sync": {"bucket", "key", "region", "retries", "differential",
+             "part_size_mb"},
     "health": {"notify"},
     "refresh": {"prune"},
     "ask": {"models", "max_turns"},
@@ -115,6 +116,22 @@ SYNC_KEY = str(get("sync", "key", "CLAUDE_RAG_SYNC_KEY", "history-rag.db"))
 # Bucket region; empty falls back to the profile/env default. Set it when the
 # bucket lives outside the default region or S3 will bounce the upload.
 SYNC_REGION = str(get("sync", "region", "CLAUDE_RAG_SYNC_REGION", "") or "")
+# Ship only the parts of the index whose bytes changed and have S3 copy the
+# rest from the object already in the bucket. Off means every push moves the
+# whole file, which is also the fallback whenever the differential path
+# cannot prove what is in the bucket.
+SYNC_DIFFERENTIAL = str(get("sync", "differential",
+                            "CLAUDE_RAG_SYNC_DIFFERENTIAL", False)
+                        ).strip().lower() in ("1", "true", "yes", "on")
+# Multipart part size, and so the block size the diff is taken in. S3 refuses
+# a server-side part copy below 5MB, which would make every part ineligible —
+# rejected here rather than mid-upload.
+SYNC_PART_SIZE_MB = int(get("sync", "part_size_mb",
+                            "CLAUDE_RAG_SYNC_PART_SIZE_MB", 8))
+if SYNC_PART_SIZE_MB < 5:
+    sys.exit(f"config error in {_CONFIG_PATH}: sync.part_size_mb is "
+             f"{SYNC_PART_SIZE_MB}, but S3 rejects part copies below 5MB")
+SYNC_PART_SIZE = SYNC_PART_SIZE_MB * 1024 * 1024
 
 # App-usage tracker (macOS): daemon writes here, sources/appusage.py reads it.
 APPUSAGE_DB = os.path.expanduser(get("appusage", "db", "CLAUDE_RAG_APPUSAGE_DB",

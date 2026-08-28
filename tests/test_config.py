@@ -55,6 +55,15 @@ def test_unknown_keys_warn(restore_modules, reload_config, capsys):
     assert "unknown section [mystery]" in err
     assert "unknown key shell.badkey" in err
 
+def test_sync_part_size_floor_is_enforced_at_load(restore_modules, reload_config):
+    """S3 refuses to copy a part smaller than 5MB, which would silently make
+    every part of a differential push ineligible. Caught here, not mid-push."""
+    cfg = reload_config("[sync]\npart_size_mb = 16\n")
+    assert cfg.SYNC_PART_SIZE == 16 * 1024 * 1024
+    with pytest.raises(SystemExit) as e:
+        reload_config("[sync]\npart_size_mb = 4\n")
+    assert "5MB" in str(e.value)
+
 def test_sources_enabled_filters_and_rejects_unknown(restore_modules, reload_config):
     import index
     reload_config('[sources]\nenabled = ["shell", "git"]\n')

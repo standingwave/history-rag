@@ -9,26 +9,36 @@ matches the last push, so an idle machine (overnight, weekends) moves zero
 bytes. The daily tools/backup.py copies are unrelated: those are disaster
 recovery, this is replication.
 
+With [sync] differential on, a push that does happen ships only the parts
+whose bytes changed and has S3 copy the rest from the object already in the
+bucket. The object it produces is byte-identical to a whole-file upload, so
+the replica's read path is unaffected.
+
 Run:    ~/.claude/rag-venv/bin/python tools/sync-s3.py
-Config: [sync] bucket, key (default history-rag.db), retries (default 5);
+Config: [sync] bucket, key (default history-rag.db), retries (default 5),
+        differential (default false), part_size_mb (default 8, min 5);
         env CLAUDE_RAG_SYNC_BUCKET / CLAUDE_RAG_SYNC_KEY /
-        CLAUDE_RAG_SYNC_RETRIES.
+        CLAUDE_RAG_SYNC_RETRIES / CLAUDE_RAG_SYNC_DIFFERENTIAL /
+        CLAUDE_RAG_SYNC_PART_SIZE_MB.
         AWS credentials resolve through the standard boto3 chain
         (AWS_PROFILE / ~/.aws / env vars).
 """
-import hashlib, os, sqlite3, sys, time
+import concurrent.futures, hashlib, json, os, sqlite3, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
-# Transfer settings. A push moves the whole ~1.2GB index and takes minutes,
-# so it is in flight for a large share of every refresh cycle and a brief
-# loss of network lands inside it more often than not — every sync failure
-# recorded so far (wip/SPEC-sync-resilience.md).
+# Transfer settings. A whole-file push moves ~1.2GB over minutes, long enough
+# for a brief loss of network to land inside it; more often the network is
+# already gone when the very first request goes out.
 _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT = 60
 _PUSH_ATTEMPTS = 3          # the first push plus two retries
 _RETRY_WAIT = 60            # seconds between them
+_COPY_WORKERS = 10          # part copies in flight at once
+
+class VerifyError(RuntimeError):
+    """The uploaded object is not the snapshot we meant to upload."""
 
 def signature(db) -> str:
     """Hash of everything a replica can serve: chunk id, timestamp, text,
@@ -76,19 +86,163 @@ def _client():
                       connect_timeout=_CONNECT_TIMEOUT,
                       read_timeout=_READ_TIMEOUT))
 
-def _upload(s3, snap: str, bucket: str) -> int:
+def _manifest_path() -> str:
+    return config.DB_PATH + ".sync-manifest"
+
+def _digests(path: str, part_size: int) -> list:
+    """Per-part (sha256, md5) over the snapshot in one read pass. The sha256
+    says whether a part still matches what the bucket holds; the md5 is what
+    S3 builds a multipart ETag from, so the same pass yields the ETag the
+    finished object must have."""
+    out = []
+    with open(path, "rb") as f:
+        while chunk := f.read(part_size):
+            out.append((hashlib.sha256(chunk).hexdigest(),
+                        hashlib.md5(chunk).digest()))
+    return out
+
+def _expected_etag(digests: list) -> str:
+    """What S3 will call an object assembled from exactly these parts: the
+    md5 of the concatenated per-part md5s, then the part count."""
+    return (hashlib.md5(b"".join(md5 for _, md5 in digests)).hexdigest()
+            + f"-{len(digests)}")
+
+def _read_manifest(part_size: int):
+    """The previous push's part hashes, or None if they can't be used —
+    absent, unreadable, or taken at a different part size."""
+    try:
+        with open(_manifest_path()) as f:
+            m = json.load(f)
+        return m if m["part_size"] == part_size and m["etag"] else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+def _remote_etag(s3, bucket):
+    """The bucket's current ETag for the index, or None if it isn't there."""
+    try:
+        head = s3.head_object(Bucket=bucket, Key=config.SYNC_KEY)
+    except Exception:
+        return None
+    return str(head.get("ETag", "")).strip('"') or None
+
+def _send_part(s3, bucket, upload_id, snap, part_size, index, size, reuse):
+    """One part of the multipart upload: copied server-side from the object
+    already in the bucket when its bytes are unchanged, sent from the
+    snapshot when they aren't."""
+    num = index + 1
+    start = index * part_size
+    if reuse:
+        res = s3.upload_part_copy(
+            Bucket=bucket, Key=config.SYNC_KEY, UploadId=upload_id,
+            PartNumber=num,
+            CopySource={"Bucket": bucket, "Key": config.SYNC_KEY},
+            CopySourceRange=f"bytes={start}-{start + size - 1}")
+        etag = res["CopyPartResult"]["ETag"]
+    else:
+        with open(snap, "rb") as f:
+            f.seek(start)
+            body = f.read(size)
+        etag = s3.upload_part(Bucket=bucket, Key=config.SYNC_KEY,
+                              UploadId=upload_id, PartNumber=num,
+                              Body=body)["ETag"]
+    return {"PartNumber": num, "ETag": etag}
+
+def _abort(s3, bucket, upload_id):
+    """Best effort: aborting is itself a network call, and the usual reason
+    we are here is that the network went away. The bucket's lifecycle rule
+    (deploy/lambda/s3-lifecycle.json) is the cleanup that always works."""
+    try:
+        s3.abort_multipart_upload(Bucket=bucket, Key=config.SYNC_KEY,
+                                  UploadId=upload_id)
+    except Exception:
+        pass
+
+def _differential(s3, snap: str, bucket: str, part_size: int, digests: list):
+    """Push only the parts whose bytes changed; S3 copies the rest from the
+    object it already holds, so they never leave the machine. Returns None
+    when the manifest can't be shown to describe that object — a different
+    part size, a missing manifest, or anyone else having written the key —
+    which is the caller's cue to push the whole file instead."""
+    old = _read_manifest(part_size)
+    if not old or not digests:
+        return None
+    if old["etag"] != _remote_etag(s3, bucket):
+        return None
+
+    total, seen = os.path.getsize(snap), old["parts"]
+    plan = [(i, min(part_size, total - i * part_size),
+             i < len(seen) and seen[i] == sha)
+            for i, (sha, _) in enumerate(digests)]
+
+    upload_id = s3.create_multipart_upload(
+        Bucket=bucket, Key=config.SYNC_KEY)["UploadId"]
+    try:
+        with concurrent.futures.ThreadPoolExecutor(_COPY_WORKERS) as pool:
+            parts = list(pool.map(
+                lambda p: _send_part(s3, bucket, upload_id, snap, part_size,
+                                     *p), plan))
+        res = s3.complete_multipart_upload(
+            Bucket=bucket, Key=config.SYNC_KEY, UploadId=upload_id,
+            MultipartUpload={"Parts": sorted(parts,
+                                             key=lambda p: p["PartNumber"])})
+    except Exception:
+        _abort(s3, bucket, upload_id)
+        raise
+
+    # The failure worth spending an md5 pass on isn't a crash — it's a part
+    # mapped to the wrong offset, which yields a valid SQLite file that
+    # answers queries wrongly and nothing downstream would ever flag.
+    etag = str(res.get("ETag", "")).strip('"')
+    want = _expected_etag(digests)
+    if etag != want:
+        raise VerifyError(f"uploaded object has ETag {etag}, expected {want} "
+                          f"— replica not confirmed, leaving it to re-push")
+    fresh = [p for p in plan if not p[2]]
+    return {"mode": "differential", "bytes": sum(size for _, size, _ in fresh),
+            "parts": len(plan), "changed": len(fresh),
+            "manifest": {"etag": etag, "part_size": part_size,
+                         "parts": [sha for sha, _ in digests]}}
+
+def _push(s3, snap: str, bucket: str, part_size: int, digests: list) -> dict:
+    """One whole attempt at getting the snapshot into the bucket. Anything
+    that goes wrong inside the differential path falls back to the plain
+    whole-file upload: that path may be slower than the one it replaces,
+    never wrong. A failed verification is the exception — it means the
+    object is not what we think it is, and the sync must fail."""
+    if digests:
+        try:
+            out = _differential(s3, snap, bucket, part_size, digests)
+            if out:
+                return out
+        except VerifyError:
+            raise
+        except Exception as e:
+            print(f"sync: differential push failed ({e}) — sending whole file",
+                  flush=True)
+    s3.upload_file(snap, bucket, config.SYNC_KEY)
+    etag = _remote_etag(s3, bucket) if digests else None
+    return {"mode": "whole", "bytes": os.path.getsize(snap),
+            "parts": len(digests), "changed": len(digests),
+            "manifest": ({"etag": etag, "part_size": part_size,
+                          "parts": [sha for sha, _ in digests]}
+                         if etag else None)}
+
+def _upload(s3, snap: str, bucket: str) -> dict:
     """Push the snapshot, retrying the whole transfer. The client's own
     retries cover a blip inside one request; this covers one that outlasts
     them, so a short outage costs seconds here instead of a whole refresh
-    interval. Returns the attempt that succeeded.
+    interval.
 
     A sleeping machine is not covered and cannot be: the process is frozen
     mid-transfer, not failing, and resumes to find the connection long dead.
     That case is the next tick's job."""
+    part_size = config.SYNC_PART_SIZE
+    digests = _digests(snap, part_size) if config.SYNC_DIFFERENTIAL else []
     for attempt in range(1, _PUSH_ATTEMPTS + 1):
         try:
-            s3.upload_file(snap, bucket, config.SYNC_KEY)
-            return attempt
+            return _push(s3, snap, bucket, part_size, digests)
+        except VerifyError:
+            raise                      # retrying repeats the same bad mapping
         except Exception as e:
             if attempt == _PUSH_ATTEMPTS:
                 raise
@@ -98,8 +252,9 @@ def _upload(s3, snap: str, bucket: str) -> int:
 
 def main():
     """Returns the outcome for the refresh driver: {"action": "unconfigured"
-    | "no-index" | "unchanged" | "pushed"[, "bytes": N]}. `synced_at`
-    stamping belongs to the caller — and only for unchanged/pushed."""
+    | "no-index" | "unchanged" | "pushed"[, "bytes": N, "mode": "whole" |
+    "differential", "parts": N, "changed": N]}. `synced_at` stamping belongs
+    to the caller — and only for unchanged/pushed."""
     bucket = config.SYNC_BUCKET
     if not bucket:
         print("sync: no [sync] bucket configured — skipping")
@@ -126,14 +281,26 @@ def main():
     dst.close()
     src.close()
     try:
-        _upload(s3, snap, bucket)
+        res = _upload(s3, snap, bucket)
     finally:
         os.remove(snap)
+    # Both files describe the object that was just confirmed into the bucket,
+    # so neither is written until it is there. A manifest that can't be
+    # written is removed rather than left to describe an older object.
+    if res["manifest"]:
+        with open(_manifest_path(), "w") as f:
+            json.dump(res["manifest"], f)
+    elif os.path.exists(_manifest_path()):
+        os.remove(_manifest_path())
     with open(marker, "w") as f:
         f.write(sig)
-    size = os.path.getsize(config.DB_PATH)
-    print(f"sync: pushed ~{size / 1e6:.0f}MB to s3://{bucket}/{config.SYNC_KEY}")
-    return {"action": "pushed", "bytes": size}
+    size, how = res["bytes"], ""
+    if res["mode"] == "differential":
+        how = f" differential ({res['changed']}/{res['parts']} parts)"
+    print(f"sync: pushed ~{size / 1e6:.0f}MB{how} to "
+          f"s3://{bucket}/{config.SYNC_KEY}")
+    return {"action": "pushed", "bytes": size, "mode": res["mode"],
+            "parts": res["parts"], "changed": res["changed"]}
 
 if __name__ == "__main__":
     main()
