@@ -232,6 +232,40 @@ def _expand_obsidian(db, chunk, n):
     return {"sections": [{"id": i, "location": l, "text": t}
                          for i, l, t in rows]}, "index"
 
+def _expand_tasks(db, chunk, n):
+    """The day's whole task list, the shape the dashboard renders: live from
+    the daily note when the vault is here, else rebuilt from every tasks
+    chunk whose latest appearance is that day."""
+    meta = chunk["meta"]
+    day = meta.get("last_seen", "")
+    import config
+    from sources import tasks as tasks_src
+    for v in config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS"):
+        if os.path.basename(v.rstrip("/")) == meta.get("vault", ""):
+            p = os.path.join(v, f"{day}.md")
+            if os.path.isfile(p):
+                with open(p, errors="replace") as f:
+                    body = tasks_src.obsidian._strip_frontmatter(f.read())[0]
+                return {"day": day, "tasks": [
+                    {k: t[k] for k in ("text", "done", "section",
+                                       "subtasks", "attachments")}
+                    for t in tasks_src.parse_note(body)]}, "live"
+    rows = db.execute(
+        """SELECT id, meta FROM chunks WHERE source = 'tasks'
+           AND json_extract(meta, '$.vault') = ?
+           AND json_extract(meta, '$.last_seen') = ?
+           ORDER BY json_extract(meta, '$.order')""",
+        (meta.get("vault", ""), day)).fetchall()
+    out = []
+    for i, mj in rows:
+        m = json.loads(mj) if mj else {}
+        txt = db.execute("SELECT text FROM chunks WHERE id = ?", (i,)).fetchone()[0]
+        out.append({"id": i, "text": txt.split("\n", 1)[0].removeprefix("Task: "),
+                    "done": m.get("done"), "section": m.get("section", ""),
+                    "subtasks": m.get("subtasks", []),
+                    "attachments": m.get("attachments", [])})
+    return {"day": day, "tasks": out}, "index"
+
 def _expand_calendar(db, chunk, n):
     """The day's agenda: every calendar chunk on the hit's local day, across
     calendars and apps, ordered by start. All-day chunks are stamped local
@@ -295,6 +329,7 @@ _EXPANDERS = {
     "git": _expand_git,
     "browser": _expand_browser,
     "obsidian": _expand_obsidian,
+    "tasks": _expand_tasks,
     "appusage": _expand_appusage,
     "shell": _expand_shell,
     "calendar": _expand_calendar,
@@ -326,6 +361,10 @@ def search_history(query: str, k: int = 5, source: str = "", location: str = "",
                   questions, query with that phrasing to catch every engine.
       - git:      commit messages they've authored across local repos
       - obsidian: their Obsidian vault notes, chunked by heading
+      - tasks:    checkbox tasks from their daily notes, one chunk per task
+                  across its lifetime; timestamp is the day it was last
+                  listed (= completion day when done, today when open).
+                  expand() returns that day's whole list.
       - calendar: their calendar events — meetings and appointments with
                   attendee names, all past plus ~90 days ahead (so "what's
                   coming up Thursday" works; this source's timestamps can be

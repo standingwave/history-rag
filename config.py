@@ -27,6 +27,7 @@ _KNOWN = {
               "exclude_categories"},
     "git": {"roots", "author"},
     "obsidian": {"vaults"},
+    "tasks": {"index_routine"},
     "appusage": {"db"},
     "digest": {"sources", "recompute_days", "backfill_days"},
     "backup": {"dir", "keep"},

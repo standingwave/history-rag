@@ -28,6 +28,7 @@ credential-bearing is dropped via the shared secret regex — personal notes
 hold passwords more often than you'd think.
 """
 import os, re, hashlib
+from typing import NamedTuple
 from datetime import datetime, timezone
 from sources.common import SECRET_RE, group_paragraphs
 
@@ -89,8 +90,20 @@ def _mtime_iso(path: str) -> str:
     except OSError:
         return ""
 
-def iter_chunks():
-    for vault in _vaults():
+class Note(NamedTuple):
+    """One vault note, frontmatter stripped. `ts` is the resolved UTC ISO
+    timestamp (frontmatter date, else mtime); `rel` is vault-relative."""
+    vault: str
+    rel: str
+    body: str
+    ts: str
+
+def iter_notes(vaults=None):
+    """Walk the configured vaults (or `vaults`) and yield every markdown
+    note with a non-empty body. The shared reader: this source chunks the
+    prose; sources/tasks.py reads the checkbox blocks out of daily notes.
+    Hidden dirs, template folders, and unreadable files are skipped."""
+    for vault in (_vaults() if vaults is None else vaults):
         if not os.path.isdir(vault):
             continue
         vname = os.path.basename(vault.rstrip("/"))
@@ -110,31 +123,34 @@ def iter_chunks():
                 if not body.strip():
                     continue
                 ts = (_fm_iso(fm_date) if fm_date else "") or _mtime_iso(path)
-                rel = os.path.relpath(path, vault)
-                title = os.path.splitext(fn)[0]
-                whole = len(body) <= WHOLE_NOTE_MAX
-                secs = [("", body)] if whole else _sections(body)
-                counts: dict[str, int] = {}
-                for heading, sec_text in secs:
-                    if heading:      # the prefix below carries the heading
-                        sec_text = sec_text.split("\n", 1)[1] \
-                            if "\n" in sec_text else ""
-                    prefix = f"{title} > {heading}" if heading else title
-                    # occurrence index disambiguates repeated headings
-                    n = counts.get(heading, 0)
-                    counts[heading] = n + 1
-                    groups = [sec_text] if whole else _groups(sec_text)
-                    for g, gtext in enumerate(groups):
-                        text = f"{prefix}\n{gtext.strip()}"[:MAX_CHARS]
-                        if not gtext.strip() or SECRET_RE.search(text):
-                            continue
-                        cid = "obsidian:" + hashlib.sha256(
-                            f"{vname}\0{rel}\0{heading}\0{n}\0{g}"
-                            .encode()).hexdigest()[:26]
-                        yield cid, text, {
-                            "source": "obsidian",
-                            "timestamp": ts,
-                            "location": rel + (f"#{heading}" if heading else ""),
-                            "meta": {"path": rel, "heading": heading,
-                                     "vault": vname},
-                        }
+                yield Note(vname, os.path.relpath(path, vault), body, ts)
+
+def iter_chunks():
+    for vname, rel, body, ts in iter_notes():
+        title = os.path.splitext(os.path.basename(rel))[0]
+        whole = len(body) <= WHOLE_NOTE_MAX
+        secs = [("", body)] if whole else _sections(body)
+        counts: dict[str, int] = {}
+        for heading, sec_text in secs:
+            if heading:      # the prefix below carries the heading
+                sec_text = sec_text.split("\n", 1)[1] \
+                    if "\n" in sec_text else ""
+            prefix = f"{title} > {heading}" if heading else title
+            # occurrence index disambiguates repeated headings
+            n = counts.get(heading, 0)
+            counts[heading] = n + 1
+            groups = [sec_text] if whole else _groups(sec_text)
+            for g, gtext in enumerate(groups):
+                text = f"{prefix}\n{gtext.strip()}"[:MAX_CHARS]
+                if not gtext.strip() or SECRET_RE.search(text):
+                    continue
+                cid = "obsidian:" + hashlib.sha256(
+                    f"{vname}\0{rel}\0{heading}\0{n}\0{g}"
+                    .encode()).hexdigest()[:26]
+                yield cid, text, {
+                    "source": "obsidian",
+                    "timestamp": ts,
+                    "location": rel + (f"#{heading}" if heading else ""),
+                    "meta": {"path": rel, "heading": heading,
+                             "vault": vname},
+                }

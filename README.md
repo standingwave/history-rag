@@ -37,6 +37,8 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   - `browser.py` — Safari/Chrome/Helium page visits, deduped by URL.
   - `git.py` — your own commits across local repos (opt-in via env var).
   - `obsidian.py` — vault notes chunked by heading (opt-in via env var).
+  - `tasks.py` — checkbox tasks from the vault's daily notes, one chunk per
+    task across its lifetime (opt-in with obsidian). See "Tasks" below.
   - `calendar.py` — calendar events with attendees (macOS, opt-in). See
     "Calendar events" below.
   - `digest.py` — precomputed daily rollups: one chunk per (local day,
@@ -91,13 +93,16 @@ setups keep working, and the file is the recommended home for anything you'd
 otherwise export in your shell AND inject into the launchd plist:
 ```toml
 [sources]
-enabled = ["claude", "shell", "browser", "git", "obsidian", "appusage"]
+enabled = ["claude", "shell", "browser", "git", "obsidian", "tasks", "appusage"]
 
 [git]
 roots = ["~/dev"]
 
 [obsidian]
 vaults = ["~/Documents/Obsidian Vault"]
+
+[tasks]
+index_routine = false     # daily-note tasks; routine-section items skipped by default
 
 [shell]
 histfiles = []            # archived history files
@@ -149,7 +154,7 @@ model's ambient context.
 ## Sources
 Every source feeds one shared index; pass `source="claude"`, `source="shell"`,
 `source="appusage"`, `source="browser"`, `source="git"`, `source="obsidian"`,
-`source="calendar"`, or `source="digest"` to `search_history` to restrict a
+`source="calendar"`, `source="tasks"`, or `source="digest"` to `search_history` to restrict a
 query.
 
 **Shell history** reads `~/.zsh_history`, `~/.bash_history`, and the per-session
@@ -265,6 +270,18 @@ browser the vault is the durable record, so pruning here is safe). Timestamps
 come from `date:` frontmatter when present, else file mtime; frontmatter is
 stripped from the text. Hidden dirs (`.obsidian`, `.trash`), template folders,
 and credential-looking sections are skipped.
+
+**Tasks** indexes the `- [ ]` / `- [x]` blocks in the vault's daily notes
+(`YYYY-MM-DD.md` at the vault root), one chunk per task across its whole
+lifetime: the task text is the identity, so a block carried forward day
+after day is one chunk, not one per copy. Its timestamp is the latest note
+it appears in — the completion day once checked, today while open — so a
+window over last week answers "what did I finish" and `list_window(
+source="tasks", since=<today>)` is today's list. Meta carries `done`,
+`first_seen`, `done_on`, the `Routine` section, subtasks, and attachment
+names; `expand` returns the day's whole list. Routine items are skipped
+unless `[tasks] index_routine = true`. Reads the same vaults as the obsidian
+source (which still indexes the note's prose); enable both.
 
 **Calendar events (macOS, opt-in)** indexes meetings and appointments from
 Apple Calendar's store — the strongest "what did I do Tuesday" anchors, and
