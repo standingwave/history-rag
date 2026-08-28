@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Convex spike: keep tools/convex-applier.py running while the Mac is
-     awake so phone-side task toggles land in the vault. Fill in __REPO__,
-     __HOME__, and the deploy key, then:
+     awake so phone-side task toggles land in the vault. The deploy key is
+     read from deploy/convex/.env.local. Fill in __REPO__ and __HOME__, then:
        cp com.user.convex-applier.plist ~/Library/LaunchAgents/
        launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.convex-applier.plist
      KeepAlive restarts it after sleep/wake network drops. -->
@@ -17,7 +17,6 @@
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>CONVEX_DEPLOY_KEY</key><string>__DEPLOY_KEY__</string>
     <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key><true/>

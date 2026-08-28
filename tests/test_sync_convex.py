@@ -141,3 +141,19 @@ def test_missing_vector_is_deferred(cfg, monkeypatch):
     sc.main([])
     pushed = [i["chunkId"] for c in fake.calls if c[0] == "sync:upsert" for i in c[1]["items"]]
     assert "tasks:2" not in pushed and "tasks:1" in pushed
+
+
+def test_deploy_key_falls_back_to_env_local(monkeypatch, tmp_path):
+    monkeypatch.delenv("CONVEX_DEPLOY_KEY", raising=False)
+    monkeypatch.setattr(sc.config, "CONVEX_DEPLOY_KEY_ENV", "CONVEX_DEPLOY_KEY")
+    fake_tools = tmp_path / "tools"; fake_tools.mkdir()
+    (tmp_path / "deploy" / "convex").mkdir(parents=True)
+    (tmp_path / "deploy" / "convex" / ".env.local").write_text(
+        "CONVEX_DEPLOYMENT=dev:x\nCONVEX_DEPLOY_KEY='dev:x|abc'\n")
+    monkeypatch.setattr(sc, "__file__", str(fake_tools / "sync-convex.py"))
+    assert sc.deploy_key() == "dev:x|abc"
+    monkeypatch.setenv("CONVEX_DEPLOY_KEY", "from-env")
+    assert sc.deploy_key() == "from-env"
+    (tmp_path / "deploy" / "convex" / ".env.local").unlink()
+    monkeypatch.delenv("CONVEX_DEPLOY_KEY")
+    assert sc.deploy_key() == ""

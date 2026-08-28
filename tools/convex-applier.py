@@ -83,11 +83,32 @@ def apply_intent(intent: dict) -> str | None:
         _write(path, new)
     return None
 
+
+def deploy_key() -> str:
+    """The deploy key: the configured env var, else the same variable in
+    deploy/convex/.env.local (where the Convex CLI keeps it), so one file
+    serves the CLI, these tools, and the launchd applier."""
+    key = os.environ.get(config.CONVEX_DEPLOY_KEY_ENV, "")
+    if key:
+        return key
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_file = os.path.join(root, "deploy", "convex", ".env.local")
+    try:
+        with open(env_file) as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k == config.CONVEX_DEPLOY_KEY_ENV and v:
+                    return v.strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
 def _client():
     from convex import ConvexClient
-    key = os.environ.get(config.CONVEX_DEPLOY_KEY_ENV, "")
+    key = deploy_key()
     if not key:
-        sys.exit(f"{config.CONVEX_DEPLOY_KEY_ENV} is not set")
+        sys.exit(f"{config.CONVEX_DEPLOY_KEY_ENV} is not set "
+                 "(env or deploy/convex/.env.local)")
     c = ConvexClient(config.CONVEX_URL)
     c.set_admin_auth(key)
     return c

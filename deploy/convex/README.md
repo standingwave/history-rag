@@ -44,11 +44,10 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
    ```
 
 5. **Deploy key for the Mac.** Dashboard → Settings → Deploy keys →
-   generate. Keep it in the password manager; export it in the shell that
-   runs the tools and paste it into the applier plist:
-   ```sh
-   export CONVEX_DEPLOY_KEY='prod:…|…'
-   ```
+   generate a key for the dev deployment and add it to `.env.local`
+   (gitignored) as `CONVEX_DEPLOY_KEY=…`. The Convex CLI, both Python
+   tools, and the launchd applier all read it from there; an exported
+   `CONVEX_DEPLOY_KEY` in the shell takes precedence if set.
 
 6. **Config.** In `~/.claude/history-rag.toml`:
    ```toml
