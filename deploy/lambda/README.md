@@ -12,7 +12,10 @@ config defaults are untouched.
 
 ## One-time AWS setup
 
-Needs an AWS account and the `aws` CLI configured. Pick values once:
+Needs an AWS account and, for this provisioning section only, the `aws`
+CLI. Nothing after setup depends on it: the sync, `set-env.py`, and the
+day-to-day commands below go through boto3 in the rag venv, so the CLI
+can come and go. Pick values once:
 
 ```sh
 REGION=us-west-2
@@ -176,7 +179,11 @@ pbpaste | python3 set-env.py ANTHROPIC_API_KEY -
 The picker offers only presets whose `key_env` is set; the client selects
 by name — endpoints and models never come from the request. Bump the
 function timeout for the agent loop:
-`aws lambda update-function-configuration --function-name history-rag --timeout 120`.
+
+```sh
+~/.claude/rag-venv/bin/python -c "import boto3; boto3.client('lambda', region_name='us-west-2') \
+  .update_function_configuration(FunctionName='history-rag', Timeout=120)"
+```
 
 ## Deploys
 
@@ -186,14 +193,18 @@ itself) deploy
 automatically via `.github/workflows/deploy-lambda.yml`: tests → build →
 OIDC role assumption → code update → a secret-less smoke invoke (the gate
 must 404 a path outside the secret) → a `deployed-sha` tag on the
-function. "What's live?" is `aws lambda list-tags`; manual runs are
-`gh workflow run deploy-lambda`.
+function. Manual runs are `gh workflow run deploy-lambda`. "What's live?":
+
+```sh
+~/.claude/rag-venv/bin/python -c "import boto3; c = boto3.client('lambda', region_name='us-west-2'); \
+  print(c.list_tags(Resource=c.get_function(FunctionName='history-rag')['Configuration']['FunctionArn'])['Tags'])"
+```
 
 Fallback (first deploy, CI outage, offline work):
 
 ```sh
-./build.sh && aws lambda update-function-code --function-name history-rag \
-  --zip-file fileb://history-rag-lambda.zip --region "$REGION"
+./build.sh && ~/.claude/rag-venv/bin/python -c "import boto3; boto3.client('lambda', region_name='us-west-2') \
+  .update_function_code(FunctionName='history-rag', ZipFile=open('history-rag-lambda.zip', 'rb').read())"
 ```
 
 ### One-time CI setup
