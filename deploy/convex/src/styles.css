@@ -1,0 +1,41 @@
+/* Tokens from deploy/lambda/ui.html (the v2 handoff), grid from design D. */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #121215; color: #e8e8eb; font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+.col { max-width: 44rem; margin: 0 auto; padding: 14px 16px 56px; }
+.hdr { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 2px 12px; }
+.wordmark { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.muted { color: #a6a6af; }
+.small { font-size: .8rem; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+.err { color: #f87171; font-size: .87rem; }
+.lnk { background: none; border: 0; color: #a6a6af; font: inherit; font-size: .85rem; padding: 0; cursor: pointer; }
+.primary { background: #e8e8eb; color: #121215; border: 0; border-radius: 9px; padding: 8px 14px; font: inherit; font-weight: 600; }
+a { color: #8ab4f8; text-decoration: none; }
+
+.daterow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 4px 2px 12px; font-size: .9rem; color: #a6a6af; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 640px) { .grid { grid-template-columns: repeat(4, 1fr); } .tile.large { grid-column: span 4; } }
+.tile { text-align: left; background: #9a9aa312; border: 1px solid #2a2a30; border-radius: 12px; padding: 11px 12px; color: inherit; font: inherit; cursor: pointer; min-height: 96px; }
+.tile.large { grid-column: span 2; min-height: 120px; }
+.thead { display: flex; justify-content: space-between; font-weight: 600; font-size: .9rem; margin-bottom: 6px; }
+.stat { font-size: 1.7rem; font-weight: 650; letter-spacing: -.02em; }
+
+.trow { padding: 5px 0; border-bottom: 1px solid #1e1e23; }
+.tile .trow { border: 0; padding: 2px 0; }
+.tline { display: flex; align-items: baseline; gap: 8px; }
+.ttext { flex: 1; }
+.glyph { background: none; border: 0; color: #8ab4f8; font: inherit; padding: 0 2px; cursor: pointer; }
+.done .ttext { color: #94949e; text-decoration: line-through; }
+.done .glyph { color: #94949e; }
+.pending .glyph { color: #facc15; }
+.tdetail { padding: 4px 0 6px 26px; font-size: .88rem; color: #c8c8cf; display: grid; gap: 3px; }
+.tdetail .done { color: #94949e; }
+.sect { font-size: .66rem; letter-spacing: .12em; color: #94949e; margin: 14px 0 4px; }
+
+.lrow { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #1e1e23; font-size: .92rem; }
+.time { color: #94949e; min-width: 3.4em; }
+.frow { display: flex; gap: 8px; margin-bottom: 8px; }
+.frow input { flex: 1; min-width: 0; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }
+.signin { display: grid; gap: 8px; max-width: 22rem; margin: 40px auto; }
+.signin input { background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 9px 11px; font: inherit; }

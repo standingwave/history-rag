@@ -29,6 +29,7 @@ def _load_tool(name: str, filename: str):
 
 backup = _load_tool("backup", "backup.py")
 sync_s3 = _load_tool("sync_s3", "sync-s3.py")
+sync_convex = _load_tool("sync_convex", "sync-convex.py")
 
 
 def prune_sources() -> list:
@@ -126,6 +127,10 @@ def _summary(steps: dict, status, embedded, secs: float) -> str:
              part("prune"),
              part("backup", steps.get("backup", {}).get("note", "")),
              part("sync", steps.get("sync", {}).get("note", ""))]
+    # Convex is opt-in (wip/SPEC-convex-spike.md); an unconfigured skip
+    # stays out of the line so installs without it read as before.
+    if steps.get("convex", {}).get("note") not in (None, "skipped:unconfigured"):
+        parts.append(part("convex", steps["convex"].get("note", "")))
     return ("refresh: " + " · ".join(p for p in parts if p)
             + f" · {int(secs)}s")
 
@@ -149,6 +154,7 @@ def main():
         _step(steps, "prune", run_prunes)
     bres = _step(steps, "backup", backup.main)
     sres = _step(steps, "sync", sync_s3.main)
+    cres = _step(steps, "convex", sync_convex.main)
 
     if bres is not None:
         steps["backup"]["note"] = ("written" if "written" in bres.values()
@@ -166,6 +172,18 @@ def main():
         # staleness questions need. Never stamped on the config/no-DB skips.
         if action in ("pushed", "unchanged"):
             steps["sync"]["synced_at"] = _utcnow()
+
+    if cres is not None:
+        n = sum(r.get("upsert", 0) + r.get("remove", 0)
+                for r in cres.get("sources", []))
+        if cres["action"] == "skipped":
+            steps["convex"]["note"] = ("skipped:unconfigured"
+                                       if "url" in cres.get("reason", "")
+                                       else cres["reason"])
+        else:
+            steps["convex"]["note"] = {
+                "pushed": f"pushed {n} chunks",
+                "unchanged": "current"}.get(cres["action"], cres["action"])
 
     db = _connect()
     row = db.execute("SELECT id, status, embedded FROM runs WHERE id > ? "

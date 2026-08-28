@@ -36,6 +36,8 @@ _KNOWN = {
     "health": {"notify"},
     "refresh": {"prune"},
     "ask": {"models", "max_turns"},
+    "convex": {"url", "deploy_key_env", "sources", "batch", "state_db",
+               "tasks_script"},
 }
 
 _FILE: dict = {}
@@ -133,6 +135,24 @@ if SYNC_PART_SIZE_MB < 5:
     sys.exit(f"config error in {_CONFIG_PATH}: sync.part_size_mb is "
              f"{SYNC_PART_SIZE_MB}, but S3 rejects part copies below 5MB")
 SYNC_PART_SIZE = SYNC_PART_SIZE_MB * 1024 * 1024
+
+# Convex spike (deploy/convex, wip/SPEC-convex-spike.md): a second replica
+# target beside S3. Empty url = the sync and applier tools no-op.
+CONVEX_URL = str(get("convex", "url", "CLAUDE_RAG_CONVEX_URL", "") or "")
+CONVEX_DEPLOY_KEY_ENV = str(get("convex", "deploy_key_env",
+                               "CLAUDE_RAG_CONVEX_DEPLOY_KEY_ENV",
+                               "CONVEX_DEPLOY_KEY"))
+_cs = get("convex", "sources", "CLAUDE_RAG_CONVEX_SOURCES",
+          ["tasks", "obsidian", "calendar"])
+CONVEX_SOURCES = [s for s in (_cs.split(",") if isinstance(_cs, str) else _cs)
+                  if str(s).strip()]
+CONVEX_BATCH = int(get("convex", "batch", "CLAUDE_RAG_CONVEX_BATCH", 60))
+CONVEX_STATE_DB = os.path.expanduser(get(
+    "convex", "state_db", "CLAUDE_RAG_CONVEX_STATE_DB",
+    "~/.claude/history-rag-convex.db"))
+CONVEX_TASKS_SCRIPT = os.path.expanduser(get(
+    "convex", "tasks_script", "CLAUDE_RAG_CONVEX_TASKS_SCRIPT",
+    "~/.claude/skills/daily-tasks/tasks.py"))
 
 # App-usage tracker (macOS): daemon writes here, sources/appusage.py reads it.
 APPUSAGE_DB = os.path.expanduser(get("appusage", "db", "CLAUDE_RAG_APPUSAGE_DB",

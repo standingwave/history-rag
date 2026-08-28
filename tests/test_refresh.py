@@ -230,3 +230,18 @@ def test_replica_health_none_on_legacy_runs_table(scratch_db, monkeypatch):
     index.ensure_runs(db)                          # no steps column
     assert server._replica_health(db) is None
     db.close()
+
+
+def test_convex_step_reports_when_configured(scratch_db, monkeypatch, capsys):
+    """The Convex spike step (wip/SPEC-convex-spike.md) shows in the stats
+    line only when it did something; an unconfigured skip stays silent."""
+    fake_index(monkeypatch, embedded=1)
+    stub_steps(monkeypatch, sync_ret={"action": "unchanged"})
+    monkeypatch.setattr(refresh.sync_convex, "main", lambda: {
+        "action": "pushed",
+        "sources": [{"source": "tasks", "upsert": 3, "remove": 1}]})
+    refresh.main()
+    out = capsys.readouterr().out
+    assert "· convex pushed 4 chunks ·" in out
+    steps = json.loads(rows(scratch_db)[0][2])
+    assert steps["convex"]["ok"] and steps["convex"]["note"] == "pushed 4 chunks"
