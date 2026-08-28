@@ -15,6 +15,9 @@ stored content. Batches stay well under Convex's 1 MiB argument limit
 No-op unless [convex] url is set and the `convex` package is importable
 in this venv (`uv pip install --python ~/.claude/rag-venv/bin/python convex`).
 
+Progress and a per-source summary go to stderr as each source completes;
+the JSON result (what refresh.py records) goes to stdout at the end.
+
 Run:    ~/.claude/rag-venv/bin/python tools/sync-convex.py [--full] [--dry-run]
                                                            [--source NAME]
 Config: [convex] url, deploy_key_env (default CONVEX_DEPLOY_KEY),
@@ -101,6 +104,11 @@ def signature(db, source: str) -> str:
 
 # ── state ────────────────────────────────────────────────────────────────────
 
+def prev_at(state, source: str) -> str:
+    row = state.execute("SELECT pushed_at FROM sigs WHERE source = ?",
+                        (source,)).fetchone()
+    return row[0][:16] if row and row[0] else "?"
+
 def open_state(path: str):
     db = sqlite3.connect(path)
     db.executescript("""
@@ -169,8 +177,13 @@ def push_source(client, index_db, state, source: str, batch: int,
     if dry_run:
         return res
     t0 = time.time()
+    def progress(done_n: int):
+        print(f"  {source}: {done_n}/{len(up)} upserted "
+              f"({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     for i in range(0, len(up), batch):
         ids = up[i:i + batch]
+        if i and (i // batch) % 20 == 0:
+            progress(i)
         items = []
         for cid in ids:
             blob = index_db.execute(
@@ -197,6 +210,8 @@ def push_source(client, index_db, state, source: str, batch: int,
         "source": source, "startedAt": t0 * 1000, "finishedAt": time.time() * 1000,
         "upserted": len(up), "removed": len(rm)})
     res["seconds"] = round(time.time() - t0, 1)
+    print(f"{source}: {len(rows)} chunks, {len(up)} upserted, {len(rm)} removed "
+          f"in {res['seconds']}s", file=sys.stderr, flush=True)
     return res
 
 def main(argv=None) -> dict:
@@ -226,6 +241,7 @@ def main(argv=None) -> dict:
                              (src,)).fetchone()
         if prev and prev[0] == sig and not a.full:
             results.append({"source": src, "unchanged": True})
+            print(f"{src}: unchanged since {prev_at(state, src)}", file=sys.stderr)
             continue
         r = push_source(client, index_db, state, src, config.CONVEX_BATCH,
                         dry_run=a.dry_run, full=a.full)

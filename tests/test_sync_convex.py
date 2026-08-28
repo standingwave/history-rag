@@ -157,3 +157,14 @@ def test_deploy_key_falls_back_to_env_local(monkeypatch, tmp_path):
     (tmp_path / "deploy" / "convex" / ".env.local").unlink()
     monkeypatch.delenv("CONVEX_DEPLOY_KEY")
     assert sc.deploy_key() == ""
+
+
+def test_progress_summary_on_stderr(cfg, monkeypatch, capsys):
+    _index(cfg / "ix.db", ROWS)
+    fake = FakeClient()
+    monkeypatch.setattr(sc, "_client", lambda: fake)
+    sc.main([])
+    err = capsys.readouterr().err
+    assert "tasks: 3 chunks, 3 upserted, 0 removed in" in err
+    sc.main([])
+    assert "tasks: unchanged since 20" in capsys.readouterr().err
