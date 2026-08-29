@@ -3,7 +3,7 @@
    a post-filter on the item's local day. `dropped` counts candidates the
    post-filter discarded — measurement #2 in the spec. */
 import { v } from "convex/values";
-import { action, internalAction } from "./_generated/server";
+import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { rag, QUERY_PROMPT, embedQuery, EMBED_PROVIDER } from "./rag";
 import { requireUserAction } from "./auth";
@@ -18,7 +18,25 @@ export type SearchResult = {
   timing: { embedMs: number; searchMs: number; joinMs: number };
 };
 
-export const DEFAULT_SOURCES = ["tasks", "obsidian", "calendar"];
+/* Every namespace the Mac pushes (index.py ALL_SOURCES). */
+export const ALL_SOURCES = ["tasks", "obsidian", "calendar", "email", "browser",
+  "claude", "git", "shell", "appusage", "digest"];
+
+/* Exact days for a bounded window of ≤ MAX_DAY_FILTERS days; the vector
+   index ORs them and nothing needs post-filtering. Longer or open-ended
+   windows fall back to months plus a post-filter on the item's day. */
+export const MAX_DAY_FILTERS = 31;
+export function daysBetween(since?: string, until?: string): string[] {
+  if (!since || !until) return [];
+  const lo = new Date(since + "T12:00:00Z"), hi = new Date(until + "T12:00:00Z");
+  const n = Math.round((hi.getTime() - lo.getTime()) / 864e5) + 1;
+  if (n < 1 || n > MAX_DAY_FILTERS) return [];
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(new Date(lo.getTime() + i * 864e5).toISOString().slice(0, 10));
+  }
+  return out;
+}
 
 export function monthsBetween(since?: string, until?: string): string[] {
   if (!since && !until) return [];
@@ -36,22 +54,20 @@ export function monthsBetween(since?: string, until?: string): string[] {
   return out;
 }
 
-export const search = action({
-  args: {
-    query: v.string(),
-    sources: v.optional(v.array(v.string())),
-    since: v.optional(v.string()),   // local YYYY-MM-DD, inclusive
-    until: v.optional(v.string()),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, a): Promise<SearchResult> => {
-    await requireUserAction(ctx);
-    const sources = a.sources?.length ? a.sources : DEFAULT_SOURCES;
+type SearchArgs = {
+  query: string; sources?: string[]; since?: string; until?: string; limit?: number;
+};
+
+async function runSearch(ctx: ActionCtx, a: SearchArgs): Promise<SearchResult> {
+    const sources = a.sources?.length ? a.sources : ALL_SOURCES;
     const limit = Math.min(a.limit ?? 10, 50);
-    const months = monthsBetween(a.since, a.until);
-    const filters = months.map((m) => ({ name: "month" as const, value: m }));
-    // Over-fetch when windowed: the month filter is coarser than the window.
-    const perNs = filters.length ? limit * 3 : limit;
+    const days = daysBetween(a.since, a.until);
+    const months = days.length ? [] : monthsBetween(a.since, a.until);
+    const filters = days.length
+      ? days.map((d) => ({ name: "day" as const, value: d }))
+      : months.map((m) => ({ name: "month" as const, value: m }));
+    // Over-fetch only when the filter is coarser than the window.
+    const perNs = months.length ? limit * 5 : limit;
 
     // Embed once; rag.search would otherwise call Mixedbread per namespace.
     let t = Date.now();
@@ -109,7 +125,32 @@ export const search = action({
       months,
       timing: { embedMs, searchMs, joinMs },
     };
+}
+
+export const search = action({
+  args: {
+    query: v.string(),
+    sources: v.optional(v.array(v.string())),
+    since: v.optional(v.string()),   // local YYYY-MM-DD, inclusive
+    until: v.optional(v.string()),
+    limit: v.optional(v.number()),
   },
+  handler: async (ctx, a): Promise<SearchResult> => {
+    await requireUserAction(ctx);
+    return runSearch(ctx, a);
+  },
+});
+
+/* Same search without user auth, for the Mac's parity eval (deploy key). */
+export const searchInternal = internalAction({
+  args: {
+    query: v.string(),
+    sources: v.optional(v.array(v.string())),
+    since: v.optional(v.string()),   // local YYYY-MM-DD, inclusive
+    until: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, a): Promise<SearchResult> => runSearch(ctx, a),
 });
 
 /* Cron target (see crons.ts). Logs the round-trip so the dashboard shows

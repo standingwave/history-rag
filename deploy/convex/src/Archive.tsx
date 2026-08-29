@@ -1,7 +1,7 @@
-/* Search / Ask / Browse sheets and the reading view (wip/SPEC-convex-app.md
-   stage 1). Search merges the live Convex sources with the archive proxy;
-   Ask, Browse, and expand are the archive's, through the proxy, until
-   stage 3 makes them native. */
+/* Search / Ask / Browse sheets and the reading view (wip/SPEC-convex-app.md).
+   Search is native Convex over every source (stage 3, parity passed
+   2026-08-29); Ask, Browse, and expand still go through the archive proxy
+   until they're native too. */
 import { useEffect, useState, type ReactNode } from "react";
 import { useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
@@ -10,7 +10,6 @@ import { describe, color, DetailBody, type Chunk } from "./render";
 
 export const SOURCES = ["tasks", "obsidian", "calendar", "email", "browser",
   "claude", "git", "shell", "appusage", "digest"] as const;
-const LIVE = new Set(["tasks", "obsidian", "calendar"]);
 export type Hit = {
   id: string; source: string; score: number; day: string; timestamp?: string;
   location?: string; text: string; meta?: any; live: boolean;
@@ -42,10 +41,6 @@ function Sheet({ title, onBack, children }: { title: string; onBack: () => void;
   );
 }
 
-function dayOf(ts?: string) { return ts ? localDay(new Date(ts)) : ""; }
-/* The archive reports L2 distance; Convex reports cosine. Same unit
-   vectors, so cos = 1 − d²/2 puts both on one scale. */
-function distToScore(d: number) { return 1 - (d * d) / 2; }
 
 /* ── reading view ─────────────────────────────────────────────────────── */
 
@@ -78,7 +73,6 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
 
 export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
   const live = useAction(api.search.search);
-  const archive = useAction(api.archive.search);
   const [q, setQ] = useState("");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
@@ -97,34 +91,17 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 
   const run = async () => {
     setBusy(true); const t0 = performance.now();
-    const wantLive = [...sel].filter((s) => LIVE.has(s));
-    const wantArchive = [...sel].filter((s) => !LIVE.has(s));
-    const win = { since: since || undefined, until: until || undefined };
     try {
-      const [l, a] = await Promise.all([
-        wantLive.length ? live({ query: q, sources: wantLive, limit: k, ...win }) : null,
-        wantArchive.length
-          ? archive({ query: q, k: Math.max(k, 20), ...win,
-                      source: wantArchive.length === 1 ? wantArchive[0] : undefined })
-          : null,
-      ]);
-      const byId = new Map<string, Hit>();
-      for (const r of l?.results ?? []) {
-        byId.set(r.id, { id: r.id, source: r.source, score: r.score, day: r.day,
-          timestamp: r.timestamp, location: r.location, text: r.text, meta: r.meta, live: true });
-      }
-      for (const r of a?.results ?? []) {
-        if (byId.has(r.id) || !sel.has(r.source) || LIVE.has(r.source)) continue;
-        byId.set(r.id, { id: r.id, source: r.source, score: distToScore(r.distance),
-          day: dayOf(r.timestamp), timestamp: r.timestamp, location: r.location,
-          text: r.text, meta: r.meta, live: false });
-      }
-      const merged = [...byId.values()].sort((p, s) => s.score - p.score).slice(0, k);
+      const r = await live({ query: q, sources: [...sel], limit: k,
+                             since: since || undefined, until: until || undefined });
+      const merged: Hit[] = r.results.map((x: any) => ({
+        id: x.id, source: x.source, score: x.score, day: x.day, timestamp: x.timestamp,
+        location: x.location, text: x.text, meta: x.meta, live: true }));
       setHits(merged);
       const ms = Math.round(performance.now() - t0);
-      setStatus(`${merged.length} shown · live ${l?.results.length ?? 0}` +
-        (l ? ` (${l.dropped} dropped by window)` : "") +
-        ` · archive ${a?.results?.length ?? 0}${a?.truncated ? " (pool exhausted)" : ""} · ${ms}ms`);
+      setStatus(`${merged.length} shown · ${r.candidates} candidates` +
+        (r.dropped ? ` · ${r.dropped} dropped by window` : "") +
+        ` · ${ms}ms (embed ${r.timing.embedMs} · search ${r.timing.searchMs} · join ${r.timing.joinMs})`);
     } catch (e) { alert(String(e)); }
     finally { setBusy(false); }
   };
