@@ -1,9 +1,11 @@
-/* Design D (widget grid) from SPEC-dashboard-tasks.md Part B, reduced to
-   the spike's three sources: Tasks (large, interactive checkboxes),
-   Agenda + Notes (small), and a Search sheet over the search action. */
+/* Design D (widget grid) from SPEC-dashboard-tasks.md Part B: Tasks
+   (large, interactive checkboxes), Agenda + Notes (small); Search / Ask /
+   Browse and the reading view are sheets from ./Archive. Sheets route by
+   the `#w=` hash; `#w=x:<id>` is the reading view. */
 import { useEffect, useState, type JSX } from "react";
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
+import { SearchSheet, AskSheet, BrowseSheet, Detail } from "./Archive";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -65,7 +67,11 @@ export function Today() {
     row={(e) => <><span className="mono time">{timeOnly(e.timestamp)}</span>{title(e)}</>} />;
   if (sheet === "notes") return <ListSheet title="Notes · 7d" items={notes} onBack={close}
     row={(n) => <><span className="mono time">{n.day.slice(5)}</span>{n.location}</>} />;
-  if (sheet === "search") return <SearchSheet onBack={close} />;
+  const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
+  if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
+  if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
+  if (sheet === "ask") return <AskSheet onBack={close} onOpen={openId} />;
+  if (sheet === "browse") return <BrowseSheet onBack={close} onOpen={openId} />;
 
   const tiles: Record<string, JSX.Element> = {
     tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} onOpen={() => open("tasks")} />,
@@ -79,7 +85,11 @@ export function Today() {
     <section>
       <div className="daterow">
         <span>{dayLabel(day)} · {period(hour)}</span>
-        <button className="lnk" onClick={() => open("search")}>search</button>
+        <span>
+          <button className="lnk" onClick={() => open("search")}>search</button>{" · "}
+          <button className="lnk" onClick={() => open("ask")}>ask</button>{" · "}
+          <button className="lnk" onClick={() => open("browse")}>browse</button>
+        </span>
       </div>
       <div className="grid">{ORDER[period(hour)].map((id) => tiles[id])}</div>
     </section>
@@ -182,49 +192,6 @@ function ListSheet({ title, items, row, onBack }:
       {items === undefined && <p className="muted">…</p>}
       {items?.length === 0 && <p className="muted">nothing</p>}
       {items?.map((i) => <div key={i.id} className="lrow">{row(i)}</div>)}
-    </section>
-  );
-}
-
-function SearchSheet({ onBack }: { onBack: () => void }) {
-  const search = useAction(api.search.search);
-  const [q, setQ] = useState("");
-  const [since, setSince] = useState("");
-  const [until, setUntil] = useState("");
-  const [res, setRes] = useState<any>(null);
-  const [busy, setBusy] = useState(false);
-  const [ms, setMs] = useState(0);
-  const run = async () => {
-    setBusy(true); const t0 = performance.now();
-    try { setRes(await search({ query: q, since: since || undefined, until: until || undefined, limit: 10 })); }
-    catch (e) { alert(String(e)); }
-    finally { setMs(Math.round(performance.now() - t0)); setBusy(false); }
-  };
-  return (
-    <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Today</button><span>Search</span></div>
-      <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="tasks · notes · calendar" />
-        <button className="primary" disabled={busy || !q}>go</button>
-      </form>
-      <div className="frow">
-        <input type="date" value={since} onChange={(e) => setSince(e.target.value)} />
-        <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
-      </div>
-      {res && (
-        <p className="muted mono small">
-          {res.results.length} shown · {res.candidates} candidates · {res.dropped} dropped by window
-          {res.months.length ? ` · months ${res.months.join(",")}` : ""}
-          {" · "}{ms}ms (embed {res.timing.embedMs} · search {res.timing.searchMs} · join {res.timing.joinMs})
-        </p>
-      )}
-      {res?.results.map((r: any) => (
-        <div key={r.id} className="lrow">
-          <span className="mono time" style={{ color: r.source === "tasks" ? "#facc15" : r.source === "calendar" ? "#f472b6" : "#a78bfa" }}>{r.source}</span>
-          <span className="grow">{r.text.split("\n", 1)[0].slice(0, 120)}</span>
-          <span className="muted mono small"> {r.day} · {r.score.toFixed(3)}</span>
-        </div>
-      ))}
     </section>
   );
 }

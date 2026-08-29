@@ -1,13 +1,13 @@
-# Convex spike
+# Convex app
 
-Throwaway implementation of `wip/SPEC-convex-spike.md`: the Today
-dashboard with task writes, on a Convex replica of three sources
-(`tasks`, `obsidian`, `calendar`). Branch `convex-spike`; only the verdict
-goes to main. Nothing here touches the Lambda, S3, or the local index.
+The one UI (`wip/SPEC-convex-app.md`): the Today dashboard with task
+writes over a Convex replica of `tasks`, `obsidian`, `calendar`, plus
+Search / Ask / Browse over the whole archive — proxied to the Lambda in
+stage 1, native in stage 3. Grew out of `wip/SPEC-convex-spike.md`.
 
 ```
-convex/          backend: schema, RAG instance, sync (internal), search, today, auth
-src/             React + Vite client: sign-in, widget grid, tasks sheet, search sheet
+convex/          backend: schema, RAG instance, sync (internal), search, today, archive (proxy), auth, crons
+src/             React + Vite client: sign-in, widget grid, tasks sheet, Search/Ask/Browse sheets, reading view
 tools/sync-convex.py      (repo root) push changed chunks + vectors from SQLite
 tools/convex-applier.py   (repo root) drain phone toggles into the vault
 ```
@@ -51,7 +51,36 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
    tools, and the launchd applier all read it from there; an exported
    `CONVEX_DEPLOY_KEY` in the shell takes precedence if set.
 
-6. **Config.** In `~/.claude/history-rag.toml`:
+6. **Archive proxy (stage 1).** The Lambda's function URL and URL secret,
+   so `convex/archive.ts` can reach every source until stage 3:
+   ```sh
+   npx convex env set LAMBDA_URL https://<id>.lambda-url.us-west-2.on.aws
+   npx convex env set LAMBDA_SECRET "$(~/.claude/rag-venv/bin/python -c "import boto3; \
+     print(boto3.client('lambda', region_name='us-west-2').get_function_configuration(\
+     FunctionName='history-rag')['Environment']['Variables']['CLAUDE_RAG_URL_SECRET'])")"
+   ```
+   The Lambda must be on a build that has `/api/search|window|expand`
+   (deploy/lambda/README.md, "Deploys").
+
+7. **Hosting.** `@convex-dev/static-hosting` serves `dist/` from
+   `https://<deployment>.convex.site` — same origin as the auth routes,
+   which stay at the root (app-owned mode in `convex/http.ts`).
+   ```sh
+   npm run smoke     # build + upload to the dev deployment; open the .convex.site URL
+   npm run deploy    # build + push backend + upload (prod when one exists)
+   ```
+   `npm run dev` stays the dev loop (HMR); the hosted build is what the
+   phone bookmarks.
+
+8. **Applier under launchd** (so writes don't need a terminal):
+   ```sh
+   sed -e "s#__REPO__#$(git rev-parse --show-toplevel)#g" -e "s#__HOME__#$HOME#g" \
+     com.user.convex-applier.plist > ~/Library/LaunchAgents/com.user.convex-applier.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.convex-applier.plist
+   tail -f ~/.claude/convex-applier.log
+   ```
+
+9. **Config.** In `~/.claude/history-rag.toml`:
    ```toml
    [convex]
    url = "https://<deployment>.convex.cloud"    # from .env.local
@@ -75,7 +104,7 @@ cd /path/to/history-rag
 # second run must be "unchanged" with zero calls
 ~/.claude/rag-venv/bin/python tools/sync-convex.py
 
-# the app, reachable from the phone on the LAN
+# the app during development (LAN); the phone uses the hosted build (step 7)
 npm run dev
 
 # the write path: leave running in a terminal, or install the plist

@@ -41,3 +41,14 @@ a { color: #8ab4f8; text-decoration: none; }
 .frow input { flex: 1; min-width: 0; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }
 .signin { display: grid; gap: 8px; max-width: 22rem; margin: 40px auto; }
 .signin input { background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 9px 11px; font: inherit; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { background: none; border: 1px solid #2a2a30; border-radius: 999px; color: #a6a6af; font: inherit; font-size: .78rem; padding: 3px 9px; cursor: pointer; }
+.chip.on { border-color: currentColor; color: #e8e8eb; background: #9a9aa312; }
+.frow select { background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }
+.frow label { display: flex; align-items: center; gap: 6px; color: #a6a6af; font-size: .85rem; }
+.frow input[type="number"] { flex: 0 0 4.5em; }
+pre.body { white-space: pre-wrap; overflow-wrap: anywhere; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; padding: 10px; font-size: .84rem; line-height: 1.4; }
+.answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.answer .cite { color: #8ab4f8; cursor: pointer; }
+.rowbtn { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }

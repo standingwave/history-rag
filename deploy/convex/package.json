@@ -1,18 +1,21 @@
 {
-  "name": "history-convex-spike",
+  "name": "history-convex",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "convex": "convex dev",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p convex/tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p convex/tsconfig.json",
+    "deploy": "npx @convex-dev/static-hosting deploy",
+    "smoke": "npx @convex-dev/static-hosting upload --build"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.0",
     "@auth/core": "0.41.1",
     "@convex-dev/auth": "^0.0.95",
     "@convex-dev/rag": "^0.7.6",
+    "@convex-dev/static-hosting": "^0.2.1",
     "ai": "^7.0.0",
     "convex": "^1.45.0",
     "convex-helpers": "^0.1.94",
