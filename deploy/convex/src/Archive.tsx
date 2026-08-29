@@ -6,23 +6,31 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { localDay } from "./Today";
+import { describe, color, DetailBody, type Chunk } from "./render";
 
 export const SOURCES = ["tasks", "obsidian", "calendar", "email", "browser",
   "claude", "git", "shell", "appusage", "digest"] as const;
 const LIVE = new Set(["tasks", "obsidian", "calendar"]);
-const COLOR: Record<string, string> = {
-  tasks: "#facc15", obsidian: "#a78bfa", calendar: "#f472b6", email: "#60a5fa",
-  browser: "#34d399", claude: "#fb923c", git: "#f87171", shell: "#a3e635",
-  appusage: "#22d3ee", digest: "#e879f9",
-};
-
 export type Hit = {
   id: string; source: string; score: number; day: string; timestamp?: string;
   location?: string; text: string; meta?: any; live: boolean;
 };
 
 export function Src({ s }: { s: string }) {
-  return <span className="mono time" style={{ color: COLOR[s] ?? "#a6a6af" }}>{s}</span>;
+  return <span className="mono src" style={{ color: color(s) }}>{s}</span>;
+}
+
+/* One list row for every source: title, then sub-line with the date and
+   an optional right-hand figure (score). */
+export function Row({ c, right, onOpen }: { c: Chunk; right?: string; onOpen: (id: string) => void }) {
+  const d = describe(c);
+  return (
+    <div className="row" onClick={() => onOpen(c.id)}>
+      <div className="r1"><Src s={c.source} /><span className="title">{d.title}</span></div>
+      <div className="r2 muted small"><span className="clip">{d.sub}</span>
+        <span className="mono">{[d.when, right].filter(Boolean).join(" · ")}</span></div>
+    </div>
+  );
 }
 
 function Sheet({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
@@ -34,7 +42,6 @@ function Sheet({ title, onBack, children }: { title: string; onBack: () => void;
   );
 }
 
-function firstLine(t: string) { return t.split("\n", 1)[0].slice(0, 140); }
 function dayOf(ts?: string) { return ts ? localDay(new Date(ts)) : ""; }
 /* The archive reports L2 distance; Convex reports cosine. Same unit
    vectors, so cos = 1 − d²/2 puts both on one scale. */
@@ -58,20 +65,9 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       {res?.error && <p className="err">{res.error}</p>}
       {c && (
         <>
-          <p className="muted mono small"><Src s={c.source} /> {c.timestamp?.slice(0, 16)} · {c.location}</p>
-          <pre className="body">{c.text}</pre>
-          {res.context && (
-            <>
-              <p className="sect">CONTEXT · {res.context_source ?? "index"}</p>
-              <pre className="body">{typeof res.context === "string" ? res.context : JSON.stringify(res.context, null, 1)}</pre>
-            </>
-          )}
-          {c.meta && Object.keys(c.meta).length > 0 && (
-            <>
-              <p className="sect">META</p>
-              <pre className="body">{JSON.stringify(c.meta, null, 1)}</pre>
-            </>
-          )}
+          <p className="muted mono small"><Src s={c.source} /> {c.timestamp ? `${c.timestamp.slice(0, 10)} ${c.timestamp.slice(11, 16)}` : ""}</p>
+          <DetailBody chunk={c} context={res.context} contextSource={res.context_source}
+            onOpen={(nid) => { history.pushState(null, "", `#w=x:${encodeURIComponent(nid)}`); dispatchEvent(new PopStateEvent("popstate")); }} />
         </>
       )}
     </Sheet>
@@ -148,18 +144,12 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         <button className={`chip ${sel.size === SOURCES.length ? "on" : ""}`} onClick={all}>all</button>
         {SOURCES.map((s) => (
           <button key={s} className={`chip ${sel.has(s) ? "on" : ""}`}
-            style={sel.has(s) ? { color: COLOR[s] } : undefined} onClick={() => toggle(s)}>{s}</button>
+            style={sel.has(s) ? { color: color(s) } : undefined} onClick={() => toggle(s)}>{s}</button>
         ))}
       </div>
       {status && <p className="muted mono small">{status}</p>}
       {hits?.length === 0 && <p className="muted">nothing</p>}
-      {hits?.map((r) => (
-        <div key={r.id} className="lrow">
-          <Src s={r.source} />
-          <button className="rowbtn grow" onClick={() => onOpen(r.id)}>{firstLine(r.text)}</button>
-          <span className="muted mono small">{r.day} · {r.score.toFixed(3)}</span>
-        </div>
-      ))}
+      {hits?.map((r) => <Row key={r.id} c={r} right={r.score.toFixed(3)} onOpen={onOpen} />)}
     </Sheet>
   );
 }
@@ -277,13 +267,7 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
           {offset + res.count < res.total && <> · <button className="lnk" onClick={() => void run(offset + LIMIT)}>next ›</button></>}
         </p>
       )}
-      {res?.results?.map((r: any) => (
-        <div key={r.id} className="lrow">
-          <span className="mono time">{r.timestamp ? r.timestamp.slice(11, 16) : "—"}</span>
-          <Src s={r.source} />
-          <button className="rowbtn grow" onClick={() => onOpen(r.id)}>{firstLine(r.text)}</button>
-        </div>
-      ))}
+      {res?.results?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
     </Sheet>
   );
 }
