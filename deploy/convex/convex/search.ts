@@ -58,6 +58,7 @@ export const search = action({
     let t = Date.now();
     const { embedding } = await embed({ model: queryModel, value: QUERY_PROMPT + a.query });
     const embedMs = Date.now() - t; t = Date.now();
+    console.log(`search embed ${embedMs}ms len=${a.query.length}`);
 
     const perSource = await Promise.all(sources.map(async (ns) => {
       const { results, entries } = await rag.search(ctx, {
@@ -113,12 +114,13 @@ export const search = action({
 });
 
 /* Cron target (see crons.ts). Logs the round-trip so the dashboard shows
-   whether the endpoint is staying warm. */
+   the embedding endpoint's latency distribution over time. */
 export const warmEmbed = internalAction({
   args: {},
   handler: async (): Promise<number> => {
     const t = Date.now();
-    await embed({ model: queryModel, value: "warm" });
+    // A novel string each time, so a response cache can't mask a slow model.
+    await embed({ model: queryModel, value: `warm ${Date.now()}` });
     const ms = Date.now() - t;
     console.log(`warmEmbed ${ms}ms`);
     return ms;
