@@ -76,7 +76,7 @@ aws lambda create-function --function-name history-rag \
   --runtime python3.12 --architectures x86_64 --handler app.handler \
   --zip-file fileb://history-rag-lambda.zip \
   --role "arn:aws:iam::$ACCOUNT:role/history-rag-lambda" \
-  --memory-size 1024 --timeout 60 --ephemeral-storage Size=1024 \
+  --memory-size 2048 --timeout 60 --ephemeral-storage Size=3072 \
   --region "$REGION" --environment "Variables={
     CLAUDE_RAG_SYNC_BUCKET=$BUCKET,
     CLAUDE_RAG_URL_SECRET=$SECRET,
@@ -268,6 +268,22 @@ key itself. Env updates recycle warm containers, so old values die
 immediately; after a URL rotation, update the claude.ai connector and
 re-run `/login?token=<new>` on each device — the auth cookie holds the
 secret, so rotation invalidates it everywhere at once.
+
+## Sizing
+
+The index is downloaded whole into the function's scratch disk, and a
+refresh writes the new copy beside the old one, so ephemeral storage
+must be > 2× the S3 object; memory must hold sqlite-vec's working set.
+At 1.22 GB (2026-08-29) the original 1 GB / 1 GB failed every request
+with `No space left on device`; now 3 GB / 2 GB. Check the S3 object
+size against `EphemeralStorage` when the index grows:
+
+```sh
+~/.claude/rag-venv/bin/python -c "import boto3; c = boto3.client('lambda', region_name='us-west-2'); \
+  print(c.get_function_configuration(FunctionName='history-rag')['EphemeralStorage'])"
+~/.claude/rag-venv/bin/python -c "import boto3; c = boto3.client('lambda', region_name='us-west-2'); \
+  c.update_function_configuration(FunctionName='history-rag', EphemeralStorage={'Size': 3072}, MemorySize=2048)"
+```
 
 ## Runbook
 - **Staleness:** Lambda re-checks the S3 ETag at most every 5 min
