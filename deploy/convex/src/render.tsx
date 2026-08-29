@@ -49,13 +49,13 @@ export function cleanHtml(t: string) {
   return t
     .replace(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, label) =>
       stripTags(label) && stripTags(label) !== href ? `${stripTags(label)} ${href}` : href)
-    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, "\n")
+    .replace(/<br\s*\/?>|<\/?p[\s>]|<\/div>|<\/li>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
     .replace(/[-:~]{8,}/g, "\n")
     .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 }
-const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g;
+const URL_RE = /(https?:\/\/[^\s<>"')\]]*[^\s<>"')\].,;:!?])/g;
 /* Text with URLs as links; the only safe markup we render from content. */
 export function Linkify({ text }: { text: string }) {
   const parts = text.split(URL_RE);
