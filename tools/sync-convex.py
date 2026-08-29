@@ -110,7 +110,7 @@ def prev_at(state, source: str) -> str:
     return row[0][:16] if row and row[0] else "?"
 
 def open_state(path: str):
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=600)
     db.executescript("""
         CREATE TABLE IF NOT EXISTS pushed(
             id TEXT PRIMARY KEY, source TEXT, hash TEXT, entry_id TEXT);
@@ -228,7 +228,10 @@ def main(argv=None) -> dict:
     if not os.path.exists(config.DB_PATH):
         return {"action": "skipped", "reason": "no index"}
     import sqlite_vec
-    index_db = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
+    # The indexer (refresh chain) writes to this DB under a rollback
+    # journal, which blocks readers for the duration; wait it out.
+    index_db = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True,
+                               timeout=600)
     index_db.enable_load_extension(True)
     sqlite_vec.load(index_db)
     sources = ([a.source] if a.source else config.CONVEX_SOURCES
