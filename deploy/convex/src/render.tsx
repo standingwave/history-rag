@@ -51,6 +51,12 @@ function claudeTitle(t: string) {
   const body = t.replace(/<[a-z-]+>[^<\n]{0,40}<\/[a-z-]+>/g, "");
   return first(stripTags(body), 120) || "(empty turn)";
 }
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+export function shortDate(iso?: string) {
+  if (!iso) return "";
+  const [, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return m && d ? `${MON[m - 1]} ${d}` : iso;
+}
 function plural(n: number, w: string) { return `${n} ${w}${n === 1 ? "" : "s"}`; }
 
 /* "Calendar event on 2026-06-16 (Monday) 12:45–13:45: TITLE — with A, B
@@ -82,7 +88,7 @@ export function describe(c: Chunk): Summary {
   switch (c.source) {
     case "tasks":
       return { title: first(c.text).replace(/^Task: /, ""),
-               sub: [m.done ? "done" : "open", m.section, m.days > 1 ? `carried ${m.days}d` : ""].filter(Boolean).join(" · "), when };
+               sub: [m.done ? "done" : "open", m.section, m.days > 1 && m.first_seen ? `since ${shortDate(m.first_seen)}` : ""].filter(Boolean).join(" · "), when };
     case "obsidian": {
       const ls = lines(c.text);
       const title = [shortPath(m.path ?? c.location), m.heading].filter(Boolean).join(" › ");

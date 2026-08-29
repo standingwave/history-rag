@@ -6,6 +6,7 @@ import { useEffect, useState, type JSX } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { SearchSheet, AskSheet, BrowseSheet, Detail } from "./Archive";
+import { shortDate } from "./render";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -130,14 +131,14 @@ function TaskRow({ t, compact, onToggle }: { t: Item; compact?: boolean; onToggl
           : <span className="glyph">{glyph}</span>}
         <span className="ttext" onClick={() => !compact && setOpen(!open)}>{title(t)}</span>
         <span className="muted mono small">
-          {subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : t.meta.days > 1 ? `carried ${t.meta.days}d` : ""}
+          {subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : t.meta.days > 1 && t.meta.first_seen ? `since ${shortDate(t.meta.first_seen)}` : ""}
         </span>
       </div>
       {open && !compact && (
         <div className="tdetail">
           {subs.map((s, i) => <div key={i} className={s.done ? "done" : ""}>{s.done ? "●" : "○"} {s.text}</div>)}
           {(t.meta.attachments ?? []).map((a: string) => <div key={a} className="muted">📎 {a}</div>)}
-          {t.meta.days > 1 && <div className="muted">carried since {t.meta.first_seen}</div>}
+          {t.meta.days > 1 && <div className="muted">on the list since {shortDate(t.meta.first_seen)} · {t.meta.days} days</div>}
           <a href={`obsidian://open?vault=${encodeURIComponent(t.meta.vault)}&file=${t.day}`}>open in Obsidian ↗</a>
         </div>
       )}
