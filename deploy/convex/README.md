@@ -2,11 +2,10 @@
 
 The one UI (`wip/SPEC-convex-app.md`): the Today dashboard with task
 writes over a Convex replica of `tasks`, `obsidian`, `calendar`, plus
-Search / Ask / Browse over the whole archive — proxied to the Lambda in
-stage 1, native in stage 3. Grew out of `wip/SPEC-convex-spike.md`.
+Search / Ask / Browse over the whole archive, all native Convex. Grew out of `wip/SPEC-convex-spike.md`.
 
 ```
-convex/          backend: schema, RAG instance, sync (internal), search, today, archive (proxy), auth, crons
+convex/          backend: schema, RAG instance, sync (internal), search, archive (window/expand), ask, today, auth, crons
 src/             React + Vite client: sign-in, widget grid, tasks sheet, Search/Ask/Browse sheets, reading view
 tools/sync-convex.py      (repo root) push changed chunks + vectors from SQLite
 tools/convex-applier.py   (repo root) drain phone toggles into the vault
@@ -51,16 +50,15 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
    tools, and the launchd applier all read it from there; an exported
    `CONVEX_DEPLOY_KEY` in the shell takes precedence if set.
 
-6. **Archive proxy (stage 1).** The Lambda's function URL and URL secret,
-   so `convex/archive.ts` can reach every source until stage 3:
+6. **Ask.** The same presets JSON the Lambda takes, plus the key each
+   preset's `key_env` names (copy both from the Lambda's env with boto3,
+   as for the HF token):
    ```sh
-   npx convex env set LAMBDA_URL https://<id>.lambda-url.us-west-2.on.aws
-   npx convex env set LAMBDA_SECRET "$(~/.claude/rag-venv/bin/python -c "import boto3; \
-     print(boto3.client('lambda', region_name='us-west-2').get_function_configuration(\
-     FunctionName='history-rag')['Environment']['Variables']['CLAUDE_RAG_URL_SECRET'])")"
+   npx convex env set ASK_MODELS '<json>'
+   npx convex env set OPENROUTER_API_KEY "<key>"
    ```
-   The Lambda must be on a build that has `/api/search|window|expand`
-   (deploy/lambda/README.md, "Deploys").
+   Search, Browse, the reading view, and Ask are all native now; the
+   `LAMBDA_URL`/`LAMBDA_SECRET` proxy from stage 1 is gone.
 
 7. **Hosting.** `@convex-dev/static-hosting` serves `dist/` from
    `https://<deployment>.convex.site` — same origin as the auth routes,

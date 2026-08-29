@@ -3,7 +3,7 @@
    2026-08-29); Ask, Browse, and expand still go through the archive proxy
    until they're native too. */
 import { useEffect, useState, type ReactNode } from "react";
-import { useAction } from "convex/react";
+import { useAction, useConvex, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { localDay } from "./Today";
 import { describe, color, DetailBody, type Chunk } from "./render";
@@ -32,6 +32,20 @@ export function Row({ c, right, onOpen }: { c: Chunk; right?: string; onOpen: (i
   );
 }
 
+/* A date input that says what it is when empty: label, calendar glyph, and
+   the chosen date (or "any"); the native picker sits invisibly on top so a
+   tap still opens it. */
+export function DateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="datef">
+      <span className="dlab">{label}</span>
+      <span className={`dval ${value ? "" : "muted"}`}>{value || "any"}</span>
+      <span className="dglyph" aria-hidden>📅</span>
+      <input type="date" value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
 function Sheet({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
   return (
     <section>
@@ -45,18 +59,11 @@ function Sheet({ title, onBack, children }: { title: string; onBack: () => void;
 /* ── reading view ─────────────────────────────────────────────────────── */
 
 export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
-  const expand = useAction(api.archive.expand);
-  const [res, setRes] = useState<any>(null);
-  const [err, setErr] = useState("");
-  useEffect(() => {
-    setRes(null); setErr("");
-    expand({ id, context: 5 }).then(setRes).catch((e) => setErr(String(e)));
-  }, [id]);
+  const res = useQuery(api.archive.expand, { id, context: 5 });
   const c = res?.chunk;
   return (
     <Sheet title="Detail" onBack={onBack}>
-      {err && <p className="err">{err}</p>}
-      {!res && !err && <p className="muted">…</p>}
+      {res === undefined && <p className="muted">…</p>}
       {res?.error && <p className="err">{res.error}</p>}
       {c && (
         <>
@@ -113,9 +120,9 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         <button className="primary" disabled={busy || !q}>go</button>
       </form>
       <div className="frow">
-        <input type="date" value={since} onChange={(e) => setSince(e.target.value)} />
-        <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
-        <input type="number" min={1} max={50} value={k} onChange={(e) => setK(Number(e.target.value) || 10)} />
+        <DateField label="from" value={since} onChange={setSince} />
+        <DateField label="to" value={until} onChange={setUntil} />
+        <input type="number" min={1} max={50} value={k} onChange={(e) => setK(Number(e.target.value) || 10)} aria-label="results" />
       </div>
       <div className="chips">
         <button className={`chip ${sel.size === SOURCES.length ? "on" : ""}`} onClick={all}>all</button>
@@ -134,15 +141,14 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 /* ── ask ──────────────────────────────────────────────────────────────── */
 
 export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
-  const ask = useAction(api.archive.ask);
-  const config = useAction(api.archive.config);
-  const [models, setModels] = useState<any[]>([]);
+  const ask = useAction(api.ask.ask);
+  const cfg = useQuery(api.archive.config, {});
+  const models: any[] = cfg?.models ?? [];
   const [model, setModel] = useState("");
   const [q, setQ] = useState("");
   const [strict, setStrict] = useState(false);
   const [res, setRes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { config({}).then((c) => setModels(c.models ?? [])).catch(() => setModels([])); }, []);
 
   const run = async () => {
     setBusy(true); setRes(null);
@@ -172,7 +178,7 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
         </select>
         <label><input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} /> sources required</label>
       </div>
-      {!models.length && <p className="muted small">ask isn't configured on the archive</p>}
+      {cfg && !models.length && <p className="muted small">ask isn't configured (ASK_MODELS)</p>}
       {busy && <p className="muted">thinking with {cur?.name}…</p>}
       {res?.error && <p className="err">{res.error}</p>}
       {res?.answer && (
@@ -192,27 +198,30 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
 /* ── browse ───────────────────────────────────────────────────────────── */
 
 export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
-  const list = useAction(api.archive.listWindow);
+  const convex = useConvex();
   const today = localDay();
   const [since, setSince] = useState(today);
   const [until, setUntil] = useState(today);
   const [source, setSource] = useState("");
   const [summaries, setSummaries] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [res, setRes] = useState<any>(null);
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const LIMIT = 50;
 
-  const run = async (off = 0) => {
-    setBusy(true);
+  const run = async (append = false) => {
+    setBusy(true); setErr("");
     try {
-      setRes(await list({ since: since || undefined, until: until || undefined,
-        source: source || undefined, summaries, limit: LIMIT, offset: off }));
-      setOffset(off);
-    } catch (e) { alert(String(e)); }
+      const r = await convex.query(api.archive.window, {
+        since: since || undefined, until: until || undefined, source: source || undefined,
+        summaries, limit: LIMIT, cursor: append ? cursor : null });
+      setRows((old) => (append && old ? [...old, ...r.results] : r.results));
+      setCursor(r.cursor);
+    } catch (e) { setErr(String(e)); }
     finally { setBusy(false); }
   };
-  useEffect(() => { void run(0); }, []);
+  useEffect(() => { void run(); }, []);
 
   const shift = (days: number) => {
     const s = new Date(since + "T12:00"); s.setDate(s.getDate() + days);
@@ -222,9 +231,9 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 
   return (
     <Sheet title="Browse" onBack={onBack}>
-      <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(0); }}>
-        <input type="date" value={since} onChange={(e) => setSince(e.target.value)} />
-        <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
+      <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
+        <DateField label="from" value={since} onChange={setSince} />
+        <DateField label="to" value={until} onChange={setUntil} />
         <button className="primary" disabled={busy}>go</button>
       </form>
       <div className="frow">
@@ -236,15 +245,11 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         </select>
         <label><input type="checkbox" checked={summaries} onChange={(e) => setSummaries(e.target.checked)} /> summaries</label>
       </div>
-      {res?.error && <p className="err">{res.error}</p>}
-      {res && !res.error && (
-        <p className="muted mono small">
-          {offset + 1}–{offset + res.count} of {res.total}
-          {offset > 0 && <> · <button className="lnk" onClick={() => void run(Math.max(0, offset - LIMIT))}>‹ prev</button></>}
-          {offset + res.count < res.total && <> · <button className="lnk" onClick={() => void run(offset + LIMIT)}>next ›</button></>}
-        </p>
-      )}
-      {res?.results?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
+      {err && <p className="err">{err}</p>}
+      {rows && <p className="muted mono small">{rows.length} shown{cursor ? " · more below" : rows.length ? " · end" : ""}</p>}
+      {rows?.length === 0 && <p className="muted">nothing</p>}
+      {rows?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
+      {cursor && <p><button className="chip" disabled={busy} onClick={() => void run(true)}>more ›</button></p>}
     </Sheet>
   );
 }

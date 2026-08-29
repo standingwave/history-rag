@@ -54,11 +54,11 @@ export function monthsBetween(since?: string, until?: string): string[] {
   return out;
 }
 
-type SearchArgs = {
+export type SearchArgs = {
   query: string; sources?: string[]; since?: string; until?: string; limit?: number;
 };
 
-async function runSearch(ctx: ActionCtx, a: SearchArgs): Promise<SearchResult> {
+export async function runSearch(ctx: ActionCtx, a: SearchArgs): Promise<SearchResult> {
     const sources = a.sources?.length ? a.sources : ALL_SOURCES;
     const limit = Math.min(a.limit ?? 10, 50);
     const days = daysBetween(a.since, a.until);

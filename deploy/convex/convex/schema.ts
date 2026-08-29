@@ -26,7 +26,9 @@ export default defineSchema({
   })
     .index("by_chunkId", ["chunkId"])
     .index("by_source_day", ["source", "day"])
-    .index("by_source_timestamp", ["source", "timestamp"]),
+    .index("by_source_timestamp", ["source", "timestamp"])
+    .index("by_day", ["day", "timestamp"])                 // cross-source windows
+    .index("by_source_location", ["source", "location"]),  // a note's sections, a repo
   taskIntents: defineTable({
     chunkId: v.string(),
     day: v.string(),
