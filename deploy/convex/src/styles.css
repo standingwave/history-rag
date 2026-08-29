@@ -33,7 +33,9 @@ a { color: #8ab4f8; text-decoration: none; }
 .tdetail .done { color: #94949e; }
 .sect { font-size: .66rem; letter-spacing: .12em; color: #94949e; margin: 14px 0 4px; }
 
-.lrow { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #1e1e23; font-size: .92rem; }
+.lrow { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid #1e1e23; font-size: .92rem; min-width: 0; }
+.lrow > * { overflow-wrap: anywhere; }
+.lrow .grow { flex: 1; min-width: 0; }
 .time { color: #94949e; min-width: 3.4em; }
 .frow { display: flex; gap: 8px; margin-bottom: 8px; }
 .frow input { flex: 1; min-width: 0; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }

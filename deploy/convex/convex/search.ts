@@ -5,7 +5,8 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { rag, QUERY_PROMPT } from "./rag";
+import { embed } from "ai";
+import { rag, QUERY_PROMPT, queryModel } from "./rag";
 import { requireUserAction } from "./auth";
 import type { Doc } from "./_generated/dataModel";
 
@@ -15,6 +16,7 @@ export type SearchHit = {
 };
 export type SearchResult = {
   results: SearchHit[]; candidates: number; dropped: number; months: string[];
+  timing: { embedMs: number; searchMs: number; joinMs: number };
 };
 
 export const DEFAULT_SOURCES = ["tasks", "obsidian", "calendar"];
@@ -52,11 +54,15 @@ export const search = action({
     // Over-fetch when windowed: the month filter is coarser than the window.
     const perNs = filters.length ? limit * 3 : limit;
 
-    const found: { chunkId: string; score: number; source: string }[] = [];
-    for (const ns of sources) {
+    // Embed once; rag.search would otherwise call Mixedbread per namespace.
+    let t = Date.now();
+    const { embedding } = await embed({ model: queryModel, value: QUERY_PROMPT + a.query });
+    const embedMs = Date.now() - t; t = Date.now();
+
+    const perSource = await Promise.all(sources.map(async (ns) => {
       const { results, entries } = await rag.search(ctx, {
         namespace: ns,
-        query: QUERY_PROMPT + a.query,
+        query: embedding,
         limit: perNs,
         filters: filters.length ? filters : undefined,
       });
@@ -66,14 +72,19 @@ export const search = action({
         const ee = e as any;
         key.set(String(e.entryId), ee.key ?? ee.metadata?.chunkId ?? "");
       }
+      const out: { chunkId: string; score: number; source: string }[] = [];
       for (const r of results) {
         const chunkId = key.get(String(r.entryId));
-        if (chunkId) found.push({ chunkId, score: r.score, source: ns });
+        if (chunkId) out.push({ chunkId, score: r.score, source: ns });
       }
-    }
+      return out;
+    }));
+    const found = perSource.flat();
+    const searchMs = Date.now() - t; t = Date.now();
 
     const items: Doc<"items">[] = await ctx.runQuery(
       internal.sync.itemsByChunkIds, { chunkIds: found.map((f) => f.chunkId) });
+    const joinMs = Date.now() - t;
     const byId = new Map(items.map((i) => [i.chunkId, i]));
     let dropped = 0;
     const kept: SearchHit[] = [];
@@ -96,6 +107,7 @@ export const search = action({
       candidates: found.length,
       dropped,
       months,
+      timing: { embedMs, searchMs, joinMs },
     };
   },
 });

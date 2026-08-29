@@ -214,13 +214,14 @@ function SearchSheet({ onBack }: { onBack: () => void }) {
       {res && (
         <p className="muted mono small">
           {res.results.length} shown · {res.candidates} candidates · {res.dropped} dropped by window
-          {res.months.length ? ` · months ${res.months.join(",")}` : ""} · {ms}ms
+          {res.months.length ? ` · months ${res.months.join(",")}` : ""}
+          {" · "}{ms}ms (embed {res.timing.embedMs} · search {res.timing.searchMs} · join {res.timing.joinMs})
         </p>
       )}
       {res?.results.map((r: any) => (
         <div key={r.id} className="lrow">
           <span className="mono time" style={{ color: r.source === "tasks" ? "#facc15" : r.source === "calendar" ? "#f472b6" : "#a78bfa" }}>{r.source}</span>
-          <span>{r.text.split("\n", 1)[0].slice(0, 120)}</span>
+          <span className="grow">{r.text.split("\n", 1)[0].slice(0, 120)}</span>
           <span className="muted mono small"> {r.day} · {r.score.toFixed(3)}</span>
         </div>
       ))}

@@ -22,10 +22,12 @@ const mixedbread = createOpenAICompatible({
   apiKey: process.env.MXBAI_API_KEY ?? "",
 });
 
+export const queryModel = mixedbread.textEmbeddingModel(
+  "mixedbread-ai/mxbai-embed-large-v1",
+);
+
 export const rag = new RAG<Filters>(components.rag, {
-  textEmbeddingModel: mixedbread.textEmbeddingModel(
-    "mixedbread-ai/mxbai-embed-large-v1",
-  ),
+  textEmbeddingModel: queryModel,
   embeddingDimension: 1024,
   filterNames: [...FILTER_NAMES],
 });
