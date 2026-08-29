@@ -16,10 +16,11 @@ export type Filters = {
 };
 export const FILTER_NAMES = ["day", "month", "locpfx", "done"] as const;
 
-/* Any OpenAI-compatible host of mxbai-embed-large-v1. Mixedbread's own API
-   stalled for 18–41 s intermittently from Convex (2026-08-28), so the host
-   is swappable by env: EMBED_BASE_URL, EMBED_API_KEY, EMBED_MODEL. Vectors
-   must match the local model — run tools/eval-embed-parity.py on a new host. */
+/* Any OpenAI-compatible host of mxbai-embed-large-v1, swappable by env:
+   EMBED_BASE_URL, EMBED_API_KEY, EMBED_MODEL. Mixedbread's API goes cold
+   after ~1 min idle (see crons.ts); the only other host found serving this
+   model is HF Inference, whose API isn't OpenAI-shaped. Vectors must match
+   the local model — run tools/eval-embed-parity.py on any new host. */
 const provider = createOpenAICompatible({
   name: "embed",
   baseURL: process.env.EMBED_BASE_URL ?? "https://api.mixedbread.com/v1",
