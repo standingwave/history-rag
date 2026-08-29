@@ -142,12 +142,12 @@ export const recordRun = internalMutation({
 
 /* Diagnostic: what the RAG component holds per namespace and status, and
    how many `items` rows — for reconciling the dashboard's storage figures. */
-export const itemsCount = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    let n = 0;
-    for await (const _ of ctx.db.query("items")) n++;
-    return n;
+export const itemsPage = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, { cursor }) => {
+    const page = await ctx.db.query("items")
+      .paginate({ cursor, numItems: 2000 });
+    return { n: page.page.length, cursor: page.continueCursor, done: page.isDone };
   },
 });
 
@@ -167,7 +167,15 @@ export const census = internalAction({
         cursor = page.continueCursor;
       }
     }
-    out.items = await ctx.runQuery(internal.sync.itemsCount, {});
+    let items = 0;
+    for (let cursor: string | null = null; ;) {
+      const p: { n: number; cursor: string; done: boolean } =
+        await ctx.runQuery(internal.sync.itemsPage, { cursor });
+      items += p.n;
+      if (p.done) break;
+      cursor = p.cursor;
+    }
+    out.items = items;
     return out;
   },
 });
