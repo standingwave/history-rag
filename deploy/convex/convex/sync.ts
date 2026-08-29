@@ -29,8 +29,8 @@ const itemArg = v.object({
 export const upsert = internalAction({
   args: { items: v.array(itemArg) },
   handler: async (ctx, { items }): Promise<{ chunkId: string; entryId: string }[]> => {
-    const rows = [];
-    for (const it of items) {
+    // rag.add is a round-trip per chunk; sequential it ran ~8 chunks/s.
+    const rows = await Promise.all(items.map(async (it) => {
       const { entryId } = await rag.add(ctx, {
         namespace: it.source,
         key: it.chunkId,
@@ -41,8 +41,8 @@ export const upsert = internalAction({
         chunks: [{ text: it.text, embedding: it.embedding }],
       });
       const { embedding: _e, filterValues: _f, ...rest } = it;
-      rows.push({ ...rest, entryId: String(entryId) });
-    }
+      return { ...rest, entryId: String(entryId) };
+    }));
     await ctx.runMutation(internal.sync.putItems, { items: rows });
     return rows.map((r) => ({ chunkId: r.chunkId, entryId: r.entryId }));
   },

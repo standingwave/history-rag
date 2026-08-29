@@ -31,17 +31,19 @@ tools/convex-applier.py   (repo root) drain phone toggles into the vault
    First app launch: "create the account" with that email; every launch
    after: sign in. Any other address is refused server-side.
 
-4. **Query embeddings.** Same key the Lambda uses, and the same query
-   prompt as `[core] mxbai_query_prompt` (default empty — don't set it
-   unless the Mac has it):
-   The key already lives in the Lambda's env, so copy it across without
-   it touching a clipboard or terminal:
+4. **Query embeddings.** Hugging Face Inference serves the index's model
+   (parity with local Ollama: cos 1.000, top-10 overlap 99%). Create a
+   fine-grained token with the "Inference Providers" permission at
+   https://huggingface.co/settings/tokens, then:
    ```sh
-   npx convex env set MXBAI_API_KEY "$(~/.claude/rag-venv/bin/python -c "import boto3; \
-     print(boto3.client('lambda', region_name='us-west-2').get_function_configuration(\
-     FunctionName='history-rag')['Environment']['Variables']['MXBAI_API_KEY'])")"
-   npx convex env get MXBAI_API_KEY | awk '{print length($0)}'   # 32
+   npx convex env set HF_TOKEN "<token>"
+   npx convex env set EMBED_PROVIDER hf
    ```
+   Mixedbread's API (`MXBAI_API_KEY`, the default provider) works too but
+   goes cold after ~1 min idle and takes 8–40 s to answer; a cron
+   (`convex/crons.ts`) embeds every 3 min to keep whichever provider is
+   active warm. `MXBAI_QUERY_PROMPT` mirrors `[core] mxbai_query_prompt`
+   (default empty — don't set it unless the Mac has it).
 
 5. **Deploy key for the Mac.** Dashboard → Settings → Deploy keys →
    generate a key for the dev deployment and add it to `.env.local`
