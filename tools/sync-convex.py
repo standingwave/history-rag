@@ -227,11 +227,20 @@ def main(argv=None) -> dict:
         return {"action": "skipped", "reason": "convex package not installed"}
     if not os.path.exists(config.DB_PATH):
         return {"action": "skipped", "reason": "no index"}
-    sources = [a.source] if a.source else config.CONVEX_SOURCES
     import sqlite_vec
     index_db = sqlite3.connect(f"file:{config.DB_PATH}?mode=ro", uri=True)
     index_db.enable_load_extension(True)
     sqlite_vec.load(index_db)
+    sources = ([a.source] if a.source else config.CONVEX_SOURCES
+               or [r[0] for r in index_db.execute(
+                   "SELECT DISTINCT source FROM chunks ORDER BY source")])
+    # One pusher at a time: a full push takes an hour and the refresh
+    # chain fires every 30 min against the same state DB.
+    lock = open(config.CONVEX_STATE_DB + ".lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return {"action": "skipped", "reason": "another sync is running"}
     state = open_state(config.CONVEX_STATE_DB)
     client = None if a.dry_run else _client()
     results, moved = [], False

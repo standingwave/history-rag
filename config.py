@@ -148,8 +148,8 @@ CONVEX_URL = str(get("convex", "url", "CLAUDE_RAG_CONVEX_URL", "") or "")
 CONVEX_DEPLOY_KEY_ENV = str(get("convex", "deploy_key_env",
                                "CLAUDE_RAG_CONVEX_DEPLOY_KEY_ENV",
                                "CONVEX_DEPLOY_KEY"))
-_cs = get("convex", "sources", "CLAUDE_RAG_CONVEX_SOURCES",
-          ["tasks", "obsidian", "calendar"])
+# Sources to replicate; empty (the default) means every source in the index.
+_cs = get("convex", "sources", "CLAUDE_RAG_CONVEX_SOURCES", [])
 CONVEX_SOURCES = [s for s in (_cs.split(",") if isinstance(_cs, str) else _cs)
                   if str(s).strip()]
 CONVEX_BATCH = int(get("convex", "batch", "CLAUDE_RAG_CONVEX_BATCH", 60))

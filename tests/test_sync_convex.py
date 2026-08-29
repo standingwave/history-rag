@@ -129,6 +129,22 @@ def test_dry_run_and_source_flag(cfg, monkeypatch):
     assert r["action"] == "dry-run"
     assert r["sources"] == [{"source": "obsidian", "chunks": 1, "upsert": 1, "remove": 0}]
 
+def test_empty_sources_means_every_source_in_the_index(cfg, monkeypatch):
+    _index(cfg / "ix.db", ROWS)
+    monkeypatch.setattr(sc.config, "CONVEX_SOURCES", [])
+    r = sc.main(["--dry-run"])
+    assert [x["source"] for x in r["sources"]] == ["obsidian", "tasks"]
+
+
+def test_concurrent_sync_is_skipped(cfg, monkeypatch):
+    import fcntl
+    _index(cfg / "ix.db", ROWS)
+    held = open(str(cfg / "state.db") + ".lock", "w")
+    fcntl.flock(held, fcntl.LOCK_EX)
+    assert sc.main(["--dry-run"]) == {"action": "skipped", "reason": "another sync is running"}
+    held.close()
+
+
 def test_unconfigured_is_a_noop(monkeypatch):
     monkeypatch.setattr(sc.config, "CONVEX_URL", "")
     assert sc.main([])["action"] == "skipped"
