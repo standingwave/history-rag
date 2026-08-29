@@ -14,7 +14,7 @@ via that variant (zip deploy); all-fail means bundling the GGUF (container).
 Read-only: the production DB is only queried, never written.
 
 Usage:
-  NOMIC_API_KEY=... | MXBAI_API_KEY=...  tools/eval-embed-parity.py \
+  NOMIC_API_KEY=... | MXBAI_API_KEY=... [HF_TOKEN=...]  tools/eval-embed-parity.py \
       [--queries F] [--k 10]
 """
 import argparse, math, os, sqlite3, sys, time
@@ -23,6 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests, sqlite_vec
 import config
 
+HF_INFERENCE_URL = ("https://router.huggingface.co/hf-inference/models/"
+                    "mixedbread-ai/mxbai-embed-large-v1/pipeline/feature-extraction")
 MXBAI_RETRIEVAL_PROMPT = ("Represent this sentence for searching relevant "
                           "passages: ")
 PASS_COSINE, PASS_OVERLAP = 0.99, 0.9
@@ -55,8 +57,16 @@ def _variants():
                 "model": config.MXBAI_API_MODEL, "input": [prompt + q],
                 "dimensions": config.DIM, "normalized": True,
                 "encoding_format": "float"})["data"][0]["embedding"]
-        return [("raw", mxbai("")),
-                ("retrieval-prompt", mxbai(MXBAI_RETRIEVAL_PROMPT))]
+        out = [("raw", mxbai("")),
+               ("retrieval-prompt", mxbai(MXBAI_RETRIEVAL_PROMPT))]
+        # Hugging Face Inference serves the same weights; opt in with HF_TOKEN.
+        hf = os.environ.get("HF_TOKEN")
+        if hf:
+            def hf_embed(q):
+                v = _post(HF_INFERENCE_URL, hf, {"inputs": q})
+                return v[0] if isinstance(v[0], list) else v
+            out.append(("hf-inference", hf_embed))
+        return out
     sys.exit(f"no hosted API known for model {config.EMBED_MODEL!r}; "
              f"the GGUF-in-container path is the only remote option.")
 

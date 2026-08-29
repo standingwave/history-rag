@@ -7,6 +7,7 @@
 import { components } from "./_generated/api";
 import { RAG } from "@convex-dev/rag";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { embed } from "ai";
 
 export type Filters = {
   day: string;      // local YYYY-MM-DD
@@ -16,20 +17,41 @@ export type Filters = {
 };
 export const FILTER_NAMES = ["day", "month", "locpfx", "done"] as const;
 
-/* Any OpenAI-compatible host of mxbai-embed-large-v1, swappable by env:
-   EMBED_BASE_URL, EMBED_API_KEY, EMBED_MODEL. Mixedbread's API goes cold
-   after ~1 min idle (see crons.ts); the only other host found serving this
-   model is HF Inference, whose API isn't OpenAI-shaped. Vectors must match
-   the local model — run tools/eval-embed-parity.py on any new host. */
-const provider = createOpenAICompatible({
-  name: "embed",
-  baseURL: process.env.EMBED_BASE_URL ?? "https://api.mixedbread.com/v1",
-  apiKey: process.env.EMBED_API_KEY ?? process.env.MXBAI_API_KEY ?? "",
+/* Query embedding host. Mixedbread's API (the default; same call the
+   Lambda makes) goes cold after ~1 min idle — see crons.ts. Set
+   EMBED_PROVIDER=hf plus HF_TOKEN to use Hugging Face Inference instead,
+   which serves the same model through its feature-extraction API. Vectors
+   must match the local model — check parity on any new host. */
+const mixedbread = createOpenAICompatible({
+  name: "mixedbread",
+  baseURL: "https://api.mixedbread.com/v1",
+  apiKey: process.env.MXBAI_API_KEY ?? "",
 });
-
-export const queryModel = provider.textEmbeddingModel(
-  process.env.EMBED_MODEL ?? "mixedbread-ai/mxbai-embed-large-v1",
+export const queryModel = mixedbread.textEmbeddingModel(
+  "mixedbread-ai/mxbai-embed-large-v1",
 );
+
+const HF_URL = "https://router.huggingface.co/hf-inference/models/"
+  + "mixedbread-ai/mxbai-embed-large-v1/pipeline/feature-extraction";
+
+async function embedHf(text: string): Promise<number[]> {
+  const r = await fetch(HF_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json",
+               Authorization: `Bearer ${process.env.HF_TOKEN ?? ""}` },
+    body: JSON.stringify({ inputs: text }),
+  });
+  if (!r.ok) throw new Error(`hf ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const v = await r.json();
+  return Array.isArray(v[0]) ? v[0] : v;
+}
+
+export const EMBED_PROVIDER = process.env.EMBED_PROVIDER ?? "mixedbread";
+
+export async function embedQuery(text: string): Promise<number[]> {
+  if (EMBED_PROVIDER === "hf") return embedHf(text);
+  return (await embed({ model: queryModel, value: text })).embedding;
+}
 
 export const rag = new RAG<Filters>(components.rag, {
   textEmbeddingModel: queryModel,

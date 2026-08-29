@@ -5,8 +5,7 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { embed } from "ai";
-import { rag, QUERY_PROMPT, queryModel } from "./rag";
+import { rag, QUERY_PROMPT, embedQuery, EMBED_PROVIDER } from "./rag";
 import { requireUserAction } from "./auth";
 import type { Doc } from "./_generated/dataModel";
 
@@ -56,9 +55,9 @@ export const search = action({
 
     // Embed once; rag.search would otherwise call Mixedbread per namespace.
     let t = Date.now();
-    const { embedding } = await embed({ model: queryModel, value: QUERY_PROMPT + a.query });
+    const embedding = await embedQuery(QUERY_PROMPT + a.query);
     const embedMs = Date.now() - t; t = Date.now();
-    console.log(`search embed ${embedMs}ms len=${a.query.length}`);
+    console.log(`search embed ${embedMs}ms ${EMBED_PROVIDER} len=${a.query.length}`);
 
     const perSource = await Promise.all(sources.map(async (ns) => {
       const { results, entries } = await rag.search(ctx, {
@@ -120,9 +119,9 @@ export const warmEmbed = internalAction({
   handler: async (): Promise<number> => {
     const t = Date.now();
     // A novel string each time, so a response cache can't mask a slow model.
-    await embed({ model: queryModel, value: `warm ${Date.now()}` });
+    await embedQuery(`warm ${Date.now()}`);
     const ms = Date.now() - t;
-    console.log(`warmEmbed ${ms}ms`);
+    console.log(`warmEmbed ${ms}ms ${EMBED_PROVIDER}`);
     return ms;
   },
 });
