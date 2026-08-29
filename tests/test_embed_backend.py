@@ -78,6 +78,31 @@ def test_mixedbread_backend_sends_api_shape(monkeypatch):
     assert len(vec) == config.DIM
 
 
+def test_hf_inference_backend_sends_api_shape(monkeypatch):
+    monkeypatch.setattr(config, "EMBED_BACKEND", "hf-inference")
+    monkeypatch.setattr(config, "HF_TOKEN", "sekret")
+    calls = {}
+
+    class _HfResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [[0.0] * config.DIM]        # array of arrays
+
+    def post(url, **kw):
+        calls["url"] = url
+        calls.update(kw)
+        return _HfResp()
+
+    monkeypatch.setattr(server.requests, "post", post)
+    vec = server._embed("hello")
+    assert calls["url"] == config.HF_INFERENCE_URL
+    assert calls["json"] == {"inputs": "hello"}
+    assert calls["headers"]["Authorization"] == "Bearer sekret"
+    assert len(vec) == config.DIM
+
+
 def test_unknown_backend_raises(capture_post, monkeypatch):
     monkeypatch.setattr(config, "EMBED_BACKEND", "bogus")
     with pytest.raises(ValueError, match="bogus"):

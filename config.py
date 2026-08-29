@@ -84,7 +84,10 @@ OLLAMA = str(get("core", "ollama", "CLAUDE_RAG_OLLAMA",
 # Query-time embedding backend: "ollama" (the default; everything above) or
 # a hosted API serving the same weights — for deployments with no Ollama
 # (deploy/lambda). "nomic-api" pairs with nomic-embed-text indexes,
-# "mixedbread-api" with mxbai-embed-large ones. Hosted runtimes may apply
+# "mixedbread-api" or "hf-inference" with mxbai-embed-large ones (Mixedbread
+# goes cold after ~1 min idle and takes 8–40 s to answer; Hugging Face
+# Inference serves the same weights at ~0.2 s warm, ~3.5 s after long
+# idle). Hosted runtimes may apply
 # prompt prefixes the local index never saw, so vector parity must be
 # verified (tools/eval-embed-parity.py) before pointing a real index at one.
 # Keys are env-only: secrets don't belong in the TOML.
@@ -103,6 +106,9 @@ MXBAI_API_MODEL = "mixedbread-ai/mxbai-embed-large-v1"
 MXBAI_QUERY_PROMPT = str(get("core", "mxbai_query_prompt",
                              "CLAUDE_RAG_MXBAI_QUERY_PROMPT", ""))
 MXBAI_API_KEY = os.environ.get("MXBAI_API_KEY", "")
+HF_INFERENCE_URL = ("https://router.huggingface.co/hf-inference/models/"
+                    "mixedbread-ai/mxbai-embed-large-v1/pipeline/feature-extraction")
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Optional cross-encoder rerank stage over search results (rerank.py):
 # "none" (off) or "flashrank" (local ONNX cross-encoder, no torch; models

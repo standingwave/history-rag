@@ -27,8 +27,9 @@ Required env:
   CLAUDE_RAG_SYNC_BUCKET   S3 bucket holding the index
   CLAUDE_RAG_URL_SECRET    random hex path segment gating all requests
   CLAUDE_RAG_EMBED_BACKEND embed backend matching the indexed model — no
-                           Ollama here: "mixedbread-api" or "nomic-api"
-  MXBAI_API_KEY            key for the above (or NOMIC_API_KEY)
+                           Ollama here: "hf-inference", "mixedbread-api",
+                           or "nomic-api"
+  HF_TOKEN                 key for the above (or MXBAI_API_KEY / NOMIC_API_KEY)
 Optional env:
   CLAUDE_RAG_SYNC_KEY      S3 object key       (default history-rag.db)
   CLAUDE_RAG_DB_FRESHNESS  seconds between S3 ETag checks (default 300)

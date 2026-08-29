@@ -82,8 +82,8 @@ aws lambda create-function --function-name history-rag \
     CLAUDE_RAG_URL_SECRET=$SECRET,
     CLAUDE_RAG_MODEL=<indexed model>,
     CLAUDE_RAG_DIM=<indexed dim>,
-    CLAUDE_RAG_EMBED_BACKEND=<mixedbread-api|nomic-api>,
-    MXBAI_API_KEY=<or NOMIC_API_KEY>}"
+    CLAUDE_RAG_EMBED_BACKEND=<hf-inference|mixedbread-api|nomic-api>,
+    HF_TOKEN=<or MXBAI_API_KEY / NOMIC_API_KEY>}"
 aws lambda put-function-concurrency --function-name history-rag \
   --reserved-concurrent-executions 2 --region "$REGION"
 aws lambda create-function-url-config --function-name history-rag \
@@ -252,7 +252,7 @@ transcripts.
 
 ```sh
 python3 set-env.py CLAUDE_RAG_URL_SECRET --random   # prints the new URL
-pbpaste | python3 set-env.py MXBAI_API_KEY -        # key via clipboard
+pbpaste | python3 set-env.py HF_TOKEN -             # key via clipboard
 ```
 
 Rotate on exposure (URL or key visible in a transcript, log, or screen

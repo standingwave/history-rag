@@ -73,13 +73,23 @@ def _embed(text: str):
                                 "encoding_format": "float"}, timeout=60)
         r.raise_for_status()
         return r.json()["data"][0]["embedding"]
+    if config.EMBED_BACKEND == "hf-inference":
+        r = requests.post(config.HF_INFERENCE_URL,
+                          headers={"Authorization":
+                                   f"Bearer {config.HF_TOKEN}"},
+                          json={"inputs": config.MXBAI_QUERY_PROMPT + text},
+                          timeout=60)
+        r.raise_for_status()
+        v = r.json()
+        return v[0] if isinstance(v[0], list) else v
     if config.EMBED_BACKEND == "ollama":
         r = requests.post(config.OLLAMA, json={"model": config.EMBED_MODEL,
                                                "input": text}, timeout=60)
         r.raise_for_status()
         return r.json()["embeddings"][0]
     raise ValueError(f"unknown embed backend {config.EMBED_BACKEND!r} "
-                     f"(want 'ollama', 'nomic-api', or 'mixedbread-api')")
+                     f"(want 'ollama', 'nomic-api', 'mixedbread-api', "
+                     f"or 'hf-inference')")
 
 def _bound_to_utc(bound: str, end_of_day: bool = False) -> str:
     """Normalize a since/until bound to a UTC ISO string for lexicographic
