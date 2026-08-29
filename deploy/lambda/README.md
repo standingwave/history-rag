@@ -156,6 +156,13 @@ Two thin clients ride the same endpoint (design: `wip/SPEC-direct-access.md`):
   without the cookie; old `/$SECRET/search?...` bookmarks redirect into
   the client and never execute anything by navigation.
 
+The same tools are available as plain JSON for the Convex app's archive
+proxy (`deploy/convex/convex/archive.ts`): `GET <url>/<secret>/api/search`,
+`/api/window`, `/api/expand` with the tool's parameters as query
+strings (snake_case; booleans as `1`). `POST /ask` and `GET /config`
+are unchanged.
+
+
 ## Ask mode
 
 The UI's Ask tab runs a model over the four tools in-process and renders

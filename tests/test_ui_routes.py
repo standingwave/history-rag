@@ -310,3 +310,40 @@ def test_mcp_paths_still_fall_through(monkeypatch):
 def test_unknown_subpaths_404_behind_the_gate():
     status, _, _ = _get("/s3cr3t/admin")
     assert status == 404
+
+
+def test_api_search_calls_the_tool_with_parsed_params(monkeypatch):
+    seen = {}
+
+    def fake_search(query, k=5, source="", location="", since="", until="",
+                    include_undated=False, max_distance=0.0):
+        seen.update(locals())
+        return json.dumps({"query": query, "count": 0, "results": []})
+
+    monkeypatch.setattr(app.server, "search_history", fake_search)
+    status, headers, body = _get("/s3cr3t/api/search",
+                                 "q=hoya&k=7&source=email&since=2026-08-01&max_distance=0.9")
+    assert status == 200 and headers["content-type"] == "application/json"
+    assert seen["query"] == "hoya" and seen["k"] == 7
+    assert seen["source"] == "email" and seen["since"] == "2026-08-01"
+    assert seen["max_distance"] == 0.9 and seen["include_undated"] is False
+    assert json.loads(body)["count"] == 0
+
+
+def test_api_window_and_expand(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(app.server, "list_window",
+                        lambda **kw: (seen.update(kw), json.dumps({"total": 1}))[1])
+    monkeypatch.setattr(app.server, "expand",
+                        lambda id, context=5: json.dumps({"chunk": {"id": id}, "n": context}))
+    status, _, body = _get("/s3cr3t/api/window", "since=2026-08-28&summaries=1&limit=20")
+    assert status == 200 and json.loads(body) == {"total": 1}
+    assert seen["since"] == "2026-08-28" and seen["summaries"] is True
+    assert seen["limit"] == 20 and seen["include_meta"] is False
+    status, _, body = _get("/s3cr3t/api/expand", "id=x&context=3")
+    assert json.loads(body) == {"chunk": {"id": "x"}, "n": 3}
+
+
+def test_api_unknown_tool_404s_and_needs_the_gate():
+    assert _get("/s3cr3t/api/nope")[0] == 404
+    assert _get("/api/search", "q=x")[0] == 404

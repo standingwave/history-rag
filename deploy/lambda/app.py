@@ -15,6 +15,12 @@ Routes (behind the gate):
   GET  /ui.js       the UI script
   GET  /config      ask presets the client may show (display fields only)
   POST /ask         {q, model?, strict?} -> ask.ask() JSON
+  GET  /api/search  search_history as JSON (q, k, source, location, since,
+                    until, max_distance) — the Convex app's archive proxy
+  GET  /api/window  list_window as JSON (since, until, source, location,
+                    limit, offset, include_undated, group_by, include_meta,
+                    summaries)
+  GET  /api/expand  expand as JSON (id, context)
   GET  /search?...  legacy server-rendered-page URLs -> redirect to /#...
   *    /mcp         the MCP endpoint (unchanged)
   GET  /login?token=<secret>   sets the auth cookie (outside the gate)
@@ -157,6 +163,29 @@ def _config() -> dict:
 _LEGACY_KEEP = ("q", "mode", "source", "since", "until", "view", "offset",
                 "model", "expand")
 
+def _api(tool: str, qs: dict):
+    """The MCP tools over plain GET, parsed JSON out — what the Convex app's
+    archive proxy calls (wip/SPEC-convex-app.md stage 1). Unknown -> None."""
+    p = lambda k, d="": qs.get(k, [d])[0]
+    flag = lambda k: p(k).lower() in ("1", "true", "yes")
+    if tool == "search":
+        return json.loads(server.search_history(
+            p("q"), k=int(p("k", "10") or 10), source=p("source"),
+            location=p("location"), since=p("since"), until=p("until"),
+            include_undated=flag("include_undated"),
+            max_distance=float(p("max_distance", "0") or 0)))
+    if tool == "window":
+        return json.loads(server.list_window(
+            since=p("since"), until=p("until"), source=p("source"),
+            location=p("location"), limit=int(p("limit", "50") or 50),
+            offset=int(p("offset", "0") or 0),
+            include_undated=flag("include_undated"), group_by=p("group_by"),
+            include_meta=flag("include_meta"), summaries=flag("summaries")))
+    if tool == "expand":
+        return json.loads(server.expand(p("id"),
+                                        context=int(p("context", "5") or 5)))
+    return None
+
 async def _handle(mount, sub, scope, receive, send):
     method = scope.get("method", "GET")
     if sub == "/" and method == "GET":
@@ -189,6 +218,13 @@ async def _handle(mount, sub, scope, receive, send):
         result = ask.ask(q, payload.get("model") or "",
                          strict=bool(payload.get("strict")))
         await _send_json(send, result)
+    elif sub.startswith("/api/") and method == "GET":
+        _refresh_db()
+        out = _api(sub[5:], _qs(scope))
+        if out is None:
+            await _send(send, 404, [])
+        else:
+            await _send_json(send, out)
     elif sub == "/search" and method == "GET":
         qs = _qs(scope)
         keep = {k: qs[k][0] for k in _LEGACY_KEEP if qs.get(k, [""])[0]}
