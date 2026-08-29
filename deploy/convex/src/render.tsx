@@ -43,6 +43,26 @@ function project(hash?: string) {
 function shortPath(p?: string) { return (p ?? "").replace(/\.md$/, ""); }
 function home(p?: string) { return (p ?? "").replace(/^\/Users\/[^/]+/, "~"); }
 function stripTags(t: string) { return t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
+/* Calendar notes and email bodies arrive as HTML fragments plus Google
+   Meet's "-::~:~::~" fences: keep anchor hrefs as text, drop the rest. */
+export function cleanHtml(t: string) {
+  return t
+    .replace(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, label) =>
+      stripTags(label) && stripTags(label) !== href ? `${stripTags(label)} ${href}` : href)
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/[-:~]{8,}/g, "\n")
+    .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+}
+const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g;
+/* Text with URLs as links; the only safe markup we render from content. */
+export function Linkify({ text }: { text: string }) {
+  const parts = text.split(URL_RE);
+  return <>{parts.map((p, i) => (i % 2
+    ? <a key={i} href={p} target="_blank" rel="noreferrer" className="link">{p.replace(/^https?:\/\//, "").slice(0, 60)}{p.length > 68 ? "…" : ""}</a>
+    : <span key={i}>{p}</span>))}</>;
+}
 /* Claude turns can be tool/task notifications wrapped in tags; the
    <summary> is the readable line when there is one. */
 function claudeTitle(t: string) {
@@ -68,7 +88,7 @@ export function parseCalendar(text: string, meta: any = {}) {
   if (m) { time = m[1]; rest = rest.slice(m[0].length); }
   let notes = "";
   const ni = rest.indexOf(" Notes: ");
-  if (ni >= 0) { notes = stripTags(rest.slice(ni + 8)); rest = rest.slice(0, ni); }
+  if (ni >= 0) { notes = cleanHtml(rest.slice(ni + 8)); rest = rest.slice(0, ni); }
   rest = rest.replace(/\s*\((?:apple|google|ics|[a-z]+):[^)]*\)\.?\s*$/, "");
   let attendees: string[] = meta.attendees ?? [];
   const wi = rest.indexOf(" — with ");
@@ -132,8 +152,9 @@ function Field({ k, v }: { k: string; v?: ReactNode }) {
   if (v === undefined || v === null || v === "") return null;
   return <div className="field"><span className="fk">{k}</span><span className="fv">{v}</span></div>;
 }
-function Pre({ children }: { children?: string }) {
-  return children ? <pre className="body">{children}</pre> : null;
+function Pre({ children, clean }: { children?: string; clean?: boolean }) {
+  if (!children) return null;
+  return <pre className="body"><Linkify text={clean ? cleanHtml(children) : children} /></pre>;
 }
 
 function GenericContext({ ctx }: { ctx: any }) {
@@ -176,7 +197,7 @@ export function DetailBody({ chunk, context, contextSource, onOpen }:
         <Field k="to" v={Array.isArray(m.to) ? m.to.join(", ") : m.to} />
         <Field k="date" v={m.date ? `${localDay(m.date)} ${hhmm(m.date)}` : undefined} />
         <Field k="mailbox" v={m.mailbox} />
-        <Pre>{chunk.text}</Pre>
+        <Pre clean>{chunk.text.replace(/^Email from .*?\): /, "")}</Pre>
         <GenericContext ctx={context} />
       </>;
     case "browser":

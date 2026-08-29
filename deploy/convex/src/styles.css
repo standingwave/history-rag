@@ -77,3 +77,4 @@ pre.body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; back
 .ctxrow .clip { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .ctxrow.target { background: #9a9aa31a; }
 .ctxrow.done { color: #94949e; }
+.link { color: #8ab4f8; overflow-wrap: anywhere; }

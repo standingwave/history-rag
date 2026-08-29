@@ -5,8 +5,8 @@
 import { useEffect, useState, type JSX } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
-import { SearchSheet, AskSheet, BrowseSheet, Detail } from "./Archive";
-import { shortDate } from "./render";
+import { SearchSheet, AskSheet, BrowseSheet, Detail, Row } from "./Archive";
+import { shortDate, hhmm } from "./render";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -62,13 +62,13 @@ export function Today() {
   const notes = useQuery(api.today.notes, { since: new Date(Date.now() - 7 * 864e5).toISOString() });
   const latest = useQuery(api.today.latestTaskDay, {});
   const hour = new Date().getHours();
+  const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
   if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close} />;
-  if (sheet === "agenda") return <ListSheet title="Agenda" items={agenda} onBack={close}
-    row={(e) => <><span className="mono time">{timeOnly(e.timestamp)}</span>{title(e)}</>} />;
+  if (sheet === "agenda") return <ListSheet title={`Agenda · ${dayLabel(day)}`} items={agenda} onBack={close}
+    row={(e) => <Row c={e} right={timeOnly(e.timestamp) === "all day" ? "all day" : hhmm(e.timestamp)} onOpen={openId} />} />;
   if (sheet === "notes") return <ListSheet title="Notes · 7d" items={notes} onBack={close}
-    row={(n) => <><span className="mono time">{n.day.slice(5)}</span>{n.location}</>} />;
-  const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
+    row={(n) => <Row c={n} onOpen={openId} />} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
   if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
   if (sheet === "ask") return <AskSheet onBack={close} onOpen={openId} />;
@@ -192,7 +192,7 @@ function ListSheet({ title, items, row, onBack }:
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Today</button><span>{title}</span></div>
       {items === undefined && <p className="muted">…</p>}
       {items?.length === 0 && <p className="muted">nothing</p>}
-      {items?.map((i) => <div key={i.id} className="lrow">{row(i)}</div>)}
+      {items?.map((i) => <div key={i.id}>{row(i)}</div>)}
     </section>
   );
 }
