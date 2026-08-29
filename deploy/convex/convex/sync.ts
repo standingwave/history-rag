@@ -139,3 +139,35 @@ export const recordRun = internalMutation({
     await ctx.db.insert("syncRuns", args);
   },
 });
+
+/* Diagnostic: what the RAG component holds per namespace and status, and
+   how many `items` rows — for reconciling the dashboard's storage figures. */
+export const itemsCount = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    let n = 0;
+    for await (const _ of ctx.db.query("items")) n++;
+    return n;
+  },
+});
+
+export const census = internalAction({
+  args: {},
+  handler: async (ctx): Promise<Record<string, number>> => {
+    const out: Record<string, number> = {};
+    for (const status of ["ready", "replaced", "pending"] as const) {
+      let cursor: string | null = null;
+      for (;;) {
+        const page = await rag.list(ctx, { status, paginationOpts: { cursor, numItems: 500 } });
+        for (const e of page.page) {
+          const ns = (e as any).namespaceId ?? "?";
+          out[`${status}:${ns}`] = (out[`${status}:${ns}`] ?? 0) + 1;
+        }
+        if (page.isDone) break;
+        cursor = page.continueCursor;
+      }
+    }
+    out.items = await ctx.runQuery(internal.sync.itemsCount, {});
+    return out;
+  },
+});
