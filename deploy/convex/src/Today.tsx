@@ -59,7 +59,10 @@ export function Today() {
 
   const tasks = useQuery(api.today.tasks, { day });
   const agenda = useQuery(api.today.agenda, { day });
-  const notes = useQuery(api.today.notes, { since: new Date(Date.now() - 7 * 864e5).toISOString() });
+  // Derived from `day`, not Date.now(): a fresh timestamp each render would
+  // be a new subscription each render, re-running the query continuously.
+  const notesSince = new Date(new Date(day + "T00:00:00").getTime() - 6 * 864e5).toISOString();
+  const notes = useQuery(api.today.notes, { since: notesSince });
   const latest = useQuery(api.today.latestTaskDay, {});
   const hour = new Date().getHours();
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
