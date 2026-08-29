@@ -3,7 +3,7 @@
    a post-filter on the item's local day. `dropped` counts candidates the
    post-filter discarded — measurement #2 in the spec. */
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { embed } from "ai";
 import { rag, QUERY_PROMPT, queryModel } from "./rag";
@@ -109,5 +109,18 @@ export const search = action({
       months,
       timing: { embedMs, searchMs, joinMs },
     };
+  },
+});
+
+/* Cron target (see crons.ts). Logs the round-trip so the dashboard shows
+   whether the endpoint is staying warm. */
+export const warmEmbed = internalAction({
+  args: {},
+  handler: async (): Promise<number> => {
+    const t = Date.now();
+    await embed({ model: queryModel, value: "warm" });
+    const ms = Date.now() - t;
+    console.log(`warmEmbed ${ms}ms`);
+    return ms;
   },
 });
