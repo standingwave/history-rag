@@ -6,5 +6,5 @@ import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
 
 const crons = cronJobs();
-crons.interval("warm embedding endpoint", { seconds: 45 }, internal.search.warmEmbed, {});
+crons.interval("warm embedding endpoint", { minutes: 30 }, internal.search.warmEmbed, {});
 export default crons;
