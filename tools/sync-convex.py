@@ -24,7 +24,7 @@ Config: [convex] url, deploy_key_env (default CONVEX_DEPLOY_KEY),
         sources (default tasks/obsidian/calendar), batch (60),
         state_db (~/.claude/history-rag-convex.db)
 """
-import argparse, hashlib, json, os, sqlite3, struct, sys, time
+import argparse, fcntl, hashlib, json, os, sqlite3, struct, sys, time
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
