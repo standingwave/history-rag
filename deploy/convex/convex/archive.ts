@@ -201,3 +201,17 @@ export const config = query({
       ({ name, ...(latency ? { latency } : {}), ...(est_cost ? { est_cost } : {}) })) };
   },
 });
+
+/* ── history_stats ────────────────────────────────────────────────────── */
+
+export const stats = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const rows = await ctx.db.query("stats").collect();
+    rows.sort((a, b) => b.count - a.count);
+    return { total: rows.reduce((n, r) => n + r.count, 0),
+             sources: rows.map(({ source, count, earliestDay, latestDay, updatedAt }) =>
+               ({ source, count, earliestDay, latestDay, updatedAt })) };
+  },
+});

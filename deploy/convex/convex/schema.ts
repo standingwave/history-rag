@@ -39,6 +39,15 @@ export default defineSchema({
     appliedAt: v.optional(v.number()),
     error: v.optional(v.string()),
   }).index("by_appliedAt", ["appliedAt"]),
+  /* history_stats: one row per source, kept by sync:putItems /
+     deleteItems and rebuilt by sync:rebuildStats. */
+  stats: defineTable({
+    source: v.string(),
+    count: v.number(),
+    earliestDay: v.string(),
+    latestDay: v.string(),
+    updatedAt: v.number(),
+  }).index("by_source", ["source"]),
   syncRuns: defineTable({
     source: v.string(),
     startedAt: v.number(),

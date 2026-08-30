@@ -90,3 +90,7 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .datef .dval { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .datef .dglyph { font-size: .9rem; opacity: .8; }
 .datef input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; padding: 0; border: 0; }
+.stats { margin: -4px 0 10px; }
+.stats p { margin: 0 0 6px; }
+.stats .chips { margin-bottom: 0; }
+.chip .cnt { opacity: .7; font-size: .7rem; margin-left: 2px; }

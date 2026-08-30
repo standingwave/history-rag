@@ -46,10 +46,41 @@ export function DateField({ label, value, onChange }: { label: string; value: st
   );
 }
 
-function Sheet({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+function kfmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n); }
+
+/* history_stats as a strip: total, span, and a chip per source with its
+   count; with `sel`/`onToggle` the chips double as the source selector. */
+export function StatsStrip({ sel, onToggle }: { sel?: Set<string>; onToggle?: (s: string) => void }) {
+  const st = useQuery(api.archive.stats, {});
+  if (!st) return <p className="muted small mono">…</p>;
+  const lo = st.sources.reduce((m, r) => (r.earliestDay && (!m || r.earliestDay < m) ? r.earliestDay : m), "");
+  const hi = st.sources.reduce((m, r) => (r.latestDay > m ? r.latestDay : m), "");
+  return (
+    <div className="stats">
+      <p className="muted small mono">{kfmt(st.total)} chunks · {st.sources.length} sources · {lo.slice(0, 7)} → {hi}</p>
+      <div className="chips">
+        {st.sources.map((r) => {
+          const on = sel ? sel.has(r.source) : true;
+          return (
+            <button key={r.source} type="button" className={`chip ${on ? "on" : ""}`}
+              style={on ? { color: color(r.source) } : undefined}
+              onClick={onToggle ? () => onToggle(r.source) : undefined}
+              title={`${r.count} · ${r.earliestDay} → ${r.latestDay}`}>
+              {r.source} <span className="cnt">{kfmt(r.count)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Sheet({ title, onBack, children, stats }:
+  { title: string; onBack: () => void; children: ReactNode; stats?: ReactNode }) {
   return (
     <section>
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Today</button><span>{title}</span></div>
+      {stats ?? <StatsStrip />}
       {children}
     </section>
   );
@@ -62,7 +93,7 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const res = useQuery(api.archive.expand, { id, context: 5 });
   const c = res?.chunk;
   return (
-    <Sheet title="Detail" onBack={onBack}>
+    <Sheet title="Detail" onBack={onBack} stats={<></>}>
       {res === undefined && <p className="muted">…</p>}
       {res?.error && <p className="err">{res.error}</p>}
       {c && (
@@ -114,7 +145,7 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   };
 
   return (
-    <Sheet title="Search" onBack={onBack}>
+    <Sheet title="Search" onBack={onBack} stats={<StatsStrip sel={sel} onToggle={toggle} />}>
       <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="anything you did, read, wrote, or planned" />
         <button className="primary" disabled={busy || !q}>go</button>
@@ -124,13 +155,7 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         <DateField label="to" value={until} onChange={setUntil} />
         <input type="number" min={1} max={50} value={k} onChange={(e) => setK(Number(e.target.value) || 10)} aria-label="results" />
       </div>
-      <div className="chips">
-        <button className={`chip ${sel.size === SOURCES.length ? "on" : ""}`} onClick={all}>all</button>
-        {SOURCES.map((s) => (
-          <button key={s} className={`chip ${sel.has(s) ? "on" : ""}`}
-            style={sel.has(s) ? { color: color(s) } : undefined} onClick={() => toggle(s)}>{s}</button>
-        ))}
-      </div>
+      <p className="small"><button type="button" className="lnk" onClick={all}>{sel.size === SOURCES.length ? "none" : "all sources"}</button></p>
       {status && <p className="muted mono small">{status}</p>}
       {hits?.length === 0 && <p className="muted">nothing</p>}
       {hits?.map((r) => <Row key={r.id} c={r} right={r.score.toFixed(3)} onOpen={onOpen} />)}

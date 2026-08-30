@@ -48,6 +48,22 @@ export const upsert = internalAction({
   },
 });
 
+/* Per-source counters behind archive.stats. A delete can't shrink the
+   day range exactly; rebuildStats fixes that whenever it matters. */
+async function bump(ctx: { db: any }, source: string, delta: number, day?: string) {
+  const row = await ctx.db.query("stats").withIndex("by_source", (q: any) => q.eq("source", source)).unique();
+  if (!row) {
+    if (delta > 0) await ctx.db.insert("stats", { source, count: delta, earliestDay: day ?? "", latestDay: day ?? "", updatedAt: Date.now() });
+    return;
+  }
+  const patch: Record<string, unknown> = { count: Math.max(0, row.count + delta), updatedAt: Date.now() };
+  if (day && delta > 0) {
+    if (!row.earliestDay || day < row.earliestDay) patch.earliestDay = day;
+    if (day > row.latestDay) patch.latestDay = day;
+  }
+  await ctx.db.patch(row._id, patch);
+}
+
 export const putItems = internalMutation({
   args: {
     items: v.array(v.object({
@@ -64,7 +80,7 @@ export const putItems = internalMutation({
         .withIndex("by_chunkId", (q) => q.eq("chunkId", it.chunkId))
         .unique();
       if (existing) await ctx.db.patch(existing._id, { ...it, pending: false });
-      else await ctx.db.insert("items", { ...it, pending: false });
+      else { await ctx.db.insert("items", { ...it, pending: false }); await bump(ctx, it.source, 1, it.day); }
     }
   },
 });
@@ -103,7 +119,55 @@ export const remove = internalAction({
 export const deleteItems = internalMutation({
   args: { ids: v.array(v.id("items")) },
   handler: async (ctx, { ids }) => {
-    for (const id of ids) await ctx.db.delete(id);
+    for (const id of ids) {
+      const row = await ctx.db.get(id);
+      if (!row) continue;
+      await ctx.db.delete(id);
+      await bump(ctx, row.source, -1);
+    }
+  },
+});
+
+/* Recount every source from `items` (paginated) and rewrite `stats`. */
+export const statsPage = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, { cursor }) => {
+    const page = await ctx.db.query("items").paginate({ cursor, numItems: 4000 });
+    const acc: Record<string, { n: number; lo: string; hi: string }> = {};
+    for (const r of page.page) {
+      const a = acc[r.source] ?? (acc[r.source] = { n: 0, lo: "", hi: "" });
+      a.n++;
+      if (r.day && (!a.lo || r.day < a.lo)) a.lo = r.day;
+      if (r.day > a.hi) a.hi = r.day;
+    }
+    return { acc, cursor: page.continueCursor, done: page.isDone };
+  },
+});
+export const writeStats = internalMutation({
+  args: { rows: v.array(v.object({ source: v.string(), count: v.number(), earliestDay: v.string(), latestDay: v.string() })) },
+  handler: async (ctx, { rows }) => {
+    for (const old of await ctx.db.query("stats").collect()) await ctx.db.delete(old._id);
+    for (const r of rows) await ctx.db.insert("stats", { ...r, updatedAt: Date.now() });
+  },
+});
+export const rebuildStats = internalAction({
+  args: {},
+  handler: async (ctx): Promise<Record<string, number>> => {
+    const acc: Record<string, { n: number; lo: string; hi: string }> = {};
+    for (let cursor: string | null = null; ;) {
+      const p: { acc: typeof acc; cursor: string; done: boolean } = await ctx.runQuery(internal.sync.statsPage, { cursor });
+      for (const [src, a] of Object.entries(p.acc)) {
+        const t = acc[src] ?? (acc[src] = { n: 0, lo: "", hi: "" });
+        t.n += a.n;
+        if (a.lo && (!t.lo || a.lo < t.lo)) t.lo = a.lo;
+        if (a.hi > t.hi) t.hi = a.hi;
+      }
+      if (p.done) break;
+      cursor = p.cursor;
+    }
+    await ctx.runMutation(internal.sync.writeStats, { rows: Object.entries(acc).map(([source, a]) =>
+      ({ source, count: a.n, earliestDay: a.lo, latestDay: a.hi })) });
+    return Object.fromEntries(Object.entries(acc).map(([s, a]) => [s, a.n]));
   },
 });
 
