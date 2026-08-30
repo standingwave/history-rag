@@ -106,7 +106,7 @@ def plan(current: dict, state: dict) -> tuple[list, list]:
     return up, rm
 
 def signature(db, source: str) -> str:
-    h = hashlib.sha256()
+    h = hashlib.sha256(f"dim={config.CONVEX_DIM}\x1f".encode())
     for row in db.execute("SELECT id, timestamp, text, coalesce(meta, '') "
                           "FROM chunks WHERE source = ? ORDER BY id", (source,)):
         for f in row:

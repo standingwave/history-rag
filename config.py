@@ -36,7 +36,7 @@ _KNOWN = {
     "health": {"notify"},
     "refresh": {"prune"},
     "ask": {"models", "max_turns"},
-    "convex": {"url", "deploy_key_env", "sources", "batch", "state_db",
+    "convex": {"url", "deploy_key_env", "sources", "batch", "state_db", "dim",
                "tasks_script"},
 }
 
