@@ -1,7 +1,11 @@
 /* Tokens from deploy/lambda/ui.html (the v2 handoff), grid from design D. */
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* iOS Safari pans horizontally whenever any box is wider than the viewport,
+   and `overflow-x: hidden` on body alone doesn't stop it; clip on both. */
+html, body { overflow-x: clip; width: 100%; -webkit-text-size-adjust: 100%; }
+#root { width: 100%; overflow-x: clip; }
+img, video, table, pre, textarea, input, select, button { max-width: 100%; }
 body { margin: 0; background: #121215; color: #e8e8eb; font: 15px/1.45 -apple-system, system-ui, sans-serif; }
 .col { max-width: 44rem; width: 100%; margin: 0 auto; padding: 14px 16px 56px; min-width: 0; }
 /* Layout rule: every flex/grid child that can hold text gets min-width: 0,
@@ -44,20 +48,20 @@ a { color: #8ab4f8; text-decoration: none; }
 .lrow > * { overflow-wrap: anywhere; }
 .lrow .grow { flex: 1; min-width: 0; }
 .time { color: #94949e; min-width: 3.4em; }
-.frow { display: flex; gap: 8px; margin-bottom: 8px; }
+.frow { display: flex; gap: 8px; margin-bottom: 8px; min-width: 0; max-width: 100%; }
 .frow > * { min-width: 0; }
 .frow input { flex: 1; min-width: 0; width: 0; -webkit-appearance: none; appearance: none; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }
 .signin { display: grid; gap: 8px; max-width: 22rem; margin: 40px auto; }
 .signin input { background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 9px 11px; font: inherit; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; max-width: 100%; }
 .chip { background: none; border: 1px solid #2a2a30; border-radius: 999px; color: #a6a6af; font: inherit; font-size: .78rem; padding: 3px 9px; cursor: pointer; }
 .chip.on { border-color: currentColor; color: #e8e8eb; background: #9a9aa312; }
 .frow select { background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; }
 .frow label { display: flex; align-items: center; gap: 6px; color: #a6a6af; font-size: .85rem; }
 .frow input[type="number"] { flex: 0 0 4.5em; }
-pre.body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; padding: 10px; font-size: .84rem; line-height: 1.4; }
-.answer { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overflow-wrap: anywhere; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; padding: 10px; font-size: .84rem; line-height: 1.4; }
+.answer { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; line-height: 1.5; }
 .answer .cite { color: #8ab4f8; cursor: pointer; }
 .rowbtn { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 
