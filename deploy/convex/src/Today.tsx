@@ -134,7 +134,7 @@ function TaskRow({ t, compact, onToggle }: { t: Item; compact?: boolean; onToggl
           : <span className="glyph">{glyph}</span>}
         <span className="ttext" onClick={() => !compact && setOpen(!open)}>{title(t)}</span>
         <span className="muted mono small">
-          {subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : t.meta.days > 1 && t.meta.first_seen ? `since ${shortDate(t.meta.first_seen)}` : ""}
+          {subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : ""}
         </span>
       </div>
       {open && !compact && (
