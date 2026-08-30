@@ -259,8 +259,8 @@ def main():
     # id -> (text, timestamp). Changed text re-embeds (e.g. today's still-
     # growing app-usage total); same text with a changed timestamp gets a
     # metadata-only update — the embedding is of the text, so no re-embed.
-    existing = {r[0]: (r[1], r[2])
-                for r in db.execute("SELECT id, text, timestamp FROM chunks")}
+    existing = {r[0]: (r[1], r[2], r[3] or "")
+                for r in db.execute("SELECT id, text, timestamp, meta FROM chunks")}
     new = failed = pruned = refreshed = 0
 
     def store(cid, text, rec, vec):
@@ -313,11 +313,15 @@ def main():
                     yielded += 1
                     prev = existing.get(cid)
                     if prev and prev[0] == text:
-                        if prev[1] != rec.get("timestamp", ""):
+                        # Same text, so no re-embed; but timestamp or meta
+                        # may have moved (a task's subtask ticked, a note
+                        # line added) and readers see meta, so refresh it.
+                        meta_json = json.dumps(rec.get("meta", {}))
+                        if prev[1] != rec.get("timestamp", "") or prev[2] != meta_json:
                             db.execute(
                                 "UPDATE chunks SET timestamp=?, location=?, meta=? WHERE id=?",
                                 (rec.get("timestamp", ""), rec.get("location", ""),
-                                 json.dumps(rec.get("meta", {})), cid))
+                                 meta_json, cid))
                             refreshed += 1
                         continue
                     batch.append((cid, text, rec))
