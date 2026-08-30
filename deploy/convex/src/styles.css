@@ -138,4 +138,4 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .prog i { position: absolute; left: 0; top: 0; bottom: 0; background: #facc15; border-radius: 2px; transition: width .2s; }
 .waiting { color: #facc15; }
 .tile.brief p { margin: 0; font-size: .9rem; line-height: 1.4; }
-.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.clamp { white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }

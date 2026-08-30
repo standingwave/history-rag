@@ -181,6 +181,8 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 /* An Ask answer with its [id:…] citations as numbered, tappable marks. */
 export function Answer({ text, onOpen }: { text: string; onOpen: (id: string) => void }) {
   const ids: string[] = [];
+  // Models slip into markdown; the app renders plain text, so drop the marks.
+  text = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/^#{1,6}\s+/gm, "").replace(/^\s*[-*]\s+/gm, "• ");
   const parts = text.split(/(\[id:[^\]\s]+\])/g).map((p, i) => {
     const m = /^\[id:([^\]\s]+)\]$/.exec(p);
     if (!m) return <span key={i}>{p}</span>;

@@ -469,7 +469,8 @@ const ago = (t: number) => {
 /* "What did I do over the last day?" — the stored answer's opening, the
    tile is the wide one so a few lines fit. */
 function BriefTile({ brief, onOpen }: { brief?: Brief; onOpen: () => void }) {
-  const text = brief?.answer?.replace(/\s*\[id:[^\]\s]+\]/g, "").trim() ?? "";
+  const text = brief?.answer?.replace(/\s*\[id:[^\]\s]+\]/g, "").replace(/\*\*/g, "").replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "• ").replace(/\n{2,}/g, "\n").trim() ?? "";
   return (
     <button className="tile large brief" onClick={onOpen}>
       <div className="thead"><span style={{ color: "#a78bfa" }}>Last day</span>
