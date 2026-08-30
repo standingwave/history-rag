@@ -154,3 +154,14 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .tile.agenda .lrow { padding: 4px 0; font-size: .92rem; border: 0; }
 .tile.agenda .lrow.next .time { color: #f472b6; }
 .tile.agenda .lrow.past { color: #94949e; }
+/* Agenda day grid */
+.cal { position: relative; margin-top: 4px; }
+.cal .hline { position: absolute; left: 0; right: 0; border-top: 1px solid #1e1e23; }
+.cal .hline span { position: absolute; top: -0.6em; left: 0; font-size: .7rem; color: #55555e; background: #121215; padding-right: 4px; font-variant-numeric: tabular-nums; }
+.cal .nowline { position: absolute; left: 2.6em; right: 0; border-top: 1px solid #f472b6; z-index: 2; }
+.cal .nowline::before { content: ""; position: absolute; left: -4px; top: -3.5px; width: 6px; height: 6px; border-radius: 50%; background: #f472b6; }
+.cal .evarea { position: absolute; top: 0; bottom: 0; left: 3em; right: 0; }
+.cal .ev { position: absolute; overflow: hidden; text-align: left; border: 0; border-left: 2px solid #f472b6; border-radius: 6px; background: #f472b61a; color: inherit; font: inherit; padding: 3px 7px; cursor: pointer; min-width: 0; display: block; }
+.cal .ev.past { opacity: .5; }
+.cal .evt { display: block; font-size: .68rem; color: #f8a8ce; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.cal .evn { display: block; font-size: .82rem; line-height: 1.25; overflow-wrap: anywhere; }

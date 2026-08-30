@@ -62,6 +62,21 @@ export const agenda = query({
   },
 });
 
+/* The first events at/after `after` (UTC ISO) — the "next event" line.
+   `after` is the local day's midnight so the subscription arg is stable;
+   the client filters to what is actually still ahead. */
+export const upcoming = query({
+  args: { after: v.string() },
+  handler: async (ctx, { after }) => {
+    await requireUser(ctx);
+    const rows = await ctx.db
+      .query("items")
+      .withIndex("by_source_timestamp", (q) => q.eq("source", "calendar").gte("timestamp", after))
+      .take(15);
+    return rows.map(pub);
+  },
+});
+
 export const notes = query({
   args: { since: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, { since, limit }) => {

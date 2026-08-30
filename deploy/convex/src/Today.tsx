@@ -89,6 +89,9 @@ export function Today() {
   const tasks = useQuery(api.today.tasks, { day });
   const agenda = useQuery(api.today.agenda, { day });
   const brief = useQuery(api.brief.latest, {});
+  // Stable arg (local midnight), so no resubscribe loop; filtered to "after
+  // now" where it's used.
+  const upcoming = useQuery(api.today.upcoming, { after: new Date(day + "T00:00:00").toISOString() });
   const latest = useQuery(api.today.latestTaskDay, {});
   const intents = useQuery(api.today.intents, {});
   const waiting = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error).length;
@@ -96,8 +99,7 @@ export function Today() {
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
   if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close} />;
-  if (sheet === "agenda") return <ListSheet title={`Agenda · ${dayLabel(day)}`} items={agenda} onBack={close}
-    row={(e) => <Row c={e} right={timeOnly(e.timestamp) === "all day" ? "all day" : hhmm(e.timestamp)} onOpen={openId} />} />;
+  if (sheet === "agenda") return <AgendaSheet day={day} agenda={agenda} onBack={close} onOpen={openId} />;
   if (sheet === "brief") return <BriefSheet brief={brief} onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
   if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
@@ -106,7 +108,7 @@ export function Today() {
 
   const tiles: Record<string, JSX.Element> = {
     tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} waiting={waiting} onOpen={() => open("tasks")} />,
-    agenda: <AgendaTile key="agenda" agenda={agenda} onOpen={() => open("agenda")} />,
+    agenda: <AgendaTile key="agenda" agenda={agenda} upcoming={upcoming} onOpen={() => open("agenda")} />,
     brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
   };
   return (
@@ -464,15 +466,25 @@ const ago = (t: number) => {
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
 };
 
+/* start/end for an event chunk: meta.start/end when present, else the
+   indexed timestamp and half an hour. */
+function evTimes(e: Item) {
+  const start = new Date(e.meta?.start ?? e.timestamp);
+  const end = e.meta?.end ? new Date(e.meta.end) : new Date(start.getTime() + 30 * 60000);
+  return { start, end, allDay: !!e.meta?.all_day || timeOnly(e.timestamp) === "all day" };
+}
+
 /* Today's events, always the first tile and full width: one line when
-   there's nothing, otherwise the next few with the upcoming one marked. */
-function AgendaTile({ agenda, onOpen }: { agenda?: Item[]; onOpen: () => void }) {
+   there's nothing (then the next event anywhere ahead, if known),
+   otherwise the next few with the upcoming one marked. */
+function AgendaTile({ agenda, upcoming, onOpen }: { agenda?: Item[]; upcoming?: Item[]; onOpen: () => void }) {
   const now = Date.now();
   const list = agenda ?? [];
   const nextI = list.findIndex((e) => new Date(e.timestamp).getTime() > now);
   const start = Math.max(0, Math.min(nextI < 0 ? list.length : nextI, list.length - 4));
   const shown = list.slice(start, start + 4);
   const label = (e: Item) => describe(e).title;
+  const next = (upcoming ?? []).find((e) => new Date(e.timestamp).getTime() > now || evTimes(e).end.getTime() > now);
   return (
     <button className="tile large agenda" onClick={onOpen}>
       <div className="thead" style={shown.length ? undefined : { marginBottom: 0 }}>
@@ -490,6 +502,11 @@ function AgendaTile({ agenda, onOpen }: { agenda?: Item[]; onOpen: () => void })
         );
       })}
       {list.length > start + 4 && <p className="muted small" style={{ margin: "2px 0 0" }}>+{list.length - start - 4} more</p>}
+      {agenda && nextI < 0 && next && (
+        <p className="muted small" style={{ margin: shown.length ? "4px 0 0" : "6px 0 0" }}>
+          next: {describe(next).title} · {dayLabel(next.day)} · {timeOnly(next.timestamp) === "all day" ? "all day" : hhmm(next.timestamp)}
+        </p>
+      )}
     </button>
   );
 }
@@ -532,6 +549,79 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
         {brief.model} · {ago(brief.generatedAt)} · {((brief.ms ?? 0) / 1000).toFixed(0)} s{brief.note ? ` · ${brief.note}` : ""}
         {brief.citations.length === 0 ? " · no sources cited" : ` · ${brief.citations.length} sources`}</p>}
       <p><button className="chip" disabled={busy} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></p>
+    </section>
+  );
+}
+
+/* The agenda as a day calendar: hour lines, events as positioned blocks
+   (overlaps share the width), all-day events as chips above, a line for
+   now. Tap a block for the reading view. */
+const HOUR_PX = 52;
+function AgendaSheet({ day, agenda, onBack, onOpen }:
+  { day: string; agenda?: Item[]; onBack: () => void; onOpen: (id: string) => void }) {
+  useTick(60_000, day === localDay());
+  const evs = (agenda ?? []).map((e) => ({ e, ...evTimes(e) }));
+  const allDay = evs.filter((x) => x.allDay);
+  const timed = evs.filter((x) => !x.allDay).sort((a, b) => a.start.getTime() - b.start.getTime());
+  const dayStart = new Date(day + "T00:00:00").getTime();
+  const mins = (d: Date) => (d.getTime() - dayStart) / 60000;
+  const loH = Math.min(8, ...timed.map((x) => Math.floor(mins(x.start) / 60)));
+  const hiH = Math.max(18, ...timed.map((x) => Math.ceil(Math.min(mins(x.end), 1440) / 60)));
+  // Overlap layout: transitive clusters, then first-free-column within each.
+  type Laid = (typeof timed)[number] & { col: number; cols: number };
+  const laid: Laid[] = [];
+  let cluster: Laid[] = [], colEnds: number[] = [], clusterEnd = -1;
+  const closeCluster = () => { for (const x of cluster) x.cols = colEnds.length; cluster = []; colEnds = []; };
+  for (const x of timed) {
+    const s = mins(x.start), en = Math.max(mins(x.end), s + 24 / (HOUR_PX / 60));
+    if (s >= clusterEnd && cluster.length) closeCluster();
+    let col = colEnds.findIndex((e) => e <= s);
+    if (col < 0) { col = colEnds.length; colEnds.push(en); } else colEnds[col] = en;
+    const l = Object.assign(x, { col, cols: 1 });
+    cluster.push(l); laid.push(l);
+    clusterEnd = Math.max(clusterEnd, en);
+  }
+  if (cluster.length) closeCluster();
+  const nowMin = mins(new Date());
+  const top = (m: number) => ((m - loH * 60) / 60) * HOUR_PX;
+  const hours = []; for (let h = loH; h <= hiH; h++) hours.push(h);
+  return (
+    <section>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
+        <span>Agenda · {dayLabel(day)}</span></div>
+      {agenda === undefined && <Skeleton widths={[80, 62, 71]} style={{ margin: "8px 0" }} />}
+      {agenda && !evs.length && <p className="muted">nothing scheduled</p>}
+      {allDay.length > 0 && (
+        <div className="chips" style={{ marginBottom: 10 }}>
+          {allDay.map(({ e }) => <button key={e.id} className="chip on" style={{ color: "#f472b6" }}
+            onClick={() => onOpen(e.id)}>{describe(e).title}</button>)}
+        </div>
+      )}
+      {timed.length > 0 && (
+        <div className="cal" style={{ height: (hiH - loH) * HOUR_PX + 14 }}>
+          {hours.map((h) => (
+            <div key={h} className="hline" style={{ top: (h - loH) * HOUR_PX }}>
+              <span>{String(h).padStart(2, "0")}:00</span>
+            </div>
+          ))}
+          {day === localDay() && nowMin >= loH * 60 && nowMin <= hiH * 60 &&
+            <div className="nowline" style={{ top: top(nowMin) }} />}
+          <div className="evarea">
+            {laid.map((x) => {
+              const s = mins(x.start), en = Math.min(mins(x.end), 1440);
+              const past = x.end.getTime() < Date.now() && day === localDay();
+              return (
+                <button key={x.e.id} className={`ev ${past ? "past" : ""}`} onClick={() => onOpen(x.e.id)}
+                  style={{ top: top(s), height: Math.max(24, ((en - s) / 60) * HOUR_PX - 2),
+                           left: `${(x.col / x.cols) * 100}%`, width: `calc(${100 / x.cols}% - 3px)` }}>
+                  <span className="evt">{hhmm(x.start.toISOString())}–{hhmm(x.end.toISOString())}</span>
+                  <span className="evn">{describe(x.e).title}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
