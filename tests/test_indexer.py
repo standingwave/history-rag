@@ -31,6 +31,16 @@ def test_metadata_refresh_does_not_reembed(scratch_db, fake_embed, monkeypatch):
     ts, loc = db.execute("SELECT timestamp, location FROM chunks WHERE id='a1'").fetchone()
     assert ts == "2026-07-02T00:00:00+00:00" and loc == "new"
 
+def test_meta_only_change_is_refreshed(scratch_db, fake_embed, monkeypatch):
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-07-01T00:00:00+00:00", meta={"done": False}))])])
+    n_embeds = len(fake_embed.calls)
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-07-01T00:00:00+00:00", meta={"done": True}))])])
+    assert len(fake_embed.calls) == n_embeds
+    db = open_db(scratch_db)
+    assert '"done": true' in db.execute("SELECT meta FROM chunks WHERE id='a1'").fetchone()[0]
+
 def test_source_isolation_and_partial_batch_dropped(scratch_db, fake_embed,
                                                     monkeypatch, capsys):
     sources = [
