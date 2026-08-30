@@ -52,7 +52,7 @@ export const upsert = internalAction({
 
 /* Per-source counters behind archive.stats. A delete can't shrink the
    day range exactly; rebuildStats fixes that whenever it matters. */
-async function bump(ctx: { db: any }, source: string, delta: number, day?: string) {
+export async function bump(ctx: { db: any }, source: string, delta: number, day?: string) {
   const row = await ctx.db.query("stats").withIndex("by_source", (q: any) => q.eq("source", source)).unique();
   if (!row) {
     if (delta > 0) await ctx.db.insert("stats", { source, count: delta, earliestDay: day ?? "", latestDay: day ?? "", updatedAt: Date.now() });
@@ -81,7 +81,7 @@ export const putItems = internalMutation({
         .query("items")
         .withIndex("by_chunkId", (q) => q.eq("chunkId", it.chunkId))
         .unique();
-      if (existing) await ctx.db.patch(existing._id, { ...it, pending: false });
+      if (existing) await ctx.db.patch(existing._id, { ...it, pending: false, hidden: false });
       else { await ctx.db.insert("items", { ...it, pending: false }); await bump(ctx, it.source, 1, it.day); }
     }
   },

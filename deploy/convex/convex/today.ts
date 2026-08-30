@@ -1,14 +1,18 @@
-/* The dashboard's reads and the one write. `tasks` is the subscribed
-   query behind the Tasks widget; `toggle` flips a task optimistically and
-   queues an intent for the Mac, which confirms through `applyIntent`
-   (internal, deploy-key only) and, eventually, a re-push of the real
-   state that clears `pending`. */
+/* The dashboard's reads and its task writes (wip/SPEC-task-writes.md).
+   `tasks` is the subscribed query behind the Tasks widget; `toggle`,
+   `add`, `edit` and `remove` change `items` optimistically and queue an
+   intent for the Mac, which confirms through `applyIntent` (internal,
+   deploy-key only) and, eventually, a re-push of the real state that
+   clears `pending`/`hidden`. Placeholder rows carry the chunk id the
+   source will compute, so the re-push patches them in place. */
 import { v } from "convex/values";
 import {
   query, mutation, internalQuery, internalMutation,
 } from "./_generated/server";
 import { requireUser } from "./auth";
 import { want } from "./schema";
+import { taskChunkId, normTask } from "./ids";
+import { bump } from "./sync";
 
 function pub(row: {
   chunkId: string; source: string; timestamp: string; day: string;
@@ -27,7 +31,7 @@ export const tasks = query({
       .withIndex("by_source_day", (q) => q.eq("source", "tasks").eq("day", day))
       .collect();
     rows.sort((a, b) => (a.meta?.order ?? 0) - (b.meta?.order ?? 0));
-    return rows.map(pub);
+    return rows.filter((r) => !r.hidden).map(pub);
   },
 });
 
@@ -104,12 +108,103 @@ export const toggle = mutation({
     });
     const text = row.text.split("\n", 1)[0].replace(/^Task: /, "");
     return await ctx.db.insert("taskIntents", {
-      chunkId: id,
-      day: row.day,
-      vault: String(row.meta?.vault ?? ""),
-      text,
-      want: done ? "open" : "done",
-      requestedAt: Date.now(),
+      kind: "toggle", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
+      text, want: done ? "open" : "done", requestedAt: Date.now(),
+    });
+  },
+});
+
+function taskText(row: { text: string }) {
+  return row.text.split("\n", 1)[0].replace(/^Task: /, "");
+}
+async function byChunkId(ctx: { db: any }, id: string) {
+  return ctx.db.query("items").withIndex("by_chunkId", (q: any) => q.eq("chunkId", id)).unique();
+}
+async function taskRow(ctx: { db: any }, id: string) {
+  const row = await byChunkId(ctx, id);
+  if (!row || row.source !== "tasks") throw new Error("not a task");
+  if (row.pending) throw new Error("that task is still being applied");
+  return row;
+}
+/* The vault a day's note lives in: from any task already on that day, else
+   the most recent task. Adds are refused when there is nothing to go on. */
+async function vaultFor(ctx: { db: any }, day: string): Promise<string> {
+  const same = await ctx.db.query("items")
+    .withIndex("by_source_day", (q: any) => q.eq("source", "tasks").eq("day", day)).first();
+  const any = same ?? await ctx.db.query("items")
+    .withIndex("by_source_timestamp", (q: any) => q.eq("source", "tasks")).order("desc").first();
+  const vault = String(any?.meta?.vault ?? "");
+  if (!vault) throw new Error("no vault known yet — index tasks first");
+  return vault;
+}
+/* A pending placeholder shaped like the row `sources/tasks.py` will push. */
+function placeholder(vault: string, day: string, text: string, meta: Record<string, unknown>, order: number) {
+  return {
+    chunkId: taskChunkId(vault, text), source: "tasks", timestamp: `${day}T00:00:00`,
+    day, month: day.slice(0, 7), location: `${day}.md#${order}`, text: `Task: ${text}`,
+    meta: { vault, done: false, first_seen: day, last_seen: day, done_on: null, section: "",
+            subtasks: [], attachments: [], days: 1, ...meta, order },
+    entryId: "", contentHash: "", pending: true,
+  };
+}
+async function nextOrder(ctx: { db: any }, day: string) {
+  const rows = await ctx.db.query("items")
+    .withIndex("by_source_day", (q: any) => q.eq("source", "tasks").eq("day", day)).collect();
+  return rows.reduce((m: number, r: any) => Math.max(m, r.meta?.order ?? 0), 0) + 1;
+}
+
+export const add = mutation({
+  args: { day: v.string(), text: v.string() },
+  handler: async (ctx, { day, text }) => {
+    await requireUser(ctx);
+    text = text.trim();
+    if (!text) throw new Error("empty task");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bad day");
+    const vault = await vaultFor(ctx, day);
+    const id = taskChunkId(vault, text);
+    const dup = await byChunkId(ctx, id);
+    if (dup && !dup.hidden) throw new Error("a task with that text already exists");
+    const row = placeholder(vault, day, text, {}, await nextOrder(ctx, day));
+    if (dup) await ctx.db.replace(dup._id, row);
+    else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1, day); }
+    return await ctx.db.insert("taskIntents", {
+      kind: "add", chunkId: id, day, vault, text, requestedAt: Date.now(),
+    });
+  },
+});
+
+export const edit = mutation({
+  args: { id: v.string(), newText: v.string() },
+  handler: async (ctx, { id, newText }) => {
+    await requireUser(ctx);
+    newText = newText.trim();
+    const row = await taskRow(ctx, id);
+    const text = taskText(row);
+    if (!newText) throw new Error("empty task");
+    if (normTask(newText) === normTask(text)) return null;
+    const vault = String(row.meta?.vault ?? "");
+    const newId = taskChunkId(vault, newText);
+    const dup = await byChunkId(ctx, newId);
+    if (dup && !dup.hidden) throw new Error("a task with that text already exists");
+    const fresh = placeholder(vault, row.day, newText, { ...row.meta }, row.meta?.order ?? 0);
+    if (dup) await ctx.db.replace(dup._id, fresh);
+    else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1, row.day); }
+    await ctx.db.patch(row._id, { pending: true, hidden: true });
+    return await ctx.db.insert("taskIntents", {
+      kind: "edit", chunkId: id, day: row.day, vault, text, newText, requestedAt: Date.now(),
+    });
+  },
+});
+
+export const remove = mutation({
+  args: { id: v.string() },
+  handler: async (ctx, { id }) => {
+    await requireUser(ctx);
+    const row = await taskRow(ctx, id);
+    await ctx.db.patch(row._id, { pending: true, hidden: true });
+    return await ctx.db.insert("taskIntents", {
+      kind: "delete", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
+      text: taskText(row), requestedAt: Date.now(),
     });
   },
 });
@@ -121,8 +216,9 @@ export const intents = query({
     await requireUser(ctx);
     const rows = await ctx.db.query("taskIntents").order("desc").take(20);
     return rows.map((r) => ({
-      id: r._id, chunkId: r.chunkId, want: r.want, requestedAt: r.requestedAt,
-      appliedAt: r.appliedAt ?? null, error: r.error ?? null,
+      id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", text: r.text, want: r.want ?? null,
+      newId: r.kind === "edit" ? taskChunkId(r.vault, r.newText ?? "") : null,
+      requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
     }));
   },
 });
@@ -137,8 +233,8 @@ export const pendingIntents = internalQuery({
       .withIndex("by_appliedAt", (q) => q.eq("appliedAt", undefined))
       .collect();
     return rows.map((r) => ({
-      id: r._id, chunkId: r.chunkId, day: r.day, vault: r.vault,
-      text: r.text, want: r.want, requestedAt: r.requestedAt,
+      id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
+      text: r.text, want: r.want ?? null, newText: r.newText ?? null, requestedAt: r.requestedAt,
     }));
   },
 });
@@ -149,18 +245,25 @@ export const applyIntent = internalMutation({
     const intent = await ctx.db.get(id);
     if (!intent) return;
     await ctx.db.patch(id, { appliedAt: Date.now(), error });
-    if (error) {
-      // Revert the optimistic flip; the vault didn't change.
-      const row = await ctx.db
-        .query("items")
-        .withIndex("by_chunkId", (q) => q.eq("chunkId", intent.chunkId))
-        .unique();
-      if (row) {
-        await ctx.db.patch(row._id, {
-          meta: { ...row.meta, done: intent.want === "open" },
-          pending: false,
-        });
+    if (!error) return;
+    // The vault didn't change: undo the optimistic effect of this kind.
+    const row = await byChunkId(ctx, intent.chunkId);
+    switch (intent.kind ?? "toggle") {
+      case "toggle":
+        if (row) await ctx.db.patch(row._id, { meta: { ...row.meta, done: intent.want === "open" }, pending: false });
+        break;
+      case "add":
+        if (row?.pending) { await ctx.db.delete(row._id); await bump(ctx, "tasks", -1); }
+        break;
+      case "edit": {
+        const fresh = await byChunkId(ctx, taskChunkId(intent.vault, intent.newText ?? ""));
+        if (fresh?.pending) { await ctx.db.delete(fresh._id); await bump(ctx, "tasks", -1); }
+        if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
+        break;
       }
+      case "delete":
+        if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
+        break;
     }
   },
 });

@@ -94,3 +94,20 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .stats p { margin: 0 0 6px; }
 .stats .chips { margin-bottom: 0; }
 .chip .cnt { opacity: .7; font-size: .7rem; margin-left: 2px; }
+
+/* Tasks sheet writes (wip/SPEC-task-writes.md): floating +, composer,
+   per-row … strip, in-place edit, delete confirm. */
+.tasks-sheet { padding-bottom: 96px; }
+.more { background: none; border: 0; color: #55555e; font: inherit; padding: 0 4px; cursor: pointer; flex: none; }
+.more.on { color: #e8e8eb; }
+.acts { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 0 4px 26px; }
+.act { background: none; border: 1px solid #2a2a30; border-radius: 999px; color: #c8c8cf; font: inherit; font-size: .8rem; padding: 3px 10px; cursor: pointer; }
+.act.danger { color: #f87171; border-color: #f8717155; }
+.confirm { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 4px 0 4px 26px; font-size: .88rem; color: #f87171; }
+.tline.edit { align-items: center; }
+.tline.edit input { flex: 1; min-width: 0; width: 0; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; padding: 2px 0; font: inherit; font-size: 16px; outline: 0; }
+.go { background: #e8e8eb; color: #121215; border: 0; border-radius: 9px; padding: 6px 12px; font: inherit; font-weight: 600; font-size: .85rem; flex: none; }
+.fab { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: calc(22px + env(safe-area-inset-bottom)); width: 46px; height: 46px; border-radius: 50%; background: #e8e8eb; color: #121215; border: 0; font-size: 1.6rem; line-height: 46px; text-align: center; box-shadow: 0 4px 14px #0008; cursor: pointer; padding: 0; }
+.composer { position: fixed; left: 0; right: 0; bottom: 0; background: #1a1a1f; border-top: 1px solid #2a2a30; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; align-items: center; }
+.composer .glyph { color: #facc15; flex: none; }
+.composer input { flex: 1; min-width: 0; width: 0; -webkit-appearance: none; appearance: none; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 9px; color: inherit; padding: 8px 10px; font: inherit; font-size: 16px; }

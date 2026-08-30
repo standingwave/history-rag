@@ -8,6 +8,8 @@ import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
 
 export const want = v.union(v.literal("done"), v.literal("open"));
+export const intentKind = v.union(
+  v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"));
 
 export default defineSchema({
   ...authTables,
@@ -23,6 +25,7 @@ export default defineSchema({
     entryId: v.string(),        // RAG entry holding this chunk's vector
     contentHash: v.string(),    // text + filter values; the sync diff key
     pending: v.optional(v.boolean()),  // optimistic state awaiting the Mac
+    hidden: v.optional(v.boolean()),   // optimistic delete/edit; readers skip it
   })
     .index("by_chunkId", ["chunkId"])
     .index("by_source_day", ["source", "day"])
@@ -34,7 +37,9 @@ export default defineSchema({
     day: v.string(),
     vault: v.string(),
     text: v.string(),           // the task line; the Mac matches on this
-    want,
+    kind: v.optional(intentKind),   // absent = toggle (rows from before kinds)
+    want: v.optional(want),         // toggle only
+    newText: v.optional(v.string()),  // edit only
     requestedAt: v.number(),
     appliedAt: v.optional(v.number()),
     error: v.optional(v.string()),

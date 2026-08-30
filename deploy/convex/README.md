@@ -8,7 +8,7 @@ Search / Ask / Browse over the whole archive, all native Convex. Grew out of `wi
 convex/          backend: schema, RAG instance, sync (internal), search, archive (window/expand), ask, today, auth, crons
 src/             React + Vite client: sign-in, widget grid, tasks sheet, Search/Ask/Browse sheets, reading view
 tools/sync-convex.py      (repo root) push changed chunks + vectors from SQLite
-tools/convex-applier.py   (repo root) drain phone toggles into the vault
+tools/convex-applier.py   (repo root) drain phone task writes into the vault
 ```
 
 ## One-time setup
@@ -123,7 +123,11 @@ step after the S3 push and reports it in the stats block; with no
   subscribed, so time the first paint after sign-in.
 - **#4 write loop**: tap in the Tasks sheet (glyph turns yellow =
   pending), watch the applier log, then the note in Obsidian; with
-  `--kick` the yellow clears after the tasks-only push.
+  `--kick` the yellow clears after the tasks-only push. Add (floating +),
+  edit and delete (… on a row) work the same way; a placeholder row reads
+  "adding…"/"editing…" until the push replaces it. The applier imports
+  `[convex] tasks_script` (the daily-tasks skill) for the note grammar;
+  `npm test` checks the server's chunk ids against the Python source.
 - **#5/#6**: `sync-convex.py` prints seconds per source; storage is on the
   dashboard's Usage page.
 - **#7**: toggle with the note open in Obsidian mobile; toggle with the

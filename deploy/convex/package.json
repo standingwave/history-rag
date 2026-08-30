@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "convex": "convex dev",
+    "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p convex/tsconfig.json",
     "deploy": "npx @convex-dev/static-hosting deploy",
     "smoke": "npx @convex-dev/static-hosting upload --build"

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Drain the Convex spike's task-intent queue into the vault.
+"""Drain the Convex app's task-intent queue into the vault.
 
-The phone flips a checkbox in the app; that writes a `taskIntents` row.
-This process — a launchd agent that runs while the Mac is awake, never a
-server — subscribes to the unapplied intents and applies each one to the
-daily note with the same grammar `~/.claude/skills/daily-tasks/tasks.py`
-uses, then confirms (or reports an error) through `today:applyIntent`.
-Intents that arrive while the Mac sleeps are applied on wake.
+The phone toggles, adds, edits or deletes a task in the app; that writes a
+`taskIntents` row. This process — a launchd agent that runs while the Mac
+is awake, never a server — subscribes to the unapplied intents and applies
+each one to the daily note through `~/.claude/skills/daily-tasks/tasks.py`
+(imported for its grammar: where a new task goes, what a block is), then
+confirms (or reports an error) through `today:applyIntent`. Intents that
+arrive while the Mac sleeps are applied on wake.
 
 Matching is by task text within the intent's day note (the skill's own
 IDs are positional and can't be stored). Zero or several matches, or a
 note that already has the wanted state, is reported rather than guessed.
+An add to a day with no note first does what the skill's `start` does —
+carry undone tasks, add the day's routines — so the note is a normal one.
 
 With --kick, a successful apply also runs `index.py --source tasks` and a
 tasks-only Convex push, so the replica confirms in seconds instead of on
@@ -30,9 +33,22 @@ TASK_RE_FALLBACK = r"^(\s*)([-*]\s+)\[( |x|X)\]\s?(.*)$"
 def _norm(s: str) -> str:
     return " ".join(s.split()).lower()
 
-def apply_to_lines(lines: list, text: str, want: str):
-    """Pure: flip the one top-level task whose text matches. Returns
-    (new_lines | None, error | None); None/None means already in state."""
+_skill_mod = None
+def skill():
+    """The daily-tasks skill's tasks.py, imported once from [convex] tasks_script."""
+    global _skill_mod
+    if _skill_mod is None:
+        path = config.CONVEX_TASKS_SCRIPT
+        spec = importlib.util.spec_from_file_location("daily_tasks", path)
+        if spec is None or spec.loader is None:
+            raise FileNotFoundError(f"tasks script not found: {path}")
+        _skill_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_skill_mod)
+    return _skill_mod
+
+def _find(lines: list, text: str):
+    """The one top-level task whose text matches: ((i, match), None) or
+    (None, error)."""
     import re
     rx = re.compile(TASK_RE_FALLBACK)
     hits = []
@@ -44,13 +60,77 @@ def apply_to_lines(lines: list, text: str, want: str):
         return None, "task not found in that day's note"
     if len(hits) > 1:
         return None, "task text is ambiguous in that day's note"
-    i, m = hits[0]
+    return hits[0], None
+
+def _exists(lines: list, text: str) -> bool:
+    hit, err = _find(lines, text)
+    return hit is not None or (err or "").startswith("task text is ambiguous")
+
+def apply_to_lines(lines: list, text: str, want: str):
+    """Pure: flip the one top-level task whose text matches. Returns
+    (new_lines | None, error | None); None/None means already in state."""
+    hit, err = _find(lines, text)
+    if err:
+        return None, err
+    i, m = hit
     done = m.group(3).lower() == "x"
     if (want == "done") == done:
         return None, None
     new = list(lines)
     new[i] = f"{m.group(1)}{m.group(2)}[{'x' if want == 'done' else ' '}] {m.group(4)}"
     return new, None
+
+def add_to_lines(lines: list, text: str):
+    """Pure: append a top-level task where the skill's `add` puts it."""
+    if _exists(lines, text):
+        return None, "a task with that text is already in that day's note"
+    new = list(lines)
+    skill().append_top(new, text)
+    return new, None
+
+def edit_in_lines(lines: list, text: str, new_text: str):
+    """Pure: rewrite the matched task's text, keeping checkbox and block."""
+    hit, err = _find(lines, text)
+    if err:
+        return None, err
+    if _norm(new_text) == _norm(text):
+        return None, None
+    if _exists(lines, new_text):
+        return None, "a task with the new text is already in that day's note"
+    i, m = hit
+    new = list(lines)
+    new[i] = f"{m.group(1)}{m.group(2)}[{m.group(3)}] {new_text.strip()}"
+    return new, None
+
+def delete_from_lines(lines: list, text: str):
+    """Pure: remove the matched task and its block (subtasks, embeds, notes)."""
+    hit, err = _find(lines, text)
+    if err:
+        return None, err
+    i, _ = hit
+    t = next(t for t in skill().parse(lines) if t.i == i)
+    new = list(lines)
+    del new[t.i:t.end]
+    return new, None
+
+def start_lines(path: str, day: str) -> list:
+    """A fresh day's note the way the skill's `start` makes it: carried
+    undone tasks, then routines. Either step may find nothing."""
+    sk = skill()
+    lines: list = []
+    try:
+        sk.carry_into(lines, path, day)
+    except SystemExit:
+        pass                      # no earlier note with tasks
+    try:
+        existing = {t.text.strip() for t in sk.parse(lines) if t.parent is None}
+        for block in sk.routines_for(os.path.dirname(path), day):
+            head = sk.TASK_RE.match(block[0]).group(4).strip()
+            if head not in existing:
+                sk.append_block(lines, block, routine=True)
+    except (OSError, ValueError, SystemExit):
+        pass                      # no template, or a bad date
+    return lines
 
 def vault_path(name: str) -> str | None:
     for v in config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS"):
@@ -73,10 +153,23 @@ def apply_intent(intent: dict) -> str | None:
     if not vault:
         return f"vault {intent['vault']!r} is not configured on this Mac"
     path = os.path.join(vault, f"{intent['day']}.md")
-    if not os.path.isfile(path):
+    kind = intent.get("kind") or "toggle"
+    if os.path.isfile(path):
+        lines = _read(path)
+    elif kind == "add":
+        lines = start_lines(path, intent["day"])
+    else:
         return f"no note for {intent['day']}"
-    lines = _read(path)
-    new, err = apply_to_lines(lines, intent["text"], intent["want"])
+    if kind == "toggle":
+        new, err = apply_to_lines(lines, intent["text"], intent["want"])
+    elif kind == "add":
+        new, err = add_to_lines(lines, intent["text"])
+    elif kind == "edit":
+        new, err = edit_in_lines(lines, intent["text"], intent["newText"] or "")
+    elif kind == "delete":
+        new, err = delete_from_lines(lines, intent["text"])
+    else:
+        return f"unknown intent kind {kind!r}"
     if err:
         return err
     if new is not None:
@@ -128,7 +221,8 @@ def drain(client, intents: list, kick: bool) -> int:
         client.mutation("today:applyIntent",
                         {"id": it["id"], **({"error": err} if err else {})})
         stamp = time.strftime("%H:%M:%S")
-        print(f"{stamp} {it['day']} {it['want']:4} {it['text'][:50]!r} "
+        what = it.get("want") if (it.get("kind") or "toggle") == "toggle" else it.get("kind")
+        print(f"{stamp} {it['day']} {what:6} {it['text'][:50]!r} "
               f"-> {err or 'ok'}", flush=True)
         applied += not err
     if applied and kick:

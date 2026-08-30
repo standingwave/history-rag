@@ -66,3 +66,71 @@ def test_drain_confirms_each_intent(tmp_path, monkeypatch):
     assert fake.calls == [("today:applyIntent", {"id": "i1"}),
                           ("today:applyIntent", {"id": "i2", "error": "task not found in that day's note"})]
     assert kicked == [1]
+
+
+# ── add / edit / delete (need the daily-tasks skill for the note grammar) ──
+
+skill_present = pytest.mark.skipif(
+    not __import__("os").path.isfile(__import__("config").CONVEX_TASKS_SCRIPT),
+    reason="daily-tasks skill not installed")
+
+BLOCK = ["- [ ] treat hoya for mealybugs",
+         "\t- [ ] isolate from other plants",
+         "\t![[2026-08-28 hoya.jpeg]]",
+         "- [x] workout",
+         "",
+         "## Routine",
+         "- [ ] brush teeth"]
+
+@skill_present
+def test_add_goes_before_routine_and_refuses_duplicates():
+    new, err = ap.add_to_lines(BLOCK, "book dentist")
+    assert err is None
+    assert new[:5] == BLOCK[:4] + ["- [ ] book dentist"]
+    assert new[-2:] == ["## Routine", "- [ ] brush teeth"]
+    new, err = ap.add_to_lines(BLOCK, "  Workout ")
+    assert new is None and "already" in err
+
+@skill_present
+def test_edit_keeps_checkbox_and_block():
+    new, err = ap.edit_in_lines(BLOCK, "workout", "workout (legs)")
+    assert err is None and new[3] == "- [x] workout (legs)" and new[:3] == BLOCK[:3]
+    assert ap.edit_in_lines(BLOCK, "workout", "WORKOUT") == (None, None)
+    new, err = ap.edit_in_lines(BLOCK, "workout", "treat hoya for mealybugs")
+    assert new is None and "already" in err
+    new, err = ap.edit_in_lines(BLOCK, "nope", "x")
+    assert new is None and "not found" in err
+
+@skill_present
+def test_delete_removes_the_whole_block():
+    new, err = ap.delete_from_lines(BLOCK, "treat hoya for mealybugs")
+    assert err is None and new == BLOCK[3:]
+    new, err = ap.delete_from_lines(BLOCK, "isolate from other plants")
+    assert new is None and "not found" in err
+
+@skill_present
+def test_add_to_missing_note_starts_the_day(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
+    (v / "Templates").mkdir()
+    (v / "Templates" / "Daily Tasks Template.md").write_text("- [ ] brush teeth\n- [ ] gym #mon\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    err = ap.apply_intent({"kind": "add", "vault": "Documents", "day": "2026-08-29",
+                           "text": "book dentist"})
+    assert err is None
+    got = (v / "2026-08-29.md").read_text().split("\n")
+    assert got[0] == "- [ ] treat hoya for mealybugs"        # carried, with its block
+    assert "\t- [ ] isolate from other plants" in got
+    assert "- [ ] book dentist" in got and "- [x] workout" not in got
+    assert got.index("- [ ] book dentist") < got.index("## Routine")
+    assert "- [ ] brush teeth" in got and "- [ ] gym" not in got  # 2026-08-29 is a Saturday
+
+@skill_present
+def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    assert ap.apply_intent({"kind": "delete", "vault": "Documents", "day": "2026-08-29",
+                            "text": "x"}) == "no note for 2026-08-29"
+    (v / "2026-08-29.md").write_text("- [ ] x\n")
+    assert "unknown" in ap.apply_intent({"kind": "attach", "vault": "Documents", "day": "2026-08-29",
+                                         "text": "x"})
