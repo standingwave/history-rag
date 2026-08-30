@@ -173,3 +173,18 @@ def test_attach_appends_a_line_at_the_block_end():
     assert err is None and new[4] == "\t- felt strong today"
     assert ap.attach_line("https://x.y/z", title=lambda u: None) == "[https://x.y/z](https://x.y/z)"
     assert "parent task not found" in ap.attach_to_lines(BLOCK, "nope", "x", title=fake)[1]
+
+
+@skill_present
+def test_attach_file_copies_into_the_vault(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
+    src = tmp_path / "IMG_1.JPG"; src.write_bytes(b"jpeg")
+    err = ap.attach_file(str(v), str(v / "2026-08-28.md"), "2026-08-28", "workout", "IMG 1.JPG", str(src))
+    assert err is None
+    assert (v / "Attachments" / "2026-08-28 IMG-1.jpg").read_bytes() == b"jpeg"
+    got = (v / "2026-08-28.md").read_text().split("\n")
+    assert got[3:5] == ["- [x] workout", "\t![[2026-08-28 IMG-1.jpg]]"]
+    err = ap.attach_file(str(v), str(v / "2026-08-28.md"), "2026-08-28", "workout", "IMG 1.JPG", str(src))
+    assert err is None and (v / "Attachments" / "2026-08-28 IMG-1-2.jpg").exists()
+    assert "parent task not found" in ap.attach_file(str(v), str(v / "2026-08-28.md"), "2026-08-28", "nope", "a.png", str(src))

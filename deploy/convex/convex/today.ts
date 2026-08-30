@@ -208,8 +208,9 @@ function subIndex(subs: Sub[], text: string) {
 /* An intent about what's under a task: subtasks or note lines. The row is
    patched optimistically and `prior` holds what to put back on error. */
 async function subIntent(ctx: { db: any }, row: any, kind: "toggle" | "add" | "edit" | "delete" | "attach",
-                         change: { subtasks?: Sub[]; notes?: string[] }, fields: Record<string, unknown>) {
-  const prior = { subtasks: row.meta?.subtasks ?? [], notes: row.meta?.notes ?? [] };
+                         change: { subtasks?: Sub[]; notes?: string[]; attachments?: string[] }, fields: Record<string, unknown>) {
+  const prior = { subtasks: row.meta?.subtasks ?? [], notes: row.meta?.notes ?? [],
+                  attachments: row.meta?.attachments ?? [] };
   await ctx.db.patch(row._id, { meta: { ...row.meta, ...change }, pending: true });
   return await ctx.db.insert("taskIntents", {
     kind, chunkId: row.chunkId, day: row.day, vault: String(row.meta?.vault ?? ""),
@@ -287,6 +288,25 @@ export const subRemove = mutation({
   },
 });
 
+/* A photo or file: the client uploads to Convex storage first, then
+   records it here; the Mac copies it into the vault and the storage
+   object is dropped when the intent is confirmed. */
+export const uploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => { await requireUser(ctx); return ctx.storage.generateUploadUrl(); },
+});
+
+export const attachFile = mutation({
+  args: { id: v.string(), storageId: v.id("_storage"), name: v.string() },
+  handler: async (ctx, { id, storageId, name }) => {
+    await requireUser(ctx);
+    name = name.trim().replace(/[\\/]/g, "-") || "file";
+    const row = await taskRow(ctx, id);
+    const attachments: string[] = [...(row.meta?.attachments ?? []), `${row.day} ${name}`];
+    return subIntent(ctx, row, "attach", { attachments }, { text: name, storageId });
+  },
+});
+
 export const remove = mutation({
   args: { id: v.string() },
   handler: async (ctx, { id }) => {
@@ -324,10 +344,12 @@ export const pendingIntents = internalQuery({
       .query("taskIntents")
       .withIndex("by_appliedAt", (q) => q.eq("appliedAt", undefined))
       .collect();
-    return rows.map((r) => ({
+    const urls = await Promise.all(rows.map((r) => r.storageId ? ctx.storage.getUrl(r.storageId) : null));
+    return rows.map((r, i) => ({
+      fileUrl: urls[i],
       id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
       text: r.text, want: r.want ?? null, newText: r.newText ?? null, parent: r.parent ?? null,
-      requestedAt: r.requestedAt,
+      requestedAt: r.requestedAt, storageId: r.storageId ?? null,
     }));
   },
 });
@@ -338,6 +360,7 @@ export const applyIntent = internalMutation({
     const intent = await ctx.db.get(id);
     if (!intent) return;
     await ctx.db.patch(id, { appliedAt: Date.now(), error });
+    if (intent.storageId) await ctx.storage.delete(intent.storageId).catch(() => {});
     if (!error) return;
     // The vault didn't change: undo the optimistic effect of this kind.
     const row = await byChunkId(ctx, intent.chunkId);

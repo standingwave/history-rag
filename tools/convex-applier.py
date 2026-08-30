@@ -186,6 +186,47 @@ def attach_line(text: str, title=page_title) -> str:
         return f"[{title(text) or text}]({text})"
     return text
 
+def attach_file(vault: str, path: str, day: str, parent_text: str, name: str, src: str):
+    """Copy a downloaded file into the vault's attachments folder the way the
+    skill's `attach` does (dated, slugged, de-duplicated) and embed it
+    right under the task. Returns an error string or None."""
+    import re, shutil
+    sk = skill()
+    lines = _read(path)
+    parent, err = _parent(lines, parent_text)
+    if err:
+        return err
+    os.makedirs(os.path.join(vault, sk.ATTACH_DIR), exist_ok=True)
+    base, ext = os.path.splitext(name)
+    slug = re.sub(r"[^\w.-]+", "-", base).strip("-") or "file"
+    fname = f"{day} {slug}{ext.lower()}"
+    dest = os.path.join(vault, sk.ATTACH_DIR, fname)
+    n = 2
+    while os.path.exists(dest):
+        fname = f"{day} {slug}-{n}{ext.lower()}"
+        dest = os.path.join(vault, sk.ATTACH_DIR, fname)
+        n += 1
+    shutil.copy2(src, dest)
+    lines.insert(parent.i + 1, f"{parent.ws}{sk.INDENT}![[{fname}]]")
+    _write(path, lines)
+    return None
+
+def fetch_file(url: str) -> str:
+    """Download to a temp file; the caller removes it."""
+    import tempfile, urllib.request
+    fd, tmp = tempfile.mkstemp(prefix="oriel-attach-")
+    os.close(fd)
+    with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+        shutil_copy(r, f)
+    return tmp
+
+def shutil_copy(r, f, chunk=1 << 20):
+    while True:
+        b = r.read(chunk)
+        if not b:
+            break
+        f.write(b)
+
 def attach_to_lines(lines: list, parent_text: str, text: str, title=page_title):
     """Pure: append one plain line at the end of the task's block."""
     sk = skill()
@@ -243,6 +284,17 @@ def apply_intent(intent: dict) -> str | None:
         lines = start_lines(path, intent["day"])
     else:
         return f"no note for {intent['day']}"
+    if kind == "attach" and intent.get("fileUrl"):
+        tmp = None
+        try:
+            tmp = fetch_file(intent["fileUrl"])
+            return attach_file(vault, path, intent["day"], intent.get("parent") or "",
+                               intent["text"], tmp)
+        except Exception as e:
+            return f"couldn't fetch the file: {e}"
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
     if kind == "attach":
         new, err = attach_to_lines(lines, intent.get("parent") or "", intent["text"])
     elif intent.get("parent"):

@@ -127,6 +127,7 @@ type Acts = {
   onSubToggle: (text: string) => void; onSubAdd: (text: string) => void;
   onSubEdit: (text: string, newText: string) => void; onSubDelete: (text: string) => void;
   onAttach: (text: string) => void;
+  onAttachFile: (file: File) => void;
 };
 
 /* A note line under a task: markdown links as links, bare URLs too. */
@@ -180,6 +181,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   const [subMode, setSubMode] = useState<{ i: number; m: Mode } | null>(null);
   const [addingSub, setAddingSub] = useState(false);
   const [attaching, setAttaching] = useState<"pick" | "link" | "note" | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [attDraft, setAttDraft] = useState("");
   const notes: string[] = t.meta.notes ?? [];
   const sendAtt = () => { const v = attDraft.trim(); if (v) acts?.onAttach(v); setAttDraft(""); setAttaching(null); };
@@ -254,6 +256,9 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
             <div className="acts sub-acts">
               <button className="act" onClick={() => setAttaching("link")}>🔗 link</button>
               <button className="act" onClick={() => setAttaching("note")}>📝 note</button>
+              <button className="act" onClick={() => fileRef.current?.click()}>🖼 photo or file</button>
+              <input ref={fileRef} type="file" hidden accept="image/*,application/pdf,.txt,.md"
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { acts?.onAttachFile(f); setAttaching(null); } }} />
               <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
             </div>
           )}
@@ -288,6 +293,8 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const subEdit = useMutation(api.today.subEdit);
   const subRemove = useMutation(api.today.subRemove);
   const attach = useMutation(api.today.attach);
+  const uploadUrl = useMutation(api.today.uploadUrl);
+  const attachFile = useMutation(api.today.attachFile);
   const intents = useQuery(api.today.intents, {});
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -316,6 +323,13 @@ function TasksSheet({ day, tasks, latest, onBack }:
     onSubEdit: (text, newText) => void subEdit({ id: t.id, text, newText }).catch(fail),
     onSubDelete: (text) => void subRemove({ id: t.id, text }).catch(fail),
     onAttach: (text) => void attach({ id: t.id, text }).catch(fail),
+    onAttachFile: (file) => void (async () => {
+      const url = await uploadUrl({});
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!res.ok) throw new Error(`upload failed (${res.status})`);
+      const { storageId } = await res.json();
+      await attachFile({ id: t.id, storageId, name: file.name });
+    })().catch(fail),
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
