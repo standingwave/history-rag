@@ -129,5 +129,5 @@ def test_expand_tasks_live_and_index(vault, monkeypatch, scratch_db, fake_embed)
     idx = json.loads(server.expand(cid))
     assert idx["context_source"] == "index"
     got = [t["text"][:10] for t in idx["context"]["tasks"]]
-    assert got == ["treat hoya", "workout", "work on a "]    # routine not indexed
+    assert got == ["treat hoya", "workout", "work on a ", "brush teet"]
     assert idx["context"]["tasks"][0]["subtasks"][0]["done"] is True
