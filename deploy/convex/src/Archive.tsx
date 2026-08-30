@@ -178,6 +178,18 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 
 /* ── ask ──────────────────────────────────────────────────────────────── */
 
+/* An Ask answer with its [id:…] citations as numbered, tappable marks. */
+export function Answer({ text, onOpen }: { text: string; onOpen: (id: string) => void }) {
+  const ids: string[] = [];
+  const parts = text.split(/(\[id:[^\]\s]+\])/g).map((p, i) => {
+    const m = /^\[id:([^\]\s]+)\]$/.exec(p);
+    if (!m) return <span key={i}>{p}</span>;
+    let n = ids.indexOf(m[1]); if (n < 0) { ids.push(m[1]); n = ids.length - 1; }
+    return <span key={i} className="cite" onClick={() => onOpen(m[1])}>[{n + 1}]</span>;
+  });
+  return <p className="answer">{parts}</p>;
+}
+
 export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
   const ask = useAction(api.ask.ask);
   const cfg = useQuery(api.archive.config, {});
@@ -200,13 +212,6 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
   const est = Number(/\d+/.exec(String(cur?.latency ?? ""))?.[0] ?? 0);   // "~10 s" → 10
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
 
-  const render = (text: string) => {
-    const parts = text.split(/(\[id:[^\]\s]+\])/g);
-    return parts.map((p, i) => {
-      const m = /^\[id:([^\]\s]+)\]$/.exec(p);
-      return m ? <span key={i} className="cite" onClick={() => onOpen(m[1])}>[{i}]</span> : <span key={i}>{p}</span>;
-    });
-  };
 
   return (
     <Sheet title="Ask" onBack={onBack}>
@@ -225,7 +230,7 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
       {res?.error && <p className="err">{res.error}</p>}
       {res?.answer && (
         <>
-          <p className="answer">{render(res.answer)}</p>
+          <Answer text={res.answer} onOpen={onOpen} />
           <p className="muted mono small">
             {res.usage?.model} · {res.usage?.turns} turns · {res.usage?.in}/{res.usage?.out} tokens
             {res.note ? ` · ${res.note}` : ""}

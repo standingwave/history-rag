@@ -6,7 +6,8 @@ import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import { SearchSheet, AskSheet, BrowseSheet, Detail, Row } from "./Archive";
+import { SearchSheet, AskSheet, BrowseSheet, Detail, Row, Answer } from "./Archive";
+import { useAction } from "convex/react";
 import { shortDate, hhmm, Linkify } from "./render";
 
 type Item = {
@@ -64,9 +65,9 @@ function period(h: number) {
   return h < 5 ? "night" : h < 12 ? "morning" : h < 18 ? "day" : "night";
 }
 const ORDER: Record<string, string[]> = {
-  morning: ["agenda", "tasks", "notes"],
-  day: ["tasks", "agenda", "notes"],
-  night: ["tasks", "notes", "agenda"],
+  morning: ["agenda", "tasks", "brief"],
+  day: ["tasks", "agenda", "brief"],
+  night: ["tasks", "brief", "agenda"],
 };
 
 export function Today() {
@@ -87,10 +88,7 @@ export function Today() {
 
   const tasks = useQuery(api.today.tasks, { day });
   const agenda = useQuery(api.today.agenda, { day });
-  // Derived from `day`, not Date.now(): a fresh timestamp each render would
-  // be a new subscription each render, re-running the query continuously.
-  const notesSince = new Date(new Date(day + "T00:00:00").getTime() - 6 * 864e5).toISOString();
-  const notes = useQuery(api.today.notes, { since: notesSince });
+  const brief = useQuery(api.brief.latest, {});
   const latest = useQuery(api.today.latestTaskDay, {});
   const intents = useQuery(api.today.intents, {});
   const waiting = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error).length;
@@ -100,8 +98,7 @@ export function Today() {
   if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close} />;
   if (sheet === "agenda") return <ListSheet title={`Agenda · ${dayLabel(day)}`} items={agenda} onBack={close}
     row={(e) => <Row c={e} right={timeOnly(e.timestamp) === "all day" ? "all day" : hhmm(e.timestamp)} onOpen={openId} />} />;
-  if (sheet === "notes") return <ListSheet title="Notes · 7d" items={notes} onBack={close}
-    row={(n) => <Row c={n} onOpen={openId} />} />;
+  if (sheet === "brief") return <BriefSheet brief={brief} onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
   if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
   if (sheet === "ask") return <AskSheet onBack={close} onOpen={openId} />;
@@ -112,8 +109,7 @@ export function Today() {
     agenda: <StatTile key="agenda" title="Agenda" color="#f472b6" onOpen={() => open("agenda")}
       stat={agenda ? String(agenda.length) : "…"}
       caption={agenda?.length ? `next ${timeOnly(agenda.find((e: Item) => new Date(e.timestamp) > new Date())?.timestamp ?? agenda[0].timestamp)}` : "no events"} loading={!agenda} />,
-    notes: <StatTile key="notes" title="Notes" color="#a78bfa" onOpen={() => open("notes")}
-      stat={notes ? String(notes.length) : "…"} caption="edited · 7d" loading={!notes} />,
+    brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
   };
   return (
     <section>
@@ -457,6 +453,58 @@ function TasksSheet({ day, tasks, latest, onBack }:
       {routine.map((t) => row(t, true))}
       {vault && <p><a href={`obsidian://open?vault=${encodeURIComponent(vault)}&file=${day}`}>open today's note in Obsidian ↗</a></p>}
       {!inputOpen && <button className="fab" aria-label="add a task" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
+    </section>
+  );
+}
+
+type Brief = {
+  question: string; answer: string | null; citations: string[]; note: string | null; model: string | null;
+  generatedAt: number | null; ms: number | null; lastError: { error: string; at: number } | null;
+};
+const ago = (t: number) => {
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+};
+
+/* "What did I do over the last day?" — the stored answer's opening, the
+   tile is the wide one so a few lines fit. */
+function BriefTile({ brief, onOpen }: { brief?: Brief; onOpen: () => void }) {
+  const text = brief?.answer?.replace(/\s*\[id:[^\]\s]+\]/g, "").trim() ?? "";
+  return (
+    <button className="tile large brief" onClick={onOpen}>
+      <div className="thead"><span style={{ color: "#a78bfa" }}>Last day</span>
+        <span className="muted">{brief?.generatedAt ? ago(brief.generatedAt) : ""} ›</span></div>
+      {!brief && <Skeleton widths={[92, 84, 60]} style={{ margin: "6px 0" }} />}
+      {brief && !brief.answer && <p className="muted">{brief.lastError ? `couldn't answer: ${brief.lastError.error}` : "not generated yet — open to run it"}</p>}
+      {text && <p className="clamp">{text}</p>}
+    </button>
+  );
+}
+
+function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => void; onOpen: (id: string) => void }) {
+  const refresh = useAction(api.brief.refresh);
+  const [busy, setBusy] = useState(false);
+  const [t0, setT0] = useState(0);
+  useTick(1000, busy);
+  const { push: fail, view: errView } = useErrors();
+  const run = () => { setBusy(true); setT0(Date.now()); refresh({}).catch(fail).finally(() => setBusy(false)); };
+  const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
+  return (
+    <section>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>Last day</span></div>
+      <p className="muted small">{brief?.question ?? "…"}</p>
+      {errView}
+      {brief?.lastError && !busy && <ErrBox>refresh {ago(brief.lastError.at)} failed: {brief.lastError.error}</ErrBox>}
+      {busy && <p className="muted"><span className="pulse">thinking with {brief?.model ?? "the default model"}</span> · <span className="mono">{secs} s</span></p>}
+      {!brief && <Skeleton widths={[96, 88, 92, 60]} />}
+      <div className={busy ? "stale" : ""}>
+        {brief?.answer && <Answer text={brief.answer} onOpen={onOpen} />}
+        {brief && !brief.answer && !busy && <p className="muted">nothing yet</p>}
+      </div>
+      {brief?.generatedAt && !busy && <p className="muted mono small">
+        {brief.model} · {ago(brief.generatedAt)} · {((brief.ms ?? 0) / 1000).toFixed(0)} s{brief.note ? ` · ${brief.note}` : ""}
+        {brief.citations.length === 0 ? " · no sources cited" : ` · ${brief.citations.length} sources`}</p>}
+      <p><button className="chip" disabled={busy} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></p>
     </section>
   );
 }

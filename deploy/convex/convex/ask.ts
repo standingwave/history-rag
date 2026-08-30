@@ -7,7 +7,7 @@
    Tools are read-only, so injected text in indexed content can at worst
    produce a bad answer. */
 import { v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireUserAction } from "./auth";
 import { runSearch, ALL_SOURCES } from "./search";
@@ -158,10 +158,24 @@ export function citations(text: string): string[] {
   return out;
 }
 
+export type AskArgs = { q: string; model?: string; strict?: boolean };
+export type AskResult = {
+  answer?: string; citations?: string[]; note?: string; error?: string;
+  usage?: { in: number; out: number; turns: number; model: string };
+};
+
+const askArgs = { q: v.string(), model: v.optional(v.string()), strict: v.optional(v.boolean()) };
 export const ask = action({
-  args: { q: v.string(), model: v.optional(v.string()), strict: v.optional(v.boolean()) },
-  handler: async (ctx, a): Promise<any> => {
-    await requireUserAction(ctx);
+  args: askArgs,
+  handler: async (ctx, a): Promise<AskResult> => { await requireUserAction(ctx); return askCore(ctx, a); },
+});
+export const askInternal = internalAction({
+  args: askArgs,
+  handler: async (ctx, a): Promise<AskResult> => askCore(ctx, a),
+});
+
+export async function askCore(ctx: ActionCtx, a: AskArgs): Promise<AskResult> {
+  {
     const ps = presets();
     if (!ps.length) return { error: "ask mode isn't configured — set ASK_MODELS and the key env vars" };
     const preset = a.model ? ps.find((p) => p.name === a.model) : ps[0];
@@ -213,5 +227,5 @@ export const ask = action({
       adapter.addResults(results);
     }
     return { answer: text, note: "stopped at max_turns", citations: citations(text), usage };
-  },
-});
+  }
+}

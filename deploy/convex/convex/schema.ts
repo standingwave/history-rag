@@ -56,6 +56,19 @@ export default defineSchema({
     latestDay: v.string(),
     updatedAt: v.number(),
   }).index("by_source", ["source"]),
+  /* The dashboard's standing question, answered by Ask on a schedule
+     (brief.ts); the newest row is the tile. */
+  briefs: defineTable({
+    question: v.string(),
+    answer: v.optional(v.string()),
+    citations: v.optional(v.array(v.string())),
+    note: v.optional(v.string()),
+    error: v.optional(v.string()),
+    model: v.optional(v.string()),
+    usage: v.optional(v.any()),
+    generatedAt: v.number(),
+    ms: v.number(),
+  }).index("by_question", ["question", "generatedAt"]),
   syncRuns: defineTable({
     source: v.string(),
     startedAt: v.number(),

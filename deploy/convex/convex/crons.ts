@@ -7,4 +7,8 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 crons.interval("warm embedding endpoint", { minutes: 3 }, internal.search.warmEmbed, {});
+/* "What did I do over the last day?" for the dashboard tile: a haiku
+   loop is a few cents, so every 3 hours keeps it fresh without waste;
+   the sheet's refresh runs it on demand. */
+crons.interval("last-day brief", { hours: 3 }, internal.brief.generate, {});
 export default crons;
