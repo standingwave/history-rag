@@ -7,7 +7,14 @@ import { internal } from "./_generated/api";
 import { requireUser, requireUserAction } from "./auth";
 import { askCore } from "./ask";
 
-export const QUESTION = "What did I do over the last day?";
+export const QUESTION = "What did I do over the previous 24 hours?";
+/* The question the model actually sees pins the window, so "previous 24
+   hours" means exactly that and not "today so far". */
+function phrased(now: Date) {
+  const from = new Date(now.getTime() - 24 * 3600e3);
+  return `${QUESTION} That is the window from ${from.toISOString()} to ${now.toISOString()} (UTC). ` +
+    "Summarise what happened in it: work, browsing, notes, tasks, calendar, app usage.";
+}
 const KEEP = 30;
 
 export const generate = internalAction({
@@ -15,7 +22,7 @@ export const generate = internalAction({
   handler: async (ctx, { question }) => {
     const q = question ?? QUESTION;
     const t0 = Date.now();
-    const r = await askCore(ctx, { q, strict: true });
+    const r = await askCore(ctx, { q: question ? q : phrased(new Date()), strict: true });
     await ctx.runMutation(internal.brief.put, {
       question: q, answer: r.answer, citations: r.citations, note: r.note, error: r.error,
       model: r.usage?.model, usage: r.usage, ms: Date.now() - t0,
