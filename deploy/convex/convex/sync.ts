@@ -10,6 +10,8 @@ import {
   internalAction, internalMutation, internalQuery,
 } from "./_generated/server";
 import { rag } from "./rag";
+import { components } from "./_generated/api";
+import { ALL_SOURCES } from "./search";
 import type { Doc } from "./_generated/dataModel";
 
 const itemArg = v.object({
@@ -241,5 +243,52 @@ export const census = internalAction({
     }
     out.items = items;
     return out;
+  },
+});
+
+/* ── namespace versions ───────────────────────────────────────────────── */
+
+/* A dimension change (EMBED_DIM) makes the component create a new
+   namespace version per source and mark the old one "replaced"; the old
+   vectors stay until their entries are deleted. `namespaces` lists the
+   versions; `gcReplacedNamespaces` deletes entries of replaced versions a
+   page at a time, rescheduling itself until nothing is left. */
+export const namespaces = internalAction({
+  args: {},
+  handler: async (ctx): Promise<any[]> => {
+    const out: any[] = [];
+    for (const ns of ALL_SOURCES) {
+      const page: any = await ctx.runQuery(components.rag.namespaces.listNamespaceVersions,
+        { namespace: ns, paginationOpts: { cursor: null, numItems: 20 } });
+      for (const n of page.page) out.push({ namespace: ns, version: n.version, dimension: n.dimension,
+        status: n.status.kind, namespaceId: n.namespaceId });
+    }
+    return out;
+  },
+});
+
+export const gcReplacedNamespaces = internalAction({
+  args: { deleted: v.optional(v.number()) },
+  handler: async (ctx, { deleted = 0 }): Promise<{ deleted: number; done: boolean }> => {
+    let n = 0;
+    for (const ns of ALL_SOURCES) {
+      const page: any = await ctx.runQuery(components.rag.namespaces.listNamespaceVersions,
+        { namespace: ns, paginationOpts: { cursor: null, numItems: 20 } });
+      for (const old of page.page.filter((x: any) => x.status.kind === "replaced")) {
+        for (const status of ["ready", "pending", "replaced"] as const) {
+          const entries = await rag.list(ctx, { namespaceId: old.namespaceId, status, limit: 200 });
+          for (const e of entries.page) { await rag.deleteAsync(ctx, { entryId: e.entryId }); n++; }
+          if (n >= 400) break;
+        }
+        if (n >= 400) break;
+      }
+      if (n >= 400) break;
+    }
+    if (n > 0) {
+      await ctx.scheduler.runAfter(2000, internal.sync.gcReplacedNamespaces, { deleted: deleted + n });
+      return { deleted: deleted + n, done: false };
+    }
+    console.log(`gcReplacedNamespaces done: ${deleted} entries deleted`);
+    return { deleted, done: true };
   },
 });

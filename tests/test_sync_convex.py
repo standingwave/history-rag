@@ -39,9 +39,17 @@ def test_shape_row():
     assert it["chunkId"] == "tasks:abc" and it["day"] and it["month"] == it["day"][:7]
     assert it["embedding"] == [0.1, 0.2] and it["meta"] == {"done": False}
 
-def test_unpack_float32():
+def test_unpack_float32(monkeypatch):
+    monkeypatch.setattr(sc.config, "CONVEX_DIM", 3)
     blob = struct.pack("3f", 1.0, 0.5, -0.25)
     assert sc.unpack(blob, 3) == [1.0, 0.5, -0.25]
+
+
+def test_unpack_truncates_and_renormalises():
+    blob = struct.pack("4f", 3.0, 4.0, 9.0, 9.0)
+    v = sc.unpack(blob, 4, keep=2)
+    assert v == [0.6, 0.8]                       # 3,4 / 5
+    assert sc.content_hash("t", [], 4) != sc.content_hash("t", [], 2)
 
 def test_plan_diff():
     up, rm = sc.plan({"a": "h1", "b": "h2", "c": "h3"}, {"a": "h1", "b": "old", "z": "h9"})

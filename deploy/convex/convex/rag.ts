@@ -48,14 +48,27 @@ async function embedHf(text: string): Promise<number[]> {
 
 export const EMBED_PROVIDER = process.env.EMBED_PROVIDER ?? "mixedbread";
 
+/* Stored dimension. The model emits 1024; a Matryoshka prefix of EMBED_DIM
+   dims, renormalised, is what the Mac pushes ([convex] dim) and what a
+   query must be reduced to. Changing it versions every namespace. */
+export const EMBED_DIM = Number(process.env.EMBED_DIM ?? 1024);
+
+export function truncate(v: number[], dim = EMBED_DIM): number[] {
+  if (v.length <= dim) return v;
+  const t = v.slice(0, dim);
+  const n = Math.sqrt(t.reduce((s, x) => s + x * x, 0)) || 1;
+  return t.map((x) => x / n);
+}
+
 export async function embedQuery(text: string): Promise<number[]> {
-  if (EMBED_PROVIDER === "hf") return embedHf(text);
-  return (await embed({ model: queryModel, value: text })).embedding;
+  const full = EMBED_PROVIDER === "hf" ? await embedHf(text)
+    : (await embed({ model: queryModel, value: text })).embedding;
+  return truncate(full);
 }
 
 export const rag = new RAG<Filters>(components.rag, {
   textEmbeddingModel: queryModel,
-  embeddingDimension: 1024,
+  embeddingDimension: EMBED_DIM as 1024 | 768 | 512,
   filterNames: [...FILTER_NAMES],
 });
 

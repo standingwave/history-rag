@@ -153,6 +153,12 @@ _cs = get("convex", "sources", "CLAUDE_RAG_CONVEX_SOURCES", [])
 CONVEX_SOURCES = [s for s in (_cs.split(",") if isinstance(_cs, str) else _cs)
                   if str(s).strip()]
 CONVEX_BATCH = int(get("convex", "batch", "CLAUDE_RAG_CONVEX_BATCH", 60))
+# Dimensions kept per vector on Convex. mxbai-embed-large is Matryoshka-
+# trained, so a prefix of the local 1024-dim vector (renormalised) is a
+# valid smaller embedding; 768 measured 9/10 top-10 agreement with 1024
+# (wip/eval-mrl-truncation.py, 2026-08-29). Must equal EMBED_DIM on the
+# deployment; changing it re-pushes every chunk.
+CONVEX_DIM = int(get("convex", "dim", "CLAUDE_RAG_CONVEX_DIM", DIM))
 CONVEX_STATE_DB = os.path.expanduser(get(
     "convex", "state_db", "CLAUDE_RAG_CONVEX_STATE_DB",
     "~/.claude/history-rag-convex.db"))

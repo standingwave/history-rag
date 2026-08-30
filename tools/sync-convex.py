@@ -64,9 +64,12 @@ def filter_values(source: str, day: str, month: str, location: str,
             {"name": "locpfx", "value": loc_prefix(source, location)},
             {"name": "done", "value": done}]
 
-def content_hash(text: str, fvals: list) -> str:
+def content_hash(text: str, fvals: list, dim: int | None = None) -> str:
+    """Text + filter values + stored dimension: a dimension change must
+    re-push every chunk even though nothing else moved."""
     h = hashlib.sha256(text.encode())
     h.update(json.dumps(fvals, sort_keys=True).encode())
+    h.update(str(dim if dim is not None else config.CONVEX_DIM).encode())
     return h.hexdigest()[:32]
 
 def shape(row: tuple, embedding: list | None) -> dict:
@@ -84,8 +87,16 @@ def shape(row: tuple, embedding: list | None) -> dict:
         item["embedding"] = embedding
     return item
 
-def unpack(blob: bytes, dim: int) -> list:
-    return list(struct.unpack(f"{dim}f", blob))
+def unpack(blob: bytes, dim: int, keep: int | None = None) -> list:
+    """The stored float32 vector; truncated to `keep` dims (Matryoshka
+    prefix) and renormalised when that is smaller than `dim`."""
+    v = list(struct.unpack(f"{dim}f", blob))
+    keep = keep if keep is not None else config.CONVEX_DIM
+    if keep < dim:
+        v = v[:keep]
+        n = sum(x * x for x in v) ** 0.5 or 1.0
+        v = [x / n for x in v]
+    return v
 
 def plan(current: dict, state: dict) -> tuple[list, list]:
     """current: chunk id -> content hash from the index; state: the same
