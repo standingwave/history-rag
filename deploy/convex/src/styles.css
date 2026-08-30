@@ -6,7 +6,10 @@
 html, body { overflow-x: clip; width: 100%; -webkit-text-size-adjust: 100%; }
 #root { width: 100%; overflow-x: clip; }
 img, video, table, pre, textarea, input, select, button { max-width: 100%; }
-body { margin: 0; background: #121215; color: #e8e8eb; font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+/* iOS zooms the page when a focused input's font is under 16px and never
+   zooms back — the "page wider than the screen" symptom. */
+input, select, textarea { font-size: 16px; }
+body { margin: 0; background: #121215; color: #e8e8eb; font: 16px/1.45 -apple-system, system-ui, sans-serif; }
 .col { max-width: 44rem; width: 100%; margin: 0 auto; padding: 14px 16px 56px; min-width: 0; }
 /* Layout rule: every flex/grid child that can hold text gets min-width: 0,
    and grid tracks use minmax(0, 1fr) — otherwise min-content of one long
