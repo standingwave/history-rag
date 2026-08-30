@@ -5,7 +5,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAction, useConvex, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
-import { localDay } from "./Today";
+import { localDay, useTick, useErrors, Skeleton } from "./Today";
 import { describe, color, DetailBody, type Chunk } from "./render";
 
 export const SOURCES = ["tasks", "obsidian", "calendar", "email", "browser",
@@ -52,7 +52,7 @@ function kfmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ?
    count; with `sel`/`onToggle` the chips double as the source selector. */
 export function StatsStrip({ sel, onToggle }: { sel?: Set<string>; onToggle?: (s: string) => void }) {
   const st = useQuery(api.archive.stats, {});
-  if (!st) return <p className="muted small mono">…</p>;
+  if (!st) return <div className="stats"><span className="skel" style={{ width: "55%", margin: "2px 0 8px" }} /><div className="chips">{[52, 60, 64, 56, 48].map((w, i) => <span key={i} className="chip skel" style={{ width: w, height: "1.6em", border: 0 }} />)}</div></div>;
   const lo = st.sources.reduce((m, r) => (r.earliestDay && (!m || r.earliestDay < m) ? r.earliestDay : m), "");
   const hi = st.sources.reduce((m, r) => (r.latestDay > m ? r.latestDay : m), "");
   return (
@@ -94,7 +94,11 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const c = res?.chunk;
   return (
     <Sheet title="Detail" onBack={onBack} stats={<></>}>
-      {res === undefined && <p className="muted">…</p>}
+      {res === undefined && (<>
+        <span className="skel" style={{ width: "75%", height: "1.3em", margin: "6px 0 14px" }} />
+        <Skeleton widths={[40, 55]} style={{ marginBottom: 14 }} />
+        <Skeleton widths={[96, 88, 92, 60]} />
+      </>)}
       {res?.error && <p className="err">{res.error}</p>}
       {c && (
         <>
@@ -119,6 +123,9 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [t0, setT0] = useState(0);
+  useTick(250, busy);
+  const { push: fail, view: errView } = useErrors();
 
   const toggle = (s: string) => setSel((old) => {
     const n = new Set(old);
@@ -128,7 +135,7 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   const all = () => setSel(new Set(sel.size === SOURCES.length ? [] : SOURCES));
 
   const run = async () => {
-    setBusy(true); const t0 = performance.now();
+    setBusy(true); const t0 = performance.now(); setT0(t0); setStatus("");
     try {
       const r = await live({ query: q, sources: [...sel], limit: k,
                              since: since || undefined, until: until || undefined });
@@ -140,9 +147,10 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
       setStatus(`${merged.length} shown · ${r.candidates} candidates` +
         (r.dropped ? ` · ${r.dropped} dropped by window` : "") +
         ` · ${ms}ms (embed ${r.timing.embedMs} · search ${r.timing.searchMs} · join ${r.timing.joinMs})`);
-    } catch (e) { alert(String(e)); }
+    } catch (e) { fail(e); }
     finally { setBusy(false); }
   };
+  const elapsed = busy ? (performance.now() - t0) / 1000 : 0;
 
   return (
     <Sheet title="Search" onBack={onBack} stats={<StatsStrip sel={sel} onToggle={toggle} />}>
@@ -156,9 +164,14 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         <input type="number" min={1} max={50} value={k} onChange={(e) => setK(Number(e.target.value) || 10)} aria-label="results" />
       </div>
       <p className="small"><button type="button" className="lnk" onClick={all}>{sel.size === SOURCES.length ? "none" : "all sources"}</button></p>
-      {status && <p className="muted mono small">{status}</p>}
-      {hits?.length === 0 && <p className="muted">nothing</p>}
-      {hits?.map((r) => <Row key={r.id} c={r} right={r.score.toFixed(3)} onOpen={onOpen} />)}
+      {errView}
+      {busy && <p className="muted mono small"><span className="pulse">searching {sel.size} source{sel.size === 1 ? "" : "s"}…</span>
+        {elapsed >= 1.5 && <span> {elapsed.toFixed(1)} s · warming the embedding host</span>}</p>}
+      {!busy && status && <p className="muted mono small">{status}</p>}
+      {hits?.length === 0 && !busy && <p className="muted">nothing</p>}
+      <div className={busy ? "stale" : ""}>
+        {hits?.map((r) => <Row key={r.id} c={r} right={r.score.toFixed(3)} onOpen={onOpen} />)}
+      </div>
     </Sheet>
   );
 }
@@ -174,14 +187,18 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
   const [strict, setStrict] = useState(false);
   const [res, setRes] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [t0, setT0] = useState(0);
+  useTick(1000, busy);
 
   const run = async () => {
-    setBusy(true); setRes(null);
+    setBusy(true); setRes(null); setT0(Date.now());
     try { setRes(await ask({ q, model: model || undefined, strict })); }
     catch (e) { setRes({ error: String(e) }); }
     finally { setBusy(false); }
   };
   const cur = models.find((m) => m.name === model) ?? models[0];
+  const est = Number(/\d+/.exec(String(cur?.latency ?? ""))?.[0] ?? 0);   // "~10 s" → 10
+  const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
 
   const render = (text: string) => {
     const parts = text.split(/(\[id:[^\]\s]+\])/g);
@@ -204,7 +221,7 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
         <label><input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} /> sources required</label>
       </div>
       {cfg && !models.length && <p className="muted small">ask isn't configured (ASK_MODELS)</p>}
-      {busy && <p className="muted">thinking with {cur?.name}…</p>}
+      {busy && <p className="muted"><span className="pulse">thinking with {cur?.name}</span> · <span className="mono" style={est && secs > est ? { color: "#facc15" } : undefined}>{secs} s</span>{est ? <span className="small"> of ~{est}</span> : null}</p>}
       {res?.error && <p className="err">{res.error}</p>}
       {res?.answer && (
         <>
@@ -235,11 +252,12 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   const [err, setErr] = useState("");
   const LIMIT = 50;
 
-  const run = async (append = false) => {
+  const run = async (append = false, win?: { since: string; until: string }) => {
+    const s = win?.since ?? since, u = win?.until ?? until;
     setBusy(true); setErr("");
     try {
       const r = await convex.query(api.archive.window, {
-        since: since || undefined, until: until || undefined, source: source || undefined,
+        since: s || undefined, until: u || undefined, source: source || undefined,
         summaries, limit: LIMIT, cursor: append ? cursor : null });
       setRows((old) => (append && old ? [...old, ...r.results] : r.results));
       setCursor(r.cursor);
@@ -252,7 +270,9 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
     const s = new Date(since + "T12:00"); s.setDate(s.getDate() + days);
     const u = new Date(until + "T12:00"); u.setDate(u.getDate() + days);
     setSince(localDay(s)); setUntil(localDay(u));
+    void run(false, { since: localDay(s), until: localDay(u) });
   };
+  const label = since === until ? since : `${since} – ${until}`;
 
   return (
     <Sheet title="Browse" onBack={onBack}>
@@ -270,11 +290,15 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         </select>
         <label><input type="checkbox" checked={summaries} onChange={(e) => setSummaries(e.target.checked)} /> summaries</label>
       </div>
-      {err && <p className="err">{err}</p>}
-      {rows && <p className="muted mono small">{rows.length} shown{cursor ? " · more below" : rows.length ? " · end" : ""}</p>}
-      {rows?.length === 0 && <p className="muted">nothing</p>}
-      {rows?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
-      {cursor && <p><button className="chip" disabled={busy} onClick={() => void run(true)}>more ›</button></p>}
+      {err && <div className="errbox"><span>{err}</span><button className="lnk" onClick={() => setErr("")}>✕</button></div>}
+      {busy && !rows && <Skeleton widths={[80, 62, 71, 55]} style={{ margin: "8px 0" }} />}
+      {busy && rows && <p className="muted mono small pulse">loading {label}…</p>}
+      {!busy && rows && <p className="muted mono small">{rows.length} shown{cursor ? " · more below" : rows.length ? " · end" : ""}</p>}
+      {rows?.length === 0 && !busy && <p className="muted">nothing</p>}
+      <div className={busy ? "stale" : ""}>
+        {rows?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
+      </div>
+      {cursor && <p><button className={`chip ${busy ? "pulse" : ""}`} disabled={busy} onClick={() => void run(true)}>{busy ? "loading…" : "more ›"}</button></p>}
     </Sheet>
   );
 }

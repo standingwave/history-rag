@@ -2,9 +2,10 @@
    (large, interactive checkboxes), Agenda + Notes (small); Search / Ask /
    Browse and the reading view are sheets from ./Archive. Sheets route by
    the `#w=` hash; `#w=x:<id>` is the reading view. */
-import { useEffect, useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
+import type { Id } from "../convex/_generated/dataModel";
 import { SearchSheet, AskSheet, BrowseSheet, Detail, Row } from "./Archive";
 import { shortDate, hhmm, Linkify } from "./render";
 
@@ -32,6 +33,33 @@ function timeOnly(ts: string) {
 function title(t: Item) {
   return t.text.split("\n", 1)[0].replace(/^Task: /, "");
 }
+/* Re-render every `ms` while mounted: elapsed counters, intent ages. */
+export function useTick(ms: number, on = true) {
+  const [, set] = useState(0);
+  useEffect(() => { if (!on) return; const t = setInterval(() => set((n) => n + 1), ms); return () => clearInterval(t); }, [ms, on]);
+}
+const YOUNG_MS = 60_000;   // an intent younger than this is "on its way"; older is "queued"
+
+/* Errors that belong to this screen: a red box in the waiting line's
+   shape, dismissable, gone by itself after 8 s. */
+export function useErrors() {
+  const [errs, setErrs] = useState<{ id: number; msg: string }[]>([]);
+  const dismiss = (id: number) => setErrs((e) => e.filter((x) => x.id !== id));
+  const push = (e: unknown) => {
+    const id = Date.now() + Math.random();
+    setErrs((old) => [...old, { id, msg: String(e instanceof Error ? e.message : e).replace(/^.*Uncaught Error: /, "").split("\n")[0] }]);
+    setTimeout(() => dismiss(id), 8000);
+  };
+  const view = errs.map((e) => <ErrBox key={e.id} onClose={() => dismiss(e.id)}>{e.msg}</ErrBox>);
+  return { push, view };
+}
+export function ErrBox({ children, onClose, action }: { children: ReactNode; onClose?: () => void; action?: ReactNode }) {
+  return <div className="errbox"><span>{children}</span>{action ?? (onClose && <button className="lnk" onClick={onClose}>✕</button>)}</div>;
+}
+export function Skeleton({ widths, style }: { widths: number[]; style?: React.CSSProperties }) {
+  return <div style={{ display: "grid", gap: 8, ...style }}>{widths.map((w, i) => <span key={i} className="skel" style={{ width: `${w}%` }} />)}</div>;
+}
+
 function period(h: number) {
   return h < 5 ? "night" : h < 12 ? "morning" : h < 18 ? "day" : "night";
 }
@@ -64,6 +92,8 @@ export function Today() {
   const notesSince = new Date(new Date(day + "T00:00:00").getTime() - 6 * 864e5).toISOString();
   const notes = useQuery(api.today.notes, { since: notesSince });
   const latest = useQuery(api.today.latestTaskDay, {});
+  const intents = useQuery(api.today.intents, {});
+  const waiting = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error).length;
   const hour = new Date().getHours();
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
@@ -78,12 +108,12 @@ export function Today() {
   if (sheet === "browse") return <BrowseSheet onBack={close} onOpen={openId} />;
 
   const tiles: Record<string, JSX.Element> = {
-    tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} onOpen={() => open("tasks")} />,
+    tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} waiting={waiting} onOpen={() => open("tasks")} />,
     agenda: <StatTile key="agenda" title="Agenda" color="#f472b6" onOpen={() => open("agenda")}
       stat={agenda ? String(agenda.length) : "…"}
-      caption={agenda?.length ? `next ${timeOnly(agenda.find((e: Item) => new Date(e.timestamp) > new Date())?.timestamp ?? agenda[0].timestamp)}` : "no events"} />,
+      caption={agenda?.length ? `next ${timeOnly(agenda.find((e: Item) => new Date(e.timestamp) > new Date())?.timestamp ?? agenda[0].timestamp)}` : "no events"} loading={!agenda} />,
     notes: <StatTile key="notes" title="Notes" color="#a78bfa" onOpen={() => open("notes")}
-      stat={notes ? String(notes.length) : "…"} caption="edited · 7d" />,
+      stat={notes ? String(notes.length) : "…"} caption="edited · 7d" loading={!notes} />,
   };
   return (
     <section>
@@ -100,7 +130,7 @@ export function Today() {
   );
 }
 
-function TasksTile({ tasks, hour, onOpen }: { tasks?: Item[]; hour: number; onOpen: () => void }) {
+function TasksTile({ tasks, hour, waiting, onOpen }: { tasks?: Item[]; hour: number; waiting: number; onOpen: () => void }) {
   const night = period(hour) === "night";
   const list = tasks ?? [];
   const main = list.filter((t) => t.meta.section !== "Routine");
@@ -111,11 +141,13 @@ function TasksTile({ tasks, hour, onOpen }: { tasks?: Item[]; hour: number; onOp
     <button className="tile large" onClick={onOpen}>
       <div className="thead"><span style={{ color: "#facc15" }}>☑ Tasks</span>
         <span className="muted">{tasks ? `${done.length}/${main.length} done` : "…"} ›</span></div>
+      {!tasks && <Skeleton widths={[70, 55, 62]} style={{ margin: "6px 0" }} />}
       {shown.map((t) => <TaskRow key={t.id} t={t} compact />)}
       {tasks && !main.length && <p className="muted">no note for today</p>}
       {tasks && main.length > 0 && (
         <p className="muted small">
           {more > 0 ? `+${more} more · ` : ""}{done.length} done · {list.length - main.length} routine
+          {waiting > 0 && <span className="waiting"> · {waiting} waiting</span>}
         </p>
       )}
     </button>
@@ -127,8 +159,12 @@ type Acts = {
   onSubToggle: (text: string) => void; onSubAdd: (text: string) => void;
   onSubEdit: (text: string, newText: string) => void; onSubDelete: (text: string) => void;
   onAttach: (text: string) => void;
-  onAttachFile: (file: File) => void;
+  onAttachFile: (file: File, onProgress: (loaded: number, total: number) => void) => Promise<void>;
 };
+type Busy = { label: string; young: boolean };
+function busyLabel(b?: Busy) {
+  return b ? <span className={`muted mono small ${b.young ? "pulse" : ""}`}>{b.young ? `${b.label}…` : "queued"}</span> : null;
+}
 
 /* A note line under a task: markdown links as links, bare URLs too. */
 function NoteLine({ line }: { line: string }) {
@@ -139,8 +175,8 @@ function NoteLine({ line }: { line: string }) {
 
 /* One line under a task: toggle glyph, text, its own … for edit/delete,
    or the underlined input while editing. */
-function SubRow({ s, acts, mode, setMode }:
-  { s: { text: string; done: boolean }; acts?: Acts; mode: Mode; setMode: (m: Mode) => void }) {
+function SubRow({ s, acts, mode, setMode, busy }:
+  { s: { text: string; done: boolean }; acts?: Acts; mode: Mode; setMode: (m: Mode) => void; busy?: Busy }) {
   const [draft, setDraft] = useState(s.text);
   const save = () => { const v = draft.trim(); if (v && v !== s.text) acts?.onSubEdit(s.text, v); setMode(null); };
   if (mode === "edit") return (
@@ -152,10 +188,11 @@ function SubRow({ s, acts, mode, setMode }:
   );
   return (
     <>
-      <div className={`sub ${s.done ? "done" : ""}`}>
-        {acts ? <button className="glyph" onClick={() => acts.onSubToggle(s.text)}>{s.done ? "●" : "○"}</button>
-              : <span className="glyph">{s.done ? "●" : "○"}</span>}
+      <div className={`sub ${s.done ? "done" : ""} ${busy ? "pending" : ""}`}>
+        {acts && !busy ? <button className="glyph" onClick={() => acts.onSubToggle(s.text)}>{s.done ? "●" : "○"}</button>
+              : <span className={`glyph ${busy?.young ? "pulse" : ""}`}>{s.done ? "●" : "○"}</span>}
         <span>{s.text}</span>
+        {busyLabel(busy)}
         {acts && <button className={`more ${mode ? "on" : ""}`} onClick={() => setMode(mode ? null : "acts")}>…</button>}
       </div>
       {mode === "acts" && <div className="acts sub-acts">
@@ -172,8 +209,9 @@ function SubRow({ s, acts, mode, setMode }:
    the action strip (edit · delete); edit swaps the text for an underlined
    input in place; delete asks once, naming what the block takes with it. */
 type Mode = "acts" | "edit" | "delete" | null;
-function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
-  { t: Item; compact?: boolean; acts?: Acts; fixed?: boolean; placeholder?: string; mode?: Mode; setMode?: (m: Mode) => void }) {
+function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, setMode }:
+  { t: Item; compact?: boolean; acts?: Acts; fixed?: boolean; placeholder?: Busy; busy?: Busy;
+    subBusy?: Record<string, Busy>; mode?: Mode; setMode?: (m: Mode) => void }) {
   const subs: { text: string; done: boolean }[] = t.meta.subtasks ?? [];
   const atts: string[] = t.meta.attachments ?? [];
   const [open, setOpen] = useState(false);
@@ -185,6 +223,13 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   const [attDraft, setAttDraft] = useState("");
   const notes: string[] = t.meta.notes ?? [];
   const sendAtt = () => { const v = attDraft.trim(); if (v) acts?.onAttach(v); setAttDraft(""); setAttaching(null); };
+  // A file on its way up: local to this row, from the first byte.
+  const [upload, setUpload] = useState<{ file: File; loaded: number; err?: string } | null>(null);
+  const startUpload = (file: File) => {
+    setUpload({ file, loaded: 0 });
+    acts?.onAttachFile(file, (loaded) => setUpload((u) => u && { ...u, loaded }))
+      .then(() => setUpload(null), (e) => setUpload({ file, loaded: 0, err: String(e instanceof Error ? e.message : e) }));
+  };
   const [subDraft, setSubDraft] = useState("");
   const subRef = useRef<HTMLInputElement>(null);
   const addSub = () => {
@@ -195,7 +240,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   const glyph = t.meta.done ? "●" : "○";
   // A placeholder (add/edit awaiting the Mac) has no line in the note yet.
   const editable = !!acts && !placeholder;
-  const status = placeholder ? `${placeholder}…` : "";
+  const pulse = (placeholder ?? busy)?.young ? "pulse" : "";
   const startEdit = () => { setDraft(title(t)); setMode?.("edit"); };
   const save = () => { const v = draft.trim(); if (v && v !== title(t)) acts?.onEdit(v); setMode?.(null); };
   if (mode === "edit") return (
@@ -215,12 +260,12 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
     <div className={`trow ${t.meta.done ? "done" : ""} ${t.pending ? "pending" : ""}`}>
       <div className="tline">
         {editable
-          ? <button className="glyph" aria-label="toggle" onClick={(e) => { e.stopPropagation(); acts.onToggle(); }}>{glyph}</button>
-          : <span className="glyph">{glyph}</span>}
+          ? <button className={`glyph ${pulse}`} aria-label="toggle" onClick={(e) => { e.stopPropagation(); acts.onToggle(); }}>{glyph}</button>
+          : <span className={`glyph ${pulse}`}>{glyph}</span>}
         <span className="ttext" onClick={() => !compact && setOpen(!open)}>{title(t)}</span>
-        <span className="muted mono small">
-          {status || (subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : "")}
-        </span>
+        {placeholder ? busyLabel(placeholder) : <span className="muted mono small">
+          {subs.length ? `${subs.filter((s) => s.done).length}/${subs.length}` : ""}
+        </span>}
         {editable && !fixed && <button className={`more ${mode ? "on" : ""}`} aria-label="actions"
           onClick={() => setMode?.(mode ? null : "acts")}>…</button>}
       </div>
@@ -240,7 +285,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
       )}
       {open && !compact && (
         <div className="tdetail">
-          {subs.map((s, i) => <SubRow key={s.text} s={s} acts={editable ? acts : undefined}
+          {subs.map((s, i) => <SubRow key={s.text} s={s} acts={editable ? acts : undefined} busy={subBusy?.[normKey(s.text)]}
             mode={subMode?.i === i ? subMode.m : null} setMode={(m) => setSubMode(m ? { i, m } : null)} />)}
           {addingSub && (
             <div className="sub edit composer"><span className="glyph">○</span>
@@ -252,13 +297,20 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
           )}
           {atts.map((a: string) => <div key={a} className="muted">📎 {a}</div>)}
           {notes.map((n, i) => <NoteLine key={i} line={n} />)}
+          {upload && !upload.err && (
+            <div className="sub pending"><span className="pulse" style={{ color: "#facc15" }}>🖼</span>
+              <span className="muted">{upload.file.name}</span>
+              <span className="muted mono small">{mb(upload.loaded)} / {mb(upload.file.size)} MB</span></div>
+          )}
+          {upload?.err && <ErrBox action={<button className="lnk" onClick={() => startUpload(upload.file)}>retry</button>}>🖼 {upload.file.name} · {upload.err}</ErrBox>}
+          {busy?.label === "attaching" && <div className="sub pending"><span className={busy.young ? "pulse" : ""} style={{ color: "#facc15" }}>📎</span>{busyLabel(busy)}</div>}
           {attaching === "pick" && (
             <div className="acts sub-acts">
               <button className="act" onClick={() => setAttaching("link")}>🔗 link</button>
               <button className="act" onClick={() => setAttaching("note")}>📝 note</button>
               <button className="act" onClick={() => fileRef.current?.click()}>🖼 photo or file</button>
               <input ref={fileRef} type="file" hidden accept="image/*,application/pdf,.txt,.md"
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { acts?.onAttachFile(f); setAttaching(null); } }} />
+                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { startUpload(f); setAttaching(null); } }} />
               <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
             </div>
           )}
@@ -276,8 +328,27 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
           <a href={`obsidian://open?vault=${encodeURIComponent(t.meta.vault)}&file=${t.day}`}>open in Obsidian ↗</a>
         </div>
       )}
+      {upload && !upload.err && <div className="prog"><i style={{ width: `${Math.round(100 * upload.loaded / Math.max(1, upload.file.size))}%` }} /></div>}
     </div>
   );
+}
+const mb = (n: number) => (n / 1048576).toFixed(1);
+const normKey = (s: string) => s.split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+
+/* POST a file to a Convex upload URL with progress (fetch has none). */
+function uploadWithProgress(url: string, file: File, onProgress: (loaded: number, total: number) => void) {
+  return new Promise<string>((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", url);
+    x.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    x.upload.onprogress = (e) => onProgress(e.loaded, e.total || file.size);
+    x.onerror = () => reject(new Error("upload failed (network)"));
+    x.onload = () => {
+      if (x.status < 200 || x.status >= 300) return reject(new Error(`upload failed (${x.status})`));
+      try { resolve(JSON.parse(x.responseText).storageId); } catch { reject(new Error("upload failed (bad response)")); }
+    };
+    x.send(file);
+  });
 }
 
 const KIND_VERB: Record<string, string> = { toggle: "apply", add: "add", edit: "edit", delete: "delete", attach: "attach" };
@@ -300,12 +371,18 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const [draft, setDraft] = useState("");
   const [active, setActive] = useState<{ id: string; mode: "acts" | "edit" | "delete" } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const errors = (intents ?? []).filter((i: { error: string | null; requestedAt: number }) => i.error && Date.now() - i.requestedAt < 3600e3);
+  useTick(5000, (intents ?? []).some((i: any) => !i.appliedAt && !i.error));
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const errors = (intents ?? []).filter((i: { id: string; error: string | null; requestedAt: number }) =>
+    i.error && Date.now() - i.requestedAt < 3600e3 && !dismissed.has(i.id));
+  const { push: fail, view: errView } = useErrors();
+  const unapplied = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error);
+  const oldest = unapplied.reduce((m: number, i: any) => Math.min(m, i.requestedAt), Infinity);
+  const stalled = unapplied.length > 0 && Date.now() - oldest > YOUNG_MS;
   const list = tasks ?? [];
   const main = list.filter((t) => t.meta.section !== "Routine");
   const routine = list.filter((t) => t.meta.section === "Routine");
   const openT = main.filter((t) => !t.meta.done), doneT = main.filter((t) => t.meta.done);
-  const fail = (e: unknown) => alert(String(e instanceof Error ? e.message : e));
   const submit = () => {
     const text = draft.trim();
     if (!text) { setComposing(false); return; }
@@ -323,23 +400,28 @@ function TasksSheet({ day, tasks, latest, onBack }:
     onSubEdit: (text, newText) => void subEdit({ id: t.id, text, newText }).catch(fail),
     onSubDelete: (text) => void subRemove({ id: t.id, text }).catch(fail),
     onAttach: (text) => void attach({ id: t.id, text }).catch(fail),
-    onAttachFile: (file) => void (async () => {
+    onAttachFile: async (file, onProgress) => {
       const url = await uploadUrl({});
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
-      if (!res.ok) throw new Error(`upload failed (${res.status})`);
-      const { storageId } = await res.json();
-      await attachFile({ id: t.id, storageId, name: file.name });
-    })().catch(fail),
+      const storageId = await uploadWithProgress(url, file, onProgress);
+      await attachFile({ id: t.id, storageId: storageId as Id<"_storage">, name: file.name });
+    },
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
-  const inflight: Record<string, string> = {};
-  for (const i of intents ?? []) if (!i.appliedAt && !i.error && !i.parent) {
-    if (i.kind === "add") inflight[i.chunkId] = "adding";
-    if (i.kind === "edit" && i.newId) inflight[i.newId] = "editing";
+  const inflight: Record<string, Busy> = {};        // placeholders
+  const rowBusy: Record<string, Busy> = {};         // toggles, deletes, attachments on a row
+  const subBusy: Record<string, Record<string, Busy>> = {};   // chunkId → sub text → busy
+  const LABEL: Record<string, string> = { toggle: "ticking", add: "adding", edit: "editing", delete: "deleting", attach: "attaching" };
+  for (const i of unapplied) {
+    const b: Busy = { label: LABEL[i.kind] ?? i.kind, young: Date.now() - i.requestedAt < YOUNG_MS };
+    if (i.kind === "attach") rowBusy[i.chunkId] = b;
+    else if (i.parent) (subBusy[i.chunkId] ??= {})[normKey(i.text)] = b;
+    else if (i.kind === "add") inflight[i.chunkId] = b;
+    else if (i.kind === "edit" && i.newId) inflight[i.newId] = b;
+    else rowBusy[i.chunkId] = b;
   }
   const row = (t: Item, fixed = false) => <TaskRow key={t.id} t={t} acts={actsFor(t)} fixed={fixed}
-    placeholder={t.pending ? inflight[t.id] : undefined}
+    placeholder={t.pending ? inflight[t.id] : undefined} busy={t.pending ? rowBusy[t.id] : undefined} subBusy={subBusy[t.id]}
     mode={active?.id === t.id ? active.mode : null}
     setMode={(m) => setActive(m ? { id: t.id, mode: m } : null)} />;
   const vault = list[0]?.meta.vault ?? "";
@@ -351,8 +433,12 @@ function TasksSheet({ day, tasks, latest, onBack }:
     <section className="tasks-sheet">
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
         <span>☑ Tasks · {doneT.length}/{main.length} done · {dayLabel(day)}</span></div>
+      {stalled && <div className="wait"><span>{unapplied.length} change{unapplied.length > 1 ? "s" : ""} waiting for the Mac</span>
+        <span className="muted">since {new Date(oldest).toTimeString().slice(0, 5)}</span></div>}
+      {errView}
       {errors.map((e: { id: string; kind: string; text: string; parent: string | null; error: string | null }) =>
-        <p key={e.id} className="err">couldn't {errWhat(e)}: {e.error}</p>)}
+        <ErrBox key={e.id} onClose={() => setDismissed((d) => new Set(d).add(e.id))}>couldn't {errWhat(e)}: {e.error}</ErrBox>)}
+      {!tasks && <Skeleton widths={[70, 55, 62, 48]} style={{ margin: "8px 0" }} />}
       {tasks && !list.length && (
         <p className="muted">no note for {day}{latest ? ` — latest is ${latest}` : ""}</p>
       )}
@@ -375,13 +461,13 @@ function TasksSheet({ day, tasks, latest, onBack }:
   );
 }
 
-function StatTile({ title, color, stat, caption, onOpen }:
-  { title: string; color: string; stat: string; caption: string; onOpen: () => void }) {
+function StatTile({ title, color, stat, caption, loading, onOpen }:
+  { title: string; color: string; stat: string; caption: string; loading?: boolean; onOpen: () => void }) {
   return (
     <button className="tile small" onClick={onOpen}>
       <div className="thead"><span style={{ color }}>{title}</span><span className="muted">›</span></div>
-      <div className="stat">{stat}</div>
-      <div className="muted small">{caption}</div>
+      <div className={`stat ${loading ? "muted" : ""}`}>{stat}</div>
+      {loading ? <span className="skel" style={{ width: "60%" }} /> : <div className="muted small">{caption}</div>}
     </button>
   );
 }
@@ -391,7 +477,7 @@ function ListSheet({ title, items, row, onBack }:
   return (
     <section>
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>{title}</span></div>
-      {items === undefined && <p className="muted">…</p>}
+      {items === undefined && <Skeleton widths={[80, 62, 71]} style={{ margin: "8px 0" }} />}
       {items?.length === 0 && <p className="muted">nothing</p>}
       {items?.map((i) => <div key={i.id}>{row(i)}</div>)}
     </section>

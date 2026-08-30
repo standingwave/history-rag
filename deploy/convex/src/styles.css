@@ -118,3 +118,22 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .sub.edit input { flex: 1; min-width: 0; width: 0; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; padding: 2px 0; font: inherit; font-size: 16px; outline: 0; }
 .sub-acts { padding-left: 0; }
 .notel { overflow-wrap: anywhere; }
+
+/* Loading & feedback vocabulary (wip/design-loading.html): pulse = this
+   device is waiting on the network; still yellow = queued for the Mac;
+   skeleton = first paint; stale = about to be replaced; errbox = the
+   waiting line's shape in red. */
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.pulse { animation: pulse 1.2s ease-in-out infinite; }
+.skel { display: block; height: .95em; border-radius: 5px; background: #1e1e23; animation: pulse 1.2s ease-in-out infinite; }
+.stale { opacity: .45; transition: opacity .2s; }
+.wait, .errbox { display: flex; justify-content: space-between; gap: 8px; font-size: .84rem; border-radius: 9px; padding: 6px 10px; margin: 0 0 10px; min-width: 0; }
+.wait > *, .errbox > * { min-width: 0; overflow-wrap: anywhere; }
+.wait { color: #facc15; background: #facc1512; border: 1px solid #facc1533; }
+.wait .muted { color: #c8b25a; flex: none; }
+.errbox { color: #f87171; background: #f8717112; border: 1px solid #f8717133; }
+.errbox .lnk, .errbox a { color: #f87171; flex: none; }
+.tdetail .errbox { margin: 2px 0 0; }
+.prog { position: relative; height: 3px; background: #1e1e23; border-radius: 2px; margin: 2px 0 4px 26px; overflow: hidden; }
+.prog i { position: absolute; left: 0; top: 0; bottom: 0; background: #facc15; border-radius: 2px; transition: width .2s; }
+.waiting { color: #facc15; }
