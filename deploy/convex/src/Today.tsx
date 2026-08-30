@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { SearchSheet, AskSheet, BrowseSheet, Detail, Row } from "./Archive";
-import { shortDate, hhmm } from "./render";
+import { shortDate, hhmm, Linkify } from "./render";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -126,7 +126,15 @@ type Acts = {
   onToggle: () => void; onEdit: (text: string) => void; onDelete: () => void;
   onSubToggle: (text: string) => void; onSubAdd: (text: string) => void;
   onSubEdit: (text: string, newText: string) => void; onSubDelete: (text: string) => void;
+  onAttach: (text: string) => void;
 };
+
+/* A note line under a task: markdown links as links, bare URLs too. */
+function NoteLine({ line }: { line: string }) {
+  const m = /^\[([^\]]*)\]\((\S+)\)$/.exec(line);
+  if (m) return <div className="notel">🔗 <a className="link" href={m[2]} target="_blank" rel="noreferrer">{m[1] || m[2]}</a></div>;
+  return <div className="notel muted">📝 <Linkify text={line} /></div>;
+}
 
 /* One line under a task: toggle glyph, text, its own … for edit/delete,
    or the underlined input while editing. */
@@ -171,6 +179,10 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   const [draft, setDraft] = useState("");
   const [subMode, setSubMode] = useState<{ i: number; m: Mode } | null>(null);
   const [addingSub, setAddingSub] = useState(false);
+  const [attaching, setAttaching] = useState<"pick" | "link" | "note" | null>(null);
+  const [attDraft, setAttDraft] = useState("");
+  const notes: string[] = t.meta.notes ?? [];
+  const sendAtt = () => { const v = attDraft.trim(); if (v) acts?.onAttach(v); setAttDraft(""); setAttaching(null); };
   const [subDraft, setSubDraft] = useState("");
   const subRef = useRef<HTMLInputElement>(null);
   const addSub = () => {
@@ -214,6 +226,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
         <div className="acts">
           <button className="act" onClick={startEdit}>edit</button>
           <button className="act" onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>+ subtask</button>
+          <button className="act" onClick={() => { setOpen(true); setAttaching("pick"); setMode?.(null); }}>📎 attach</button>
           <button className="act danger" onClick={() => setMode?.("delete")}>delete</button>
         </div>
       )}
@@ -236,6 +249,24 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
             </div>
           )}
           {atts.map((a: string) => <div key={a} className="muted">📎 {a}</div>)}
+          {notes.map((n, i) => <NoteLine key={i} line={n} />)}
+          {attaching === "pick" && (
+            <div className="acts sub-acts">
+              <button className="act" onClick={() => setAttaching("link")}>🔗 link</button>
+              <button className="act" onClick={() => setAttaching("note")}>📝 note</button>
+              <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
+            </div>
+          )}
+          {(attaching === "link" || attaching === "note") && (
+            <div className="sub edit composer"><span>{attaching === "link" ? "🔗" : "📝"}</span>
+              <input autoFocus type={attaching === "link" ? "url" : "text"} inputMode={attaching === "link" ? "url" : "text"}
+                placeholder={attaching === "link" ? "https://…" : "a note under this task"}
+                value={attDraft} onChange={(e) => setAttDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") sendAtt(); if (e.key === "Escape") setAttaching(null); }} />
+              <button className="go" onClick={sendAtt}>attach</button>
+              <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
+            </div>
+          )}
           {t.meta.days > 1 && <div className="muted">on the list since {shortDate(t.meta.first_seen)} · {t.meta.days} days</div>}
           <a href={`obsidian://open?vault=${encodeURIComponent(t.meta.vault)}&file=${t.day}`}>open in Obsidian ↗</a>
         </div>
@@ -244,7 +275,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   );
 }
 
-const KIND_VERB: Record<string, string> = { toggle: "apply", add: "add", edit: "edit", delete: "delete" };
+const KIND_VERB: Record<string, string> = { toggle: "apply", add: "add", edit: "edit", delete: "delete", attach: "attach" };
 
 function TasksSheet({ day, tasks, latest, onBack }:
   { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void }) {
@@ -256,6 +287,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const subAdd = useMutation(api.today.subAdd);
   const subEdit = useMutation(api.today.subEdit);
   const subRemove = useMutation(api.today.subRemove);
+  const attach = useMutation(api.today.attach);
   const intents = useQuery(api.today.intents, {});
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -283,6 +315,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
     onSubAdd: (text) => void subAdd({ id: t.id, text }).catch(fail),
     onSubEdit: (text, newText) => void subEdit({ id: t.id, text, newText }).catch(fail),
     onSubDelete: (text) => void subRemove({ id: t.id, text }).catch(fail),
+    onAttach: (text) => void attach({ id: t.id, text }).catch(fail),
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
@@ -298,7 +331,8 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const vault = list[0]?.meta.vault ?? "";
   const inputOpen = composing || active?.mode === "edit";
   const errWhat = (e: { kind: string; text: string; parent: string | null }) =>
-    e.parent ? `${KIND_VERB[e.kind] ?? e.kind} subtask "${e.text}"` : `${KIND_VERB[e.kind] ?? e.kind} "${e.text}"`;
+    e.kind === "attach" ? `attach "${e.text}" to "${e.parent}"`
+    : e.parent ? `${KIND_VERB[e.kind] ?? e.kind} subtask "${e.text}"` : `${KIND_VERB[e.kind] ?? e.kind} "${e.text}"`;
   return (
     <section className="tasks-sheet">
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>

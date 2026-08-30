@@ -132,7 +132,7 @@ def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
     assert ap.apply_intent({"kind": "delete", "vault": "Documents", "day": "2026-08-29",
                             "text": "x"}) == "no note for 2026-08-29"
     (v / "2026-08-29.md").write_text("- [ ] x\n")
-    assert "unknown" in ap.apply_intent({"kind": "attach", "vault": "Documents", "day": "2026-08-29",
+    assert "unknown" in ap.apply_intent({"kind": "zap", "vault": "Documents", "day": "2026-08-29",
                                          "text": "x"})
 
 
@@ -162,3 +162,14 @@ def test_apply_intent_routes_subtasks(tmp_path, monkeypatch):
                            "day": "2026-08-28", "text": "legs"})
     assert err is None
     assert "- [x] workout\n\t- [ ] legs\n" in (v / "2026-08-28.md").read_text()
+
+
+@skill_present
+def test_attach_appends_a_line_at_the_block_end():
+    fake = lambda url: "Mealybugs — RHS"
+    new, err = ap.attach_to_lines(BLOCK, "treat hoya for mealybugs", "https://rhs.org/mealybugs", title=fake)
+    assert err is None and new[3] == "\t- [Mealybugs — RHS](https://rhs.org/mealybugs)" and new[4] == "- [x] workout"
+    new, err = ap.attach_to_lines(BLOCK, "workout", "felt strong today", title=fake)
+    assert err is None and new[4] == "\t- felt strong today"
+    assert ap.attach_line("https://x.y/z", title=lambda u: None) == "[https://x.y/z](https://x.y/z)"
+    assert "parent task not found" in ap.attach_to_lines(BLOCK, "nope", "x", title=fake)[1]

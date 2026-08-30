@@ -9,7 +9,7 @@ import { authTables } from "@convex-dev/auth/server";
 
 export const want = v.union(v.literal("done"), v.literal("open"));
 export const intentKind = v.union(
-  v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"));
+  v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"), v.literal("attach"));
 
 export default defineSchema({
   ...authTables,
@@ -41,7 +41,7 @@ export default defineSchema({
     want: v.optional(want),         // toggle only
     newText: v.optional(v.string()),  // edit only
     parent: v.optional(v.string()),   // set = the intent is about a subtask of this task
-    prior: v.optional(v.any()),       // parent's meta.subtasks before the change (revert)
+    prior: v.optional(v.any()),       // {subtasks, notes} of the task before the change (revert)
     requestedAt: v.number(),
     appliedAt: v.optional(v.number()),
     error: v.optional(v.string()),

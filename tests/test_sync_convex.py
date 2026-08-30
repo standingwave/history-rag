@@ -51,6 +51,13 @@ def test_unpack_truncates_and_renormalises():
     assert v == [0.6, 0.8]                       # 3,4 / 5
     assert sc.content_hash("t", [], 4) != sc.content_hash("t", [], 2)
 
+def test_content_hash_includes_meta_only_when_given():
+    assert sc.content_hash("t", []) == sc.content_hash("t", [], meta=None)
+    assert sc.content_hash("t", [], meta={"a": 1}) != sc.content_hash("t", [], meta={"a": 2})
+    tasks = sc.shape(("c", "tasks", "2026-08-30T07:00:00+00:00", "x", "t", '{"done": false, "subtasks": [{"done": false}]}'), None)
+    tasks2 = sc.shape(("c", "tasks", "2026-08-30T07:00:00+00:00", "x", "t", '{"done": false, "subtasks": [{"done": true}]}'), None)
+    assert tasks["contentHash"] != tasks2["contentHash"]
+
 def test_plan_diff():
     up, rm = sc.plan({"a": "h1", "b": "h2", "c": "h3"}, {"a": "h1", "b": "old", "z": "h9"})
     assert up == ["b", "c"] and rm == ["z"]

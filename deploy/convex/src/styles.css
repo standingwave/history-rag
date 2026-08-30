@@ -117,3 +117,4 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .sub.edit { align-items: center; }
 .sub.edit input { flex: 1; min-width: 0; width: 0; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; padding: 2px 0; font: inherit; font-size: 16px; outline: 0; }
 .sub-acts { padding-left: 0; }
+.notel { overflow-wrap: anywhere; }

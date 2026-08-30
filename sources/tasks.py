@@ -46,7 +46,8 @@ def _width(ws: str) -> int:
 
 def parse_note(body: str) -> list[dict]:
     """Top-level task blocks in document order:
-    {text, done, section, line, subtasks:[{text, done, depth}], attachments}."""
+    {text, done, section, line, subtasks:[{text, done, depth}], attachments,
+    notes} — notes are the block's plain lines (links, remarks), bullet stripped."""
     lines = body.split("\n")
     tasks, section = [], ""
     i = 0
@@ -63,7 +64,7 @@ def parse_note(body: str) -> list[dict]:
             continue
         depth = _width(m.group(1))
         task = {"text": m.group(4).strip(), "done": m.group(3).lower() == "x",
-                "section": section, "line": i, "subtasks": [], "attachments": []}
+                "section": section, "line": i, "subtasks": [], "attachments": [], "notes": []}
         j = i + 1
         while j < len(lines):
             nxt = lines[j]
@@ -79,6 +80,8 @@ def parse_note(body: str) -> list[dict]:
                         "depth": _width(sm.group(1)) - depth})
                 elif em:
                     task["attachments"].append(em.group(1).strip())
+                else:
+                    task["notes"].append(re.sub(r"^\s*[-*]\s+", "", nxt).strip())
             j += 1
         tasks.append(task)
         i = j
@@ -137,6 +140,7 @@ def iter_chunks(vaults=None):
                 "order": t["line"],
                 "subtasks": t["subtasks"],
                 "attachments": t["attachments"],
+                "notes": t["notes"],
                 "days": len(dates),
             },
         }

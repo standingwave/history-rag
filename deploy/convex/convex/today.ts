@@ -205,15 +205,33 @@ function subIndex(subs: Sub[], text: string) {
   if (hits.length !== 1) throw new Error(hits.length ? "subtask text is ambiguous" : "no such subtask");
   return hits[0][1];
 }
-async function subIntent(ctx: { db: any }, row: any, kind: "toggle" | "add" | "edit" | "delete",
-                         subs: Sub[], fields: Record<string, unknown>) {
-  const prior = row.meta?.subtasks ?? [];
-  await ctx.db.patch(row._id, { meta: { ...row.meta, subtasks: subs }, pending: true });
+/* An intent about what's under a task: subtasks or note lines. The row is
+   patched optimistically and `prior` holds what to put back on error. */
+async function subIntent(ctx: { db: any }, row: any, kind: "toggle" | "add" | "edit" | "delete" | "attach",
+                         change: { subtasks?: Sub[]; notes?: string[] }, fields: Record<string, unknown>) {
+  const prior = { subtasks: row.meta?.subtasks ?? [], notes: row.meta?.notes ?? [] };
+  await ctx.db.patch(row._id, { meta: { ...row.meta, ...change }, pending: true });
   return await ctx.db.insert("taskIntents", {
     kind, chunkId: row.chunkId, day: row.day, vault: String(row.meta?.vault ?? ""),
     parent: taskText(row), prior, requestedAt: Date.now(), ...fields,
   });
 }
+
+/* A link or a remark under the task: one plain line in its block. A bare
+   URL is written as a markdown link; the Mac fills in the page title. */
+export const attach = mutation({
+  args: { id: v.string(), text: v.string() },
+  handler: async (ctx, { id, text }) => {
+    await requireUser(ctx);
+    text = text.trim().replace(/\s+/g, " ");
+    if (!text) throw new Error("empty note");
+    const row = await taskRow(ctx, id);
+    const notes: string[] = [...(row.meta?.notes ?? [])];
+    const line = /^https?:\/\/\S+$/.test(text) ? `[${text}](${text})` : text;
+    notes.push(line);
+    return subIntent(ctx, row, "attach", { notes }, { text });
+  },
+});
 
 export const subToggle = mutation({
   args: { id: v.string(), text: v.string() },
@@ -223,7 +241,7 @@ export const subToggle = mutation({
     const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
     const i = subIndex(subs, text);
     subs[i] = { ...subs[i], done: !subs[i].done };
-    return subIntent(ctx, row, "toggle", subs, { text: subs[i].text, want: subs[i].done ? "done" : "open" });
+    return subIntent(ctx, row, "toggle", { subtasks: subs }, { text: subs[i].text, want: subs[i].done ? "done" : "open" });
   },
 });
 
@@ -237,7 +255,7 @@ export const subAdd = mutation({
     const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
     if (subs.some((s) => normTask(s.text) === normTask(text))) throw new Error("a subtask with that text already exists");
     subs.push({ text, done: false, depth: 4 });
-    return subIntent(ctx, row, "add", subs, { text });
+    return subIntent(ctx, row, "add", { subtasks: subs }, { text });
   },
 });
 
@@ -253,7 +271,7 @@ export const subEdit = mutation({
     if (normTask(newText) === normTask(subs[i].text)) return null;
     if (subs.some((s, j) => j !== i && normTask(s.text) === normTask(newText))) throw new Error("a subtask with that text already exists");
     subs[i] = { ...subs[i], text: newText };
-    return subIntent(ctx, row, "edit", subs, { text, newText });
+    return subIntent(ctx, row, "edit", { subtasks: subs }, { text, newText });
   },
 });
 
@@ -265,7 +283,7 @@ export const subRemove = mutation({
     const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
     const i = subIndex(subs, text);
     subs.splice(i, 1);
-    return subIntent(ctx, row, "delete", subs, { text });
+    return subIntent(ctx, row, "delete", { subtasks: subs }, { text });
   },
 });
 
@@ -324,7 +342,8 @@ export const applyIntent = internalMutation({
     // The vault didn't change: undo the optimistic effect of this kind.
     const row = await byChunkId(ctx, intent.chunkId);
     if (intent.parent != null) {
-      if (row) await ctx.db.patch(row._id, { meta: { ...row.meta, subtasks: intent.prior ?? [] }, pending: false });
+      const prior = Array.isArray(intent.prior) ? { subtasks: intent.prior } : (intent.prior ?? {});
+      if (row) await ctx.db.patch(row._id, { meta: { ...row.meta, ...prior }, pending: false });
       return;
     }
     switch (intent.kind ?? "toggle") {

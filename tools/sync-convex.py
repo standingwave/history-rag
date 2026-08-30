@@ -64,12 +64,18 @@ def filter_values(source: str, day: str, month: str, location: str,
             {"name": "locpfx", "value": loc_prefix(source, location)},
             {"name": "done", "value": done}]
 
-def content_hash(text: str, fvals: list, dim: int | None = None) -> str:
+META_HASHED = {"tasks"}   # sources whose meta changes without their text
+
+def content_hash(text: str, fvals: list, dim: int | None = None, meta=None) -> str:
     """Text + filter values + stored dimension: a dimension change must
-    re-push every chunk even though nothing else moved."""
+    re-push every chunk even though nothing else moved. Sources in
+    META_HASHED add their meta, so a subtask tick or a new note line
+    under a task (meta only) still reaches the replica."""
     h = hashlib.sha256(text.encode())
     h.update(json.dumps(fvals, sort_keys=True).encode())
     h.update(str(dim if dim is not None else config.CONVEX_DIM).encode())
+    if meta is not None:
+        h.update(json.dumps(meta, sort_keys=True).encode())
     return h.hexdigest()[:32]
 
 def shape(row: tuple, embedding: list | None) -> dict:
@@ -81,7 +87,7 @@ def shape(row: tuple, embedding: list | None) -> dict:
     item = {"chunkId": cid, "source": source, "timestamp": ts or "",
             "day": day, "month": month, "location": location or "",
             "text": text, "meta": meta,
-            "contentHash": content_hash(text, fvals),
+            "contentHash": content_hash(text, fvals, meta=meta if source in META_HASHED else None),
             "filterValues": fvals}
     if embedding is not None:
         item["embedding"] = embedding

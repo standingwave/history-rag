@@ -162,6 +162,40 @@ def apply_sub(lines: list, parent_text: str, kind: str, text: str,
         return None, f"unknown intent kind {kind!r}"
     return new, None
 
+URL_RE = __import__("re").compile(r"^https?://\S+$")
+
+def page_title(url: str, timeout: float = 3.0) -> str | None:
+    """Best-effort <title> of a page; None when anything is off."""
+    import re, urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if "html" not in (r.headers.get("Content-Type") or ""):
+                return None
+            head = r.read(65536).decode("utf-8", "replace")
+        m = re.search(r"<title[^>]*>(.*?)</title>", head, re.I | re.S)
+        t = " ".join(__import__("html").unescape(m.group(1)).split()) if m else ""
+        return t[:120] or None
+    except Exception:
+        return None
+
+def attach_line(text: str, title=page_title) -> str:
+    """The note line for an attach intent: a bare URL becomes a link with
+    the page's title (or the URL itself), anything else is kept as is."""
+    if URL_RE.match(text):
+        return f"[{title(text) or text}]({text})"
+    return text
+
+def attach_to_lines(lines: list, parent_text: str, text: str, title=page_title):
+    """Pure: append one plain line at the end of the task's block."""
+    sk = skill()
+    parent, err = _parent(lines, parent_text)
+    if err:
+        return None, err
+    new = list(lines)
+    sk.append_in_block(new, parent, f"{parent.ws}{sk.INDENT}- {attach_line(text, title)}")
+    return new, None
+
 def start_lines(path: str, day: str) -> list:
     """A fresh day's note the way the skill's `start` makes it: carried
     undone tasks, then routines. Either step may find nothing."""
@@ -209,7 +243,9 @@ def apply_intent(intent: dict) -> str | None:
         lines = start_lines(path, intent["day"])
     else:
         return f"no note for {intent['day']}"
-    if intent.get("parent"):
+    if kind == "attach":
+        new, err = attach_to_lines(lines, intent.get("parent") or "", intent["text"])
+    elif intent.get("parent"):
         new, err = apply_sub(lines, intent["parent"], kind, intent["text"],
                              intent.get("want"), intent.get("newText") or "")
     elif kind == "toggle":

@@ -20,6 +20,8 @@ D1 = """- [ ] treat hoya for mealybugs (alcohol wipe)
 """
 D2 = """- [ ] treat hoya for mealybugs (alcohol wipe)
 \t![[2026-08-26 hoya-stems.png]]
+\t- [https://example.com/mealybugs](https://example.com/mealybugs)
+\tspray weekly
 \t- [x] isolate from other plants
 \t- [x] prune dead leaves
 - [x] workout
@@ -50,6 +52,9 @@ def test_parse_note_blocks_sections_and_attachments():
                                             "export API", "brush teet"]
     hoya = ts[0]
     assert hoya["attachments"] == ["2026-08-26 hoya-stems.png"]
+    assert hoya["notes"] == []
+    d2 = {t["text"]: t for t in tasks.parse_note(D2)}["treat hoya for mealybugs (alcohol wipe)"]
+    assert d2["notes"] == ["[https://example.com/mealybugs](https://example.com/mealybugs)", "spray weekly"]
     assert [(s["text"][:7], s["done"]) for s in hoya["subtasks"]] == \
         [("isolate", False), ("prune d", True)]
     assert hoya["done"] is False and ts[1]["done"] is True
