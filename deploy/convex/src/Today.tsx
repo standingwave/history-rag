@@ -122,7 +122,42 @@ function TasksTile({ tasks, hour, onOpen }: { tasks?: Item[]; hour: number; onOp
   );
 }
 
-type Acts = { onToggle: () => void; onEdit: (text: string) => void; onDelete: () => void };
+type Acts = {
+  onToggle: () => void; onEdit: (text: string) => void; onDelete: () => void;
+  onSubToggle: (text: string) => void; onSubAdd: (text: string) => void;
+  onSubEdit: (text: string, newText: string) => void; onSubDelete: (text: string) => void;
+};
+
+/* One line under a task: toggle glyph, text, its own … for edit/delete,
+   or the underlined input while editing. */
+function SubRow({ s, acts, mode, setMode }:
+  { s: { text: string; done: boolean }; acts?: Acts; mode: Mode; setMode: (m: Mode) => void }) {
+  const [draft, setDraft] = useState(s.text);
+  const save = () => { const v = draft.trim(); if (v && v !== s.text) acts?.onSubEdit(s.text, v); setMode(null); };
+  if (mode === "edit") return (
+    <div className="sub edit"><span className="glyph">{s.done ? "●" : "○"}</span>
+      <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setMode(null); }} />
+      <button className="go" onClick={save}>save</button><button className="lnk" onClick={() => setMode(null)}>✕</button>
+    </div>
+  );
+  return (
+    <>
+      <div className={`sub ${s.done ? "done" : ""}`}>
+        {acts ? <button className="glyph" onClick={() => acts.onSubToggle(s.text)}>{s.done ? "●" : "○"}</button>
+              : <span className="glyph">{s.done ? "●" : "○"}</span>}
+        <span>{s.text}</span>
+        {acts && <button className={`more ${mode ? "on" : ""}`} onClick={() => setMode(mode ? null : "acts")}>…</button>}
+      </div>
+      {mode === "acts" && <div className="acts sub-acts">
+        <button className="act" onClick={() => { setDraft(s.text); setMode("edit"); }}>edit</button>
+        <button className="act danger" onClick={() => setMode("delete")}>delete</button></div>}
+      {mode === "delete" && <div className="confirm sub-acts">delete this subtask?
+        <button className="act danger" onClick={() => { acts?.onSubDelete(s.text); setMode(null); }}>yes, delete</button>
+        <button className="lnk" onClick={() => setMode(null)}>keep</button></div>}
+    </>
+  );
+}
 
 /* One task. `acts` makes it editable: the row ends in a faint … that opens
    the action strip (edit · delete); edit swaps the text for an underlined
@@ -134,6 +169,15 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
   const atts: string[] = t.meta.attachments ?? [];
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [subMode, setSubMode] = useState<{ i: number; m: Mode } | null>(null);
+  const [addingSub, setAddingSub] = useState(false);
+  const [subDraft, setSubDraft] = useState("");
+  const subRef = useRef<HTMLInputElement>(null);
+  const addSub = () => {
+    const v = subDraft.trim();
+    if (!v) { setAddingSub(false); return; }
+    setSubDraft(""); acts?.onSubAdd(v); subRef.current?.focus();
+  };
   const glyph = t.meta.done ? "●" : "○";
   // A placeholder (add/edit awaiting the Mac) has no line in the note yet.
   const editable = !!acts && !placeholder;
@@ -169,6 +213,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
       {mode === "acts" && (
         <div className="acts">
           <button className="act" onClick={startEdit}>edit</button>
+          <button className="act" onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>+ subtask</button>
           <button className="act danger" onClick={() => setMode?.("delete")}>delete</button>
         </div>
       )}
@@ -180,7 +225,16 @@ function TaskRow({ t, compact, acts, fixed, placeholder, mode, setMode }:
       )}
       {open && !compact && (
         <div className="tdetail">
-          {subs.map((s, i) => <div key={i} className={s.done ? "done" : ""}>{s.done ? "●" : "○"} {s.text}</div>)}
+          {subs.map((s, i) => <SubRow key={s.text} s={s} acts={editable ? acts : undefined}
+            mode={subMode?.i === i ? subMode.m : null} setMode={(m) => setSubMode(m ? { i, m } : null)} />)}
+          {addingSub && (
+            <div className="sub edit composer"><span className="glyph">○</span>
+              <input ref={subRef} autoFocus placeholder="new subtask" value={subDraft} onChange={(e) => setSubDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") addSub(); if (e.key === "Escape") setAddingSub(false); }} />
+              <button className="go" onClick={addSub}>add</button>
+              <button className="lnk" onClick={() => setAddingSub(false)}>✕</button>
+            </div>
+          )}
           {atts.map((a: string) => <div key={a} className="muted">📎 {a}</div>)}
           {t.meta.days > 1 && <div className="muted">on the list since {shortDate(t.meta.first_seen)} · {t.meta.days} days</div>}
           <a href={`obsidian://open?vault=${encodeURIComponent(t.meta.vault)}&file=${t.day}`}>open in Obsidian ↗</a>
@@ -198,6 +252,10 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const add = useMutation(api.today.add);
   const edit = useMutation(api.today.edit);
   const remove = useMutation(api.today.remove);
+  const subToggle = useMutation(api.today.subToggle);
+  const subAdd = useMutation(api.today.subAdd);
+  const subEdit = useMutation(api.today.subEdit);
+  const subRemove = useMutation(api.today.subRemove);
   const intents = useQuery(api.today.intents, {});
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -221,11 +279,15 @@ function TasksSheet({ day, tasks, latest, onBack }:
     onToggle: () => void toggle({ id: t.id }).catch(fail),
     onEdit: (newText) => void edit({ id: t.id, newText }).catch(fail),
     onDelete: () => void remove({ id: t.id }).catch(fail),
+    onSubToggle: (text) => void subToggle({ id: t.id, text }).catch(fail),
+    onSubAdd: (text) => void subAdd({ id: t.id, text }).catch(fail),
+    onSubEdit: (text, newText) => void subEdit({ id: t.id, text, newText }).catch(fail),
+    onSubDelete: (text) => void subRemove({ id: t.id, text }).catch(fail),
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
   const inflight: Record<string, string> = {};
-  for (const i of intents ?? []) if (!i.appliedAt && !i.error) {
+  for (const i of intents ?? []) if (!i.appliedAt && !i.error && !i.parent) {
     if (i.kind === "add") inflight[i.chunkId] = "adding";
     if (i.kind === "edit" && i.newId) inflight[i.newId] = "editing";
   }
@@ -235,12 +297,14 @@ function TasksSheet({ day, tasks, latest, onBack }:
     setMode={(m) => setActive(m ? { id: t.id, mode: m } : null)} />;
   const vault = list[0]?.meta.vault ?? "";
   const inputOpen = composing || active?.mode === "edit";
+  const errWhat = (e: { kind: string; text: string; parent: string | null }) =>
+    e.parent ? `${KIND_VERB[e.kind] ?? e.kind} subtask "${e.text}"` : `${KIND_VERB[e.kind] ?? e.kind} "${e.text}"`;
   return (
     <section className="tasks-sheet">
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
         <span>☑ Tasks · {doneT.length}/{main.length} done · {dayLabel(day)}</span></div>
-      {errors.map((e: { id: string; kind: string; text: string; error: string | null }) =>
-        <p key={e.id} className="err">couldn't {KIND_VERB[e.kind] ?? e.kind} "{e.text}": {e.error}</p>)}
+      {errors.map((e: { id: string; kind: string; text: string; parent: string | null; error: string | null }) =>
+        <p key={e.id} className="err">couldn't {errWhat(e)}: {e.error}</p>)}
       {tasks && !list.length && (
         <p className="muted">no note for {day}{latest ? ` — latest is ${latest}` : ""}</p>
       )}

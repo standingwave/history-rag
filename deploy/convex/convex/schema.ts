@@ -40,6 +40,8 @@ export default defineSchema({
     kind: v.optional(intentKind),   // absent = toggle (rows from before kinds)
     want: v.optional(want),         // toggle only
     newText: v.optional(v.string()),  // edit only
+    parent: v.optional(v.string()),   // set = the intent is about a subtask of this task
+    prior: v.optional(v.any()),       // parent's meta.subtasks before the change (revert)
     requestedAt: v.number(),
     appliedAt: v.optional(v.number()),
     error: v.optional(v.string()),

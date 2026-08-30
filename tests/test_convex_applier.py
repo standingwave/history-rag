@@ -134,3 +134,31 @@ def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
     (v / "2026-08-29.md").write_text("- [ ] x\n")
     assert "unknown" in ap.apply_intent({"kind": "attach", "vault": "Documents", "day": "2026-08-29",
                                          "text": "x"})
+
+
+@skill_present
+def test_subtask_toggle_add_edit_delete():
+    new, err = ap.apply_sub(BLOCK, "treat hoya for mealybugs", "toggle", "isolate from other plants", want="done")
+    assert err is None and new[1] == "\t- [x] isolate from other plants" and new[2] == BLOCK[2]
+    assert ap.apply_sub(BLOCK, "treat hoya for mealybugs", "toggle", "isolate from other plants", want="open") == (None, None)
+    new, err = ap.apply_sub(BLOCK, "treat hoya for mealybugs", "add", "order neem oil")
+    assert err is None and new[3] == "\t- [ ] order neem oil" and new[4] == "- [x] workout"
+    new, err = ap.apply_sub(BLOCK, "workout", "add", "legs")
+    assert err is None and new[4] == "\t- [ ] legs"
+    new, err = ap.apply_sub(BLOCK, "treat hoya for mealybugs", "edit", "isolate from other plants", new_text="quarantine")
+    assert err is None and new[1] == "\t- [ ] quarantine"
+    new, err = ap.apply_sub(BLOCK, "treat hoya for mealybugs", "delete", "isolate from other plants")
+    assert err is None and new == [BLOCK[0], BLOCK[2]] + BLOCK[3:]
+    assert "parent task not found" in ap.apply_sub(BLOCK, "nope", "toggle", "x", want="done")[1]
+    assert "subtask not found" in ap.apply_sub(BLOCK, "workout", "toggle", "x", want="done")[1]
+    assert "already" in ap.apply_sub(BLOCK, "treat hoya for mealybugs", "add", "Isolate from other plants")[1]
+
+@skill_present
+def test_apply_intent_routes_subtasks(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    err = ap.apply_intent({"kind": "add", "parent": "workout", "vault": "Documents",
+                           "day": "2026-08-28", "text": "legs"})
+    assert err is None
+    assert "- [x] workout\n\t- [ ] legs\n" in (v / "2026-08-28.md").read_text()

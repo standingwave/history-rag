@@ -113,6 +113,55 @@ def delete_from_lines(lines: list, text: str):
     del new[t.i:t.end]
     return new, None
 
+def _parent(lines: list, text: str):
+    """The skill's Task object for the matched top-level task."""
+    hit, err = _find(lines, text)
+    if err:
+        return None, err.replace("task", "parent task", 1)
+    return next(t for t in skill().parse(lines) if t.i == hit[0]), None
+
+def _child(parent, text: str):
+    hits = [c for c in parent.children if _norm(c.text) == _norm(text)]
+    if not hits:
+        return None, "subtask not found under that task"
+    if len(hits) > 1:
+        return None, "subtask text is ambiguous under that task"
+    return hits[0], None
+
+def apply_sub(lines: list, parent_text: str, kind: str, text: str,
+              want: str | None = None, new_text: str = ""):
+    """Pure: toggle / add / edit / delete one direct subtask of a top-level
+    task. Returns (new_lines | None, error | None) like the others."""
+    sk = skill()
+    parent, err = _parent(lines, parent_text)
+    if err:
+        return None, err
+    new = list(lines)
+    if kind == "add":
+        if any(_norm(c.text) == _norm(text) for c in parent.children):
+            return None, "a subtask with that text is already under that task"
+        parent, _ = _parent(new, parent_text)
+        sk.append_in_block(new, parent, sk.task_line(parent.ws + sk.INDENT, text))
+        return new, None
+    child, err = _child(parent, text)
+    if err:
+        return None, err
+    if kind == "toggle":
+        if (want == "done") == child.done:
+            return None, None
+        new[child.i] = f"{child.ws}{child.bullet}[{'x' if want == 'done' else ' '}] {child.text}"
+    elif kind == "edit":
+        if _norm(new_text) == _norm(child.text):
+            return None, None
+        if any(_norm(c.text) == _norm(new_text) for c in parent.children):
+            return None, "a subtask with the new text is already under that task"
+        new[child.i] = f"{child.ws}{child.bullet}[{'x' if child.done else ' '}] {new_text.strip()}"
+    elif kind == "delete":
+        del new[child.i:child.end]
+    else:
+        return None, f"unknown intent kind {kind!r}"
+    return new, None
+
 def start_lines(path: str, day: str) -> list:
     """A fresh day's note the way the skill's `start` makes it: carried
     undone tasks, then routines. Either step may find nothing."""
@@ -160,7 +209,10 @@ def apply_intent(intent: dict) -> str | None:
         lines = start_lines(path, intent["day"])
     else:
         return f"no note for {intent['day']}"
-    if kind == "toggle":
+    if intent.get("parent"):
+        new, err = apply_sub(lines, intent["parent"], kind, intent["text"],
+                             intent.get("want"), intent.get("newText") or "")
+    elif kind == "toggle":
         new, err = apply_to_lines(lines, intent["text"], intent["want"])
     elif kind == "add":
         new, err = add_to_lines(lines, intent["text"])
@@ -222,7 +274,8 @@ def drain(client, intents: list, kick: bool) -> int:
                         {"id": it["id"], **({"error": err} if err else {})})
         stamp = time.strftime("%H:%M:%S")
         what = it.get("want") if (it.get("kind") or "toggle") == "toggle" else it.get("kind")
-        print(f"{stamp} {it['day']} {what:6} {it['text'][:50]!r} "
+        where = f" under {it['parent'][:30]!r}" if it.get("parent") else ""
+        print(f"{stamp} {it['day']} {what:6} {it['text'][:50]!r}{where} "
               f"-> {err or 'ok'}", flush=True)
         applied += not err
     if applied and kick:

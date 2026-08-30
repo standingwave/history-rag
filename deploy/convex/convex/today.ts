@@ -196,6 +196,79 @@ export const edit = mutation({
   },
 });
 
+/* ── subtasks: one level under a task; identity is the parent's row, the
+   change is to its meta.subtasks[] and the intent carries `parent`. ── */
+
+type Sub = { text: string; done: boolean; depth?: number };
+function subIndex(subs: Sub[], text: string) {
+  const hits = subs.map((s, i) => [normTask(s.text) === normTask(text), i] as const).filter(([h]) => h);
+  if (hits.length !== 1) throw new Error(hits.length ? "subtask text is ambiguous" : "no such subtask");
+  return hits[0][1];
+}
+async function subIntent(ctx: { db: any }, row: any, kind: "toggle" | "add" | "edit" | "delete",
+                         subs: Sub[], fields: Record<string, unknown>) {
+  const prior = row.meta?.subtasks ?? [];
+  await ctx.db.patch(row._id, { meta: { ...row.meta, subtasks: subs }, pending: true });
+  return await ctx.db.insert("taskIntents", {
+    kind, chunkId: row.chunkId, day: row.day, vault: String(row.meta?.vault ?? ""),
+    parent: taskText(row), prior, requestedAt: Date.now(), ...fields,
+  });
+}
+
+export const subToggle = mutation({
+  args: { id: v.string(), text: v.string() },
+  handler: async (ctx, { id, text }) => {
+    await requireUser(ctx);
+    const row = await taskRow(ctx, id);
+    const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
+    const i = subIndex(subs, text);
+    subs[i] = { ...subs[i], done: !subs[i].done };
+    return subIntent(ctx, row, "toggle", subs, { text: subs[i].text, want: subs[i].done ? "done" : "open" });
+  },
+});
+
+export const subAdd = mutation({
+  args: { id: v.string(), text: v.string() },
+  handler: async (ctx, { id, text }) => {
+    await requireUser(ctx);
+    text = text.trim();
+    if (!text) throw new Error("empty subtask");
+    const row = await taskRow(ctx, id);
+    const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
+    if (subs.some((s) => normTask(s.text) === normTask(text))) throw new Error("a subtask with that text already exists");
+    subs.push({ text, done: false, depth: 4 });
+    return subIntent(ctx, row, "add", subs, { text });
+  },
+});
+
+export const subEdit = mutation({
+  args: { id: v.string(), text: v.string(), newText: v.string() },
+  handler: async (ctx, { id, text, newText }) => {
+    await requireUser(ctx);
+    newText = newText.trim();
+    if (!newText) throw new Error("empty subtask");
+    const row = await taskRow(ctx, id);
+    const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
+    const i = subIndex(subs, text);
+    if (normTask(newText) === normTask(subs[i].text)) return null;
+    if (subs.some((s, j) => j !== i && normTask(s.text) === normTask(newText))) throw new Error("a subtask with that text already exists");
+    subs[i] = { ...subs[i], text: newText };
+    return subIntent(ctx, row, "edit", subs, { text, newText });
+  },
+});
+
+export const subRemove = mutation({
+  args: { id: v.string(), text: v.string() },
+  handler: async (ctx, { id, text }) => {
+    await requireUser(ctx);
+    const row = await taskRow(ctx, id);
+    const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
+    const i = subIndex(subs, text);
+    subs.splice(i, 1);
+    return subIntent(ctx, row, "delete", subs, { text });
+  },
+});
+
 export const remove = mutation({
   args: { id: v.string() },
   handler: async (ctx, { id }) => {
@@ -217,7 +290,8 @@ export const intents = query({
     const rows = await ctx.db.query("taskIntents").order("desc").take(20);
     return rows.map((r) => ({
       id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", text: r.text, want: r.want ?? null,
-      newId: r.kind === "edit" ? taskChunkId(r.vault, r.newText ?? "") : null,
+      newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "") : null,
+      parent: r.parent ?? null,
       requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
     }));
   },
@@ -234,7 +308,8 @@ export const pendingIntents = internalQuery({
       .collect();
     return rows.map((r) => ({
       id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
-      text: r.text, want: r.want ?? null, newText: r.newText ?? null, requestedAt: r.requestedAt,
+      text: r.text, want: r.want ?? null, newText: r.newText ?? null, parent: r.parent ?? null,
+      requestedAt: r.requestedAt,
     }));
   },
 });
@@ -248,6 +323,10 @@ export const applyIntent = internalMutation({
     if (!error) return;
     // The vault didn't change: undo the optimistic effect of this kind.
     const row = await byChunkId(ctx, intent.chunkId);
+    if (intent.parent != null) {
+      if (row) await ctx.db.patch(row._id, { meta: { ...row.meta, subtasks: intent.prior ?? [] }, pending: false });
+      return;
+    }
     switch (intent.kind ?? "toggle") {
       case "toggle":
         if (row) await ctx.db.patch(row._id, { meta: { ...row.meta, done: intent.want === "open" }, pending: false });
