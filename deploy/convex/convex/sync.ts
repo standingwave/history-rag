@@ -9,7 +9,7 @@ import { internal } from "./_generated/api";
 import {
   internalAction, internalMutation, internalQuery,
 } from "./_generated/server";
-import { rag } from "./rag";
+import { rag, EMBED_DIM } from "./rag";
 import { components } from "./_generated/api";
 import { ALL_SOURCES } from "./search";
 import type { Doc } from "./_generated/dataModel";
@@ -249,8 +249,8 @@ export const census = internalAction({
 /* ── namespace versions ───────────────────────────────────────────────── */
 
 /* A dimension change (EMBED_DIM) makes the component create a new
-   namespace version per source and mark the old one "replaced"; the old
-   vectors stay until their entries are deleted. `namespaces` lists the
+   namespace version per source; the old version's vectors stay until its
+   entries are deleted. `namespaces` lists the
    versions; `gcReplacedNamespaces` deletes entries of replaced versions a
    page at a time, rescheduling itself until nothing is left. */
 export const namespaces = internalAction({
@@ -261,7 +261,7 @@ export const namespaces = internalAction({
       const page: any = await ctx.runQuery(components.rag.namespaces.listNamespaceVersions,
         { namespace: ns, paginationOpts: { cursor: null, numItems: 20 } });
       for (const n of page.page) out.push({ namespace: ns, version: n.version, dimension: n.dimension,
-        status: n.status.kind, namespaceId: n.namespaceId });
+        live: n.dimension === EMBED_DIM, namespaceId: n.namespaceId });
     }
     return out;
   },
@@ -274,7 +274,8 @@ export const gcReplacedNamespaces = internalAction({
     for (const ns of ALL_SOURCES) {
       const page: any = await ctx.runQuery(components.rag.namespaces.listNamespaceVersions,
         { namespace: ns, paginationOpts: { cursor: null, numItems: 20 } });
-      for (const old of page.page.filter((x: any) => x.status.kind === "replaced")) {
+      // Old = any version whose dimension isn't the one the instance uses now.
+      for (const old of page.page.filter((x: any) => x.dimension !== EMBED_DIM)) {
         for (const status of ["ready", "pending", "replaced"] as const) {
           const entries = await rag.list(ctx, { namespaceId: old.namespaceId, status, limit: 200 });
           for (const e of entries.page) { await rag.deleteAsync(ctx, { entryId: e.entryId }); n++; }
