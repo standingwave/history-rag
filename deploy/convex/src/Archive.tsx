@@ -315,8 +315,8 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
         <button className="primary" disabled={busy}>go</button>
       </form>
       <div className="frow">
-        <button className="chip" type="button" onClick={() => shift(-1)}>‹ day</button>
-        <button className="chip" type="button" onClick={() => shift(1)}>day ›</button>
+        <div className="cbar slim"><button type="button" onClick={() => shift(-1)}>‹ day</button>
+          <button type="button" onClick={() => shift(1)}>day ›</button></div>
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">all sources</option>
           {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -331,7 +331,7 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
       <div className={busy ? "stale" : ""}>
         {rows?.map((r: any) => <Row key={r.id} c={r} right={r.timestamp ? r.timestamp.slice(11, 16) : ""} onOpen={onOpen} />)}
       </div>
-      {cursor && <p><button className={`chip ${busy ? "pulse" : ""}`} disabled={busy} onClick={() => void run(true)}>{busy ? "loading…" : "more ›"}</button></p>}
+      {cursor && <div className="cbar slim" style={{ margin: "6px 0" }}><button className={busy ? "pulse" : ""} disabled={busy} onClick={() => void run(true)}>{busy ? "loading…" : "more ›"}</button></div>}
     </Sheet>
   );
 }

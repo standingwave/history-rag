@@ -179,7 +179,7 @@ function SubRow({ s, acts, mode, setMode, busy }:
     <div className="sub edit"><span className="glyph">{s.done ? "●" : "○"}</span>
       <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setMode(null); }} />
-      <button className="go" onClick={save}>save</button><button className="lnk" onClick={() => setMode(null)}>✕</button>
+      <button className="go" onClick={save}>save</button><button className="cancelv" onClick={() => setMode(null)}>cancel</button>
     </div>
   );
   return (
@@ -191,12 +191,12 @@ function SubRow({ s, acts, mode, setMode, busy }:
         {busyLabel(busy)}
         {acts && <button className={`more ${mode ? "on" : ""}`} onClick={() => setMode(mode ? null : "acts")}>…</button>}
       </div>
-      {mode === "acts" && <div className="acts sub-acts">
-        <button className="act" onClick={() => { setDraft(s.text); setMode("edit"); }}>edit</button>
-        <button className="act danger" onClick={() => setMode("delete")}>delete</button></div>}
-      {mode === "delete" && <div className="confirm sub-acts">delete this subtask?
-        <button className="act danger" onClick={() => { acts?.onSubDelete(s.text); setMode(null); }}>yes, delete</button>
-        <button className="lnk" onClick={() => setMode(null)}>keep</button></div>}
+      {mode === "acts" && <div className="cbar subbar">
+        <button onClick={() => { setDraft(s.text); setMode("edit"); }}>edit</button>
+        <button className="danger" onClick={() => setMode("delete")}>delete</button></div>}
+      {mode === "delete" && <div className="confirm subc">delete:
+        <button className="yes" onClick={() => { acts?.onSubDelete(s.text); setMode(null); }}>Yes</button>
+        <button className="no" onClick={() => setMode(null)}>No</button></div>}
     </>
   );
 }
@@ -266,17 +266,17 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
           onClick={() => setMode?.(mode ? null : "acts")}>…</button>}
       </div>
       {mode === "acts" && (
-        <div className="acts">
-          <button className="act" onClick={startEdit}>edit</button>
-          <button className="act" onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>+ subtask</button>
-          <button className="act" onClick={() => { setOpen(true); setAttaching("pick"); setMode?.(null); }}>📎 attach</button>
-          <button className="act danger" onClick={() => setMode?.("delete")}>delete</button>
+        <div className="cbar">
+          <button onClick={startEdit}>edit</button>
+          <button onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>subtask</button>
+          <button onClick={() => { setOpen(true); setAttaching("pick"); setMode?.(null); }}>attach</button>
+          <button className="danger" onClick={() => setMode?.("delete")}>delete</button>
         </div>
       )}
       {mode === "delete" && (
-        <div className="confirm">delete this task{what ? `, ${what}` : ""}?
-          <button className="act danger" onClick={() => { acts?.onDelete(); setMode?.(null); }}>yes, delete</button>
-          <button className="lnk" onClick={() => setMode?.(null)}>keep</button>
+        <div className="confirm">delete{what ? <span className="muted small">&nbsp;(takes {what})</span> : ""}:
+          <button className="yes" onClick={() => { acts?.onDelete(); setMode?.(null); }}>Yes</button>
+          <button className="no" onClick={() => setMode?.(null)}>No</button>
         </div>
       )}
       {open && !compact && (
@@ -288,7 +288,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
               <input ref={subRef} autoFocus placeholder="new subtask" value={subDraft} onChange={(e) => setSubDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") addSub(); if (e.key === "Escape") setAddingSub(false); }} />
               <button className="go" onClick={addSub}>add</button>
-              <button className="lnk" onClick={() => setAddingSub(false)}>✕</button>
+              <button className="cancelv" onClick={() => setAddingSub(false)}>cancel</button>
             </div>
           )}
           {atts.map((a: string) => <div key={a} className="muted">📎 {a}</div>)}
@@ -301,13 +301,13 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
           {upload?.err && <ErrBox action={<button className="lnk" onClick={() => startUpload(upload.file)}>retry</button>}>🖼 {upload.file.name} · {upload.err}</ErrBox>}
           {busy?.label === "attaching" && <div className="sub pending"><span className={busy.young ? "pulse" : ""} style={{ color: "#facc15" }}>📎</span>{busyLabel(busy)}</div>}
           {attaching === "pick" && (
-            <div className="acts sub-acts">
-              <button className="act" onClick={() => setAttaching("link")}>🔗 link</button>
-              <button className="act" onClick={() => setAttaching("note")}>📝 note</button>
-              <button className="act" onClick={() => fileRef.current?.click()}>🖼 photo or file</button>
+            <div className="cbar" style={{ marginLeft: 0 }}>
+              <button onClick={() => setAttaching("link")}>🔗 link</button>
+              <button onClick={() => setAttaching("note")}>📝 note</button>
+              <button onClick={() => fileRef.current?.click()}>🖼 file</button>
+              <button onClick={() => setAttaching(null)}>cancel</button>
               <input ref={fileRef} type="file" hidden accept="image/*,application/pdf,.txt,.md"
                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) { startUpload(f); setAttaching(null); } }} />
-              <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
             </div>
           )}
           {(attaching === "link" || attaching === "note") && (
@@ -317,7 +317,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
                 value={attDraft} onChange={(e) => setAttDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") sendAtt(); if (e.key === "Escape") setAttaching(null); }} />
               <button className="go" onClick={sendAtt}>attach</button>
-              <button className="lnk" onClick={() => setAttaching(null)}>✕</button>
+              <button className="cancelv" onClick={() => setAttaching(null)}>cancel</button>
             </div>
           )}
           {t.meta.days > 1 && <div className="muted">on the list since {shortDate(t.meta.first_seen)} · {t.meta.days} days</div>}
@@ -446,7 +446,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
           <input ref={inputRef} autoFocus placeholder="new task" value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
           <button className="go" onClick={submit}>add</button>
-          <button className="lnk" onClick={() => setComposing(false)}>✕</button>
+          <button className="cancelv" onClick={() => setComposing(false)}>cancel</button>
         </div>
       )}
       {routine.length > 0 && <p className="sect">ROUTINE</p>}
@@ -548,7 +548,7 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
       {brief?.generatedAt && !busy && <p className="muted mono small">
         {brief.model} · {ago(brief.generatedAt)} · {((brief.ms ?? 0) / 1000).toFixed(0)} s{brief.note ? ` · ${brief.note}` : ""}
         {brief.citations.length === 0 ? " · no sources cited" : ` · ${brief.citations.length} sources`}</p>}
-      <p><button className="chip" disabled={busy} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></p>
+      <div className="cbar slim"><button disabled={busy} className={busy ? "pulse" : ""} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></div>
     </section>
   );
 }
