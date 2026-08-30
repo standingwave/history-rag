@@ -8,7 +8,7 @@ export function App() {
   return (
     <div className="col">
       <header className="hdr">
-        <span className="wordmark">today</span>
+        <span className="wordmark">Oriel</span>
         <Authenticated>
           <button className="lnk" onClick={() => void signOut()}>sign out</button>
         </Authenticated>

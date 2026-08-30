@@ -20,7 +20,7 @@ Grammar (shared with ~/.claude/skills/daily-tasks/tasks.py, the note's sole
 scripted writer): a task is a checkbox line; its block is every following
 line indented deeper; `![[…]]` lines in the block are attachments; a
 `## Routine` heading starts the routine section. Routine tasks recur by
-template and are skipped unless [tasks] index_routine is on.
+template and are indexed unless [tasks] index_routine is off.
 
 Reads through obsidian.iter_notes — the vault list is [obsidian] vaults.
 """
@@ -38,7 +38,7 @@ DAILY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.md$")
 
 def _index_routine() -> bool:
     import config
-    v = config.get("tasks", "index_routine", "CLAUDE_RAG_TASKS_ROUTINE", False)
+    v = config.get("tasks", "index_routine", "CLAUDE_RAG_TASKS_ROUTINE", True)
     return str(v).lower() in ("1", "true", "yes") if isinstance(v, str) else bool(v)
 
 def _width(ws: str) -> int:

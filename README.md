@@ -102,7 +102,7 @@ roots = ["~/dev"]
 vaults = ["~/Documents/Obsidian Vault"]
 
 [tasks]
-index_routine = false     # daily-note tasks; routine-section items skipped by default
+index_routine = true      # daily-note tasks; set false to skip the routine section
 
 [shell]
 histfiles = []            # archived history files
@@ -279,8 +279,8 @@ it appears in — the completion day once checked, today while open — so a
 window over last week answers "what did I finish" and `list_window(
 source="tasks", since=<today>)` is today's list. Meta carries `done`,
 `first_seen`, `done_on`, the `Routine` section, subtasks, and attachment
-names; `expand` returns the day's whole list. Routine items are skipped
-unless `[tasks] index_routine = true`. Reads the same vaults as the obsidian
+names; `expand` returns the day's whole list. Routine items are indexed
+unless `[tasks] index_routine = false`. Reads the same vaults as the obsidian
 source (which still indexes the note's prose); enable both.
 
 **Calendar events (macOS, opt-in)** indexes meetings and appointments from

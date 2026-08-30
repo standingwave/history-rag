@@ -237,7 +237,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const inputOpen = composing || active?.mode === "edit";
   return (
     <section className="tasks-sheet">
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Today</button>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
         <span>☑ Tasks · {doneT.length}/{main.length} done · {dayLabel(day)}</span></div>
       {errors.map((e: { id: string; kind: string; text: string; error: string | null }) =>
         <p key={e.id} className="err">couldn't {KIND_VERB[e.kind] ?? e.kind} "{e.text}": {e.error}</p>)}
@@ -278,7 +278,7 @@ function ListSheet({ title, items, row, onBack }:
   { title: string; items?: Item[]; row: (i: Item) => JSX.Element; onBack: () => void }) {
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Today</button><span>{title}</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>{title}</span></div>
       {items === undefined && <p className="muted">…</p>}
       {items?.length === 0 && <p className="muted">nothing</p>}
       {items?.map((i) => <div key={i.id}>{row(i)}</div>)}

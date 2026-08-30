@@ -96,11 +96,11 @@ def test_only_root_daily_notes_count(vault):
     assert "a task in a project note" not in texts
     assert "nested daily lookalike" not in texts
 
-def test_routine_skipped_unless_configured(vault, monkeypatch):
-    assert "brush teeth and shower" not in _by_text(tasks.iter_chunks())
-    monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "true")
+def test_routine_indexed_unless_turned_off(vault, monkeypatch):
     by = _by_text(tasks.iter_chunks())
     assert by["brush teeth and shower"][2]["meta"]["section"] == "Routine"
+    monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "false")
+    assert "brush teeth and shower" not in _by_text(tasks.iter_chunks())
 
 def test_secret_bearing_task_dropped(vault):
     assert not any("API_KEY" in c[1] for c in tasks.iter_chunks())
