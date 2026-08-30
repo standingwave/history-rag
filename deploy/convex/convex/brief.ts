@@ -15,7 +15,7 @@ function phrased(now: Date) {
   return `${QUESTION} That is the window from ${from.toISOString()} to ${now.toISOString()} (UTC). ` +
     "Summarise what happened in it: work, browsing, notes, tasks, calendar, app usage.\n" +
     "Format: no preamble; 3–6 short sections, each a `## heading` followed by `- ` bullets of one line; " +
-    "bold (**…**) only for the key noun in a bullet; no closing summary.";
+    "bold (**…**) only for the key noun in a bullet; end every bullet with the [id:…] citation(s) it rests on; no closing summary.";
 }
 const KEEP = 30;
 
