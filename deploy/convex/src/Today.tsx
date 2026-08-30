@@ -216,6 +216,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
     add({ day, text }).catch(fail);
     inputRef.current?.focus();
   };
+  useEffect(() => { if (composing) inputRef.current?.scrollIntoView({ block: "nearest" }); }, [composing]);
   const actsFor = (t: Item): Acts => ({
     onToggle: () => void toggle({ id: t.id }).catch(fail),
     onEdit: (newText) => void edit({ id: t.id, newText }).catch(fail),
@@ -245,12 +246,8 @@ function TasksSheet({ day, tasks, latest, onBack }:
       )}
       {openT.map((t) => row(t))}
       {doneT.map((t) => row(t))}
-      {routine.length > 0 && <p className="sect">ROUTINE</p>}
-      {routine.map((t) => row(t, true))}
-      {vault && <p><a href={`obsidian://open?vault=${encodeURIComponent(vault)}&file=${day}`}>open today's note in Obsidian ↗</a></p>}
-      {!inputOpen && <button className="fab" aria-label="add a task" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
       {composing && (
-        <div className="composer">
+        <div className="trow composer">
           <span className="glyph">○</span>
           <input ref={inputRef} autoFocus placeholder="new task" value={draft} onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
@@ -258,6 +255,10 @@ function TasksSheet({ day, tasks, latest, onBack }:
           <button className="lnk" onClick={() => setComposing(false)}>✕</button>
         </div>
       )}
+      {routine.length > 0 && <p className="sect">ROUTINE</p>}
+      {routine.map((t) => row(t, true))}
+      {vault && <p><a href={`obsidian://open?vault=${encodeURIComponent(vault)}&file=${day}`}>open today's note in Obsidian ↗</a></p>}
+      {!inputOpen && <button className="fab" aria-label="add a task" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
     </section>
   );
 }
