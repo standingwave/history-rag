@@ -178,18 +178,44 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
 
 /* ── ask ──────────────────────────────────────────────────────────────── */
 
-/* An Ask answer with its [id:…] citations as numbered, tappable marks. */
-export function Answer({ text, onOpen }: { text: string; onOpen: (id: string) => void }) {
+/* An Ask answer rendered from the light markdown models produce —
+   `## heading`, `- bullet`, `**bold**`, blank-line paragraphs — with
+   [id:…] citations as numbered, tappable marks. `compact` drops the
+   headings to labels and keeps things tight for the dashboard tile. */
+export function Answer({ text, onOpen, compact }: { text: string; onOpen?: (id: string) => void; compact?: boolean }) {
   const ids: string[] = [];
-  // Models slip into markdown; the app renders plain text, so drop the marks.
-  text = text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/^#{1,6}\s+/gm, "").replace(/^\s*[-*]\s+/gm, "• ");
-  const parts = text.split(/(\[id:[^\]\s]+\])/g).map((p, i) => {
-    const m = /^\[id:([^\]\s]+)\]$/.exec(p);
-    if (!m) return <span key={i}>{p}</span>;
-    let n = ids.indexOf(m[1]); if (n < 0) { ids.push(m[1]); n = ids.length - 1; }
-    return <span key={i} className="cite" onClick={() => onOpen(m[1])}>[{n + 1}]</span>;
+  const inline = (line: string, key: string) => {
+    const parts = line.split(/(\[id:[^\]\s]+\]|\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean);
+    return parts.map((p, i) => {
+      const c = /^\[id:([^\]\s]+)\]$/.exec(p);
+      if (c) {
+        if (compact || !onOpen) return null;
+        let n = ids.indexOf(c[1]); if (n < 0) { ids.push(c[1]); n = ids.length - 1; }
+        return <span key={`${key}${i}`} className="cite" onClick={() => onOpen(c[1])}>[{n + 1}]</span>;
+      }
+      if (p.startsWith("**")) return <strong key={`${key}${i}`}>{p.slice(2, -2)}</strong>;
+      if (p.startsWith("`")) return <code key={`${key}${i}`} className="mono">{p.slice(1, -1)}</code>;
+      return <span key={`${key}${i}`}>{p}</span>;
+    });
+  };
+  const out: ReactNode[] = [];
+  let list: ReactNode[] = [], para: string[] = [];
+  const flush = () => {
+    if (list.length) { out.push(<ul key={`l${out.length}`} className="md-list">{list}</ul>); list = []; }
+    if (para.length) { out.push(<p key={`p${out.length}`} className="md-p">{inline(para.join(" "), `p${out.length}`)}</p>); para = []; }
+  };
+  text.split("\n").forEach((raw, n) => {
+    const line = raw.replace(/\s+$/, "");
+    const h = /^#{1,6}\s+(.*)$/.exec(line) ?? /^\*\*([^*]+)\*\*:?$/.exec(line);
+    const b = /^\s*[-*•]\s+(.*)$/.exec(line);
+    if (!line.trim()) { flush(); return; }
+    if (h) { flush(); out.push(<p key={`h${n}`} className={compact ? "md-h compact" : "md-h"}>{h[1].replace(/:$/, "")}</p>); return; }
+    if (b) { if (para.length) flush(); list.push(<li key={`b${n}`}>{inline(b[1], `b${n}`)}</li>); return; }
+    if (list.length) flush();
+    para.push(line.trim());
   });
-  return <p className="answer">{parts}</p>;
+  flush();
+  return <div className={`answer ${compact ? "compact" : ""}`}>{out}</div>;
 }
 
 export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {

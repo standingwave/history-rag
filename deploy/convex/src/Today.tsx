@@ -8,7 +8,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { SearchSheet, AskSheet, BrowseSheet, Detail, Row, Answer } from "./Archive";
 import { useAction } from "convex/react";
-import { shortDate, hhmm, Linkify } from "./render";
+import { shortDate, hhmm, Linkify, describe } from "./render";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -66,8 +66,8 @@ function period(h: number) {
 }
 const ORDER: Record<string, string[]> = {
   morning: ["agenda", "tasks", "brief"],
-  day: ["tasks", "agenda", "brief"],
-  night: ["tasks", "brief", "agenda"],
+  day: ["agenda", "tasks", "brief"],
+  night: ["agenda", "brief", "tasks"],
 };
 
 export function Today() {
@@ -106,9 +106,7 @@ export function Today() {
 
   const tiles: Record<string, JSX.Element> = {
     tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} waiting={waiting} onOpen={() => open("tasks")} />,
-    agenda: <StatTile key="agenda" title="Agenda" color="#f472b6" onOpen={() => open("agenda")}
-      stat={agenda ? String(agenda.length) : "…"}
-      caption={agenda?.length ? `next ${timeOnly(agenda.find((e: Item) => new Date(e.timestamp) > new Date())?.timestamp ?? agenda[0].timestamp)}` : "no events"} loading={!agenda} />,
+    agenda: <AgendaTile key="agenda" agenda={agenda} onOpen={() => open("agenda")} />,
     brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
   };
   return (
@@ -466,18 +464,46 @@ const ago = (t: number) => {
   return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
 };
 
-/* "What did I do over the last day?" — the stored answer's opening, the
-   tile is the wide one so a few lines fit. */
+/* Today's events, always the first tile and full width: one line when
+   there's nothing, otherwise the next few with the upcoming one marked. */
+function AgendaTile({ agenda, onOpen }: { agenda?: Item[]; onOpen: () => void }) {
+  const now = Date.now();
+  const list = agenda ?? [];
+  const nextI = list.findIndex((e) => new Date(e.timestamp).getTime() > now);
+  const start = Math.max(0, Math.min(nextI < 0 ? list.length : nextI, list.length - 4));
+  const shown = list.slice(start, start + 4);
+  const label = (e: Item) => describe(e).title;
+  return (
+    <button className="tile large agenda" onClick={onOpen}>
+      <div className="thead" style={shown.length ? undefined : { marginBottom: 0 }}>
+        <span style={{ color: "#f472b6" }}>Agenda</span>
+        <span className="muted">{!agenda ? "…" : list.length ? `${list.length} event${list.length > 1 ? "s" : ""}` : "no events today"} ›</span>
+      </div>
+      {!agenda && <span className="skel" style={{ width: "60%", margin: "4px 0" }} />}
+      {shown.map((e, i) => {
+        const past = new Date(e.timestamp).getTime() <= now && timeOnly(e.timestamp) !== "all day";
+        return (
+          <div key={e.id} className={`lrow ${start + i === nextI ? "next" : ""} ${past ? "past" : ""}`}>
+            <span className="time">{timeOnly(e.timestamp) === "all day" ? "all day" : hhmm(e.timestamp)}</span>
+            <span className="grow">{label(e)}</span>
+          </div>
+        );
+      })}
+      {list.length > start + 4 && <p className="muted small" style={{ margin: "2px 0 0" }}>+{list.length - start - 4} more</p>}
+    </button>
+  );
+}
+
+/* "What did I do over the previous 24 hours?" — the stored answer, rendered
+   the same way as the sheet but compact and clamped with a fade. */
 function BriefTile({ brief, onOpen }: { brief?: Brief; onOpen: () => void }) {
-  const text = brief?.answer?.replace(/\s*\[id:[^\]\s]+\]/g, "").replace(/\*\*/g, "").replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*]\s+/gm, "• ").replace(/\n{2,}/g, "\n").trim() ?? "";
   return (
     <button className="tile large brief" onClick={onOpen}>
-      <div className="thead"><span style={{ color: "#a78bfa" }}>Last day</span>
+      <div className="thead"><span style={{ color: "#a78bfa" }}>Last 24 h</span>
         <span className="muted">{brief?.generatedAt ? ago(brief.generatedAt) : ""} ›</span></div>
       {!brief && <Skeleton widths={[92, 84, 60]} style={{ margin: "6px 0" }} />}
       {brief && !brief.answer && <p className="muted">{brief.lastError ? `couldn't answer: ${brief.lastError.error}` : "not generated yet — open to run it"}</p>}
-      {text && <p className="clamp">{text}</p>}
+      {brief?.answer && <div className="clamp"><Answer text={brief.answer} compact /></div>}
     </button>
   );
 }
@@ -492,7 +518,7 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>Last day</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>Last 24 h</span></div>
       <p className="muted small">{brief?.question ?? "…"}</p>
       {errView}
       {brief?.lastError && !busy && <ErrBox>refresh {ago(brief.lastError.at)} failed: {brief.lastError.error}</ErrBox>}
