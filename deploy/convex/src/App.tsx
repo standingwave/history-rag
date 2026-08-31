@@ -31,8 +31,15 @@ export function App() {
   return (
     <div className="col">
       <header className="hdr">
-        <button className={`wordmark ${isLoading ? "pulse" : ""}`} title="reload"
-          onClick={() => location.reload()}>Oriel</button>
+        {/* The wordmark is "go to the start": closes any open sheet, and
+            reloads when already on the dashboard. */}
+        <button className={`wordmark ${isLoading ? "pulse" : ""}`} title="home / reload"
+          onClick={() => {
+            if (new URLSearchParams(location.hash.slice(1)).get("w")) {
+              history.pushState(null, "", "#");
+              dispatchEvent(new PopStateEvent("popstate"));
+            } else location.reload();
+          }}>Oriel</button>
         <Authenticated>
           <button className="lnk" onClick={() => void signOut()}>sign out</button>
         </Authenticated>

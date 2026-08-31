@@ -86,7 +86,7 @@ function Sheet({ title, onBack, children, stats }:
   { title: string; onBack: () => void; children: ReactNode; stats?: ReactNode }) {
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>{title}</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>{title}</span></div>
       {stats ?? <StatsStrip />}
       {children}
     </section>

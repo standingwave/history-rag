@@ -437,7 +437,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
     : e.parent ? `${KIND_VERB[e.kind] ?? e.kind} subtask "${e.text}"` : `${KIND_VERB[e.kind] ?? e.kind} "${e.text}"`;
   return (
     <section className="tasks-sheet">
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
         <span>☑ Tasks · {doneT.length}/{main.length} done · {dayLabel(day)}</span></div>
       {stalled && <div className="wait"><span>{unapplied.length} change{unapplied.length > 1 ? "s" : ""} waiting for the Mac</span>
         <span className="muted">since {new Date(oldest).toTimeString().slice(0, 5)}</span></div>}
@@ -551,7 +551,7 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>Last 24 h</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>Last 24 h</span></div>
       <p className="muted small">{brief?.question ?? "…"}</p>
       {errView}
       {brief?.lastError && !busy && <ErrBox>refresh {ago(brief.lastError.at)} failed: {brief.lastError.error}</ErrBox>}
@@ -603,7 +603,7 @@ function AgendaSheet({ day, agenda, onBack, onOpen }:
   const hours = []; for (let h = loH; h <= hiH; h++) hours.push(h);
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
         <span>Agenda · {dayLabel(day)}</span></div>
       {agenda === undefined && <Skeleton widths={[80, 62, 71]} style={{ margin: "8px 0" }} />}
       {agenda && !evs.length && <p className="muted">nothing scheduled</p>}
@@ -661,7 +661,7 @@ function ListSheet({ title, items, row, onBack }:
   { title: string; items?: Item[]; row: (i: Item) => JSX.Element; onBack: () => void }) {
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ Oriel</button><span>{title}</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>{title}</span></div>
       {items === undefined && <Skeleton widths={[80, 62, 71]} style={{ margin: "8px 0" }} />}
       {items?.length === 0 && <p className="muted">nothing</p>}
       {items?.map((i) => <div key={i.id}>{row(i)}</div>)}
