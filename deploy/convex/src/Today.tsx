@@ -91,6 +91,8 @@ export function Today() {
   const latest = useQuery(api.today.latestTaskDay, {});
   const intents = useQuery(api.today.intents, {});
   const waiting = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error).length;
+  const starting = (intents ?? []).some((i: any) => i.kind === "start" && !i.appliedAt && !i.error);
+  const startDay = useMutation(api.today.startDay);
   const hour = new Date().getHours();
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
@@ -103,7 +105,8 @@ export function Today() {
   if (sheet === "browse") return <BrowseSheet onBack={close} onOpen={openId} />;
 
   const tiles: Record<string, JSX.Element> = {
-    tasks: <TasksTile key="tasks" tasks={tasks} waiting={waiting} onOpen={() => open("tasks")} />,
+    tasks: <TasksTile key="tasks" tasks={tasks} waiting={waiting} starting={starting}
+      onStart={() => startDay({ day })} onOpen={() => open("tasks")} />,
     agenda: <AgendaTile key="agenda" agenda={agenda} upcoming={upcoming} onOpen={() => open("agenda")} />,
     brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
   };
@@ -122,7 +125,9 @@ export function Today() {
   );
 }
 
-function TasksTile({ tasks, waiting, onOpen }: { tasks?: Item[]; waiting: number; onOpen: () => void }) {
+function TasksTile({ tasks, waiting, starting, onStart, onOpen }:
+  { tasks?: Item[]; waiting: number; starting: boolean; onStart: () => Promise<unknown>; onOpen: () => void }) {
+  const [startErr, setStartErr] = useState("");
   const list = tasks ?? [];
   const main = list.filter((t) => t.meta.section !== "Routine");
   const done = main.filter((t) => t.meta.done);
@@ -135,7 +140,14 @@ function TasksTile({ tasks, waiting, onOpen }: { tasks?: Item[]; waiting: number
         <span className="muted">{tasks ? `${done.length}/${main.length} done` : "…"} ›</span></div>
       {!tasks && <Skeleton widths={[70, 55, 62]} style={{ margin: "6px 0" }} />}
       {shown.map((t) => <TaskRow key={t.id} t={t} compact />)}
-      {tasks && !main.length && <p className="muted">no note for today</p>}
+      {tasks && !list.length && (starting
+        ? <p className="muted"><span className="waiting">starting the day — waiting for your Mac</span></p>
+        : <p className="muted">no note for today · <span className="lnk" role="button"
+            style={{ color: "#8ab4f8" }}
+            onClick={(e) => { e.stopPropagation(); setStartErr(""); onStart().catch((err) => setStartErr(String(err?.message ?? err))); }}>
+            start day</span></p>)}
+      {startErr && <p className="muted small" style={{ color: "#f87171" }}>{startErr}</p>}
+      {tasks && list.length > 0 && !main.length && <p className="muted">no tasks yet — just routines</p>}
       {tasks && main.length > 0 && (
         <p className="muted small">
           {more > 0 ? `+${more} more · ` : ""}{done.length} done · {list.length - main.length} routine
@@ -348,6 +360,7 @@ const KIND_VERB: Record<string, string> = { toggle: "apply", add: "add", edit: "
 function TasksSheet({ day, tasks, latest, onBack }:
   { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void }) {
   const toggle = useMutation(api.today.toggle);
+  const startDay = useMutation(api.today.startDay);
   const add = useMutation(api.today.add);
   const edit = useMutation(api.today.edit);
   const remove = useMutation(api.today.remove);
@@ -403,7 +416,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const inflight: Record<string, Busy> = {};        // placeholders
   const rowBusy: Record<string, Busy> = {};         // toggles, deletes, attachments on a row
   const subBusy: Record<string, Record<string, Busy>> = {};   // chunkId → sub text → busy
-  const LABEL: Record<string, string> = { toggle: "ticking", add: "adding", edit: "editing", delete: "deleting", attach: "attaching" };
+  const LABEL: Record<string, string> = { toggle: "ticking", add: "adding", edit: "editing", delete: "deleting", attach: "attaching", start: "starting" };
   for (const i of unapplied) {
     const b: Busy = { label: LABEL[i.kind] ?? i.kind, young: Date.now() - i.requestedAt < YOUNG_MS };
     if (i.kind === "attach") rowBusy[i.chunkId] = b;
@@ -419,7 +432,8 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const vault = list[0]?.meta.vault ?? "";
   const inputOpen = composing || active?.mode === "edit";
   const errWhat = (e: { kind: string; text: string; parent: string | null }) =>
-    e.kind === "attach" ? `attach "${e.text}" to "${e.parent}"`
+    e.kind === "start" ? "start the day"
+    : e.kind === "attach" ? `attach "${e.text}" to "${e.parent}"`
     : e.parent ? `${KIND_VERB[e.kind] ?? e.kind} subtask "${e.text}"` : `${KIND_VERB[e.kind] ?? e.kind} "${e.text}"`;
   return (
     <section className="tasks-sheet">
@@ -432,7 +446,13 @@ function TasksSheet({ day, tasks, latest, onBack }:
         <ErrBox key={e.id} onClose={() => setDismissed((d) => new Set(d).add(e.id))}>couldn't {errWhat(e)}: {e.error}</ErrBox>)}
       {!tasks && <Skeleton widths={[70, 55, 62, 48]} style={{ margin: "8px 0" }} />}
       {tasks && !list.length && (
-        <p className="muted">no note for {day}{latest ? ` — latest is ${latest}` : ""}</p>
+        <>
+          <p className="muted">no note for {day}{latest ? ` — latest is ${latest}` : ""}</p>
+          {unapplied.some((i: any) => i.kind === "start")
+            ? <p className="muted"><span className="waiting">starting the day — waiting for your Mac</span></p>
+            : <p><button className="go" onClick={() => void startDay({ day }).catch(fail)}>start day</button>
+                <span className="muted small" style={{ marginLeft: 10 }}>carries open tasks, adds routines</span></p>}
+        </>
       )}
       {openT.map((t) => row(t))}
       {doneT.map((t) => row(t))}

@@ -126,6 +126,25 @@ def test_add_to_missing_note_starts_the_day(tmp_path, monkeypatch):
     assert "- [ ] brush teeth" in got and "- [ ] gym" not in got  # 2026-08-29 is a Saturday
 
 @skill_present
+def test_start_creates_the_note_without_adding(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
+    (v / "Templates").mkdir()
+    (v / "Templates" / "Daily Tasks Template.md").write_text("- [ ] brush teeth\n- [ ] gym #mon\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    err = ap.apply_intent({"kind": "start", "vault": "Documents", "day": "2026-08-29", "text": ""})
+    assert err is None
+    got = (v / "2026-08-29.md").read_text().split("\n")
+    assert got[0] == "- [ ] treat hoya for mealybugs"        # carried, with its block
+    assert "\t- [ ] isolate from other plants" in got
+    assert "- [x] workout" not in got                        # done stays behind
+    assert "- [ ] brush teeth" in got and "- [ ] gym" not in got  # 2026-08-29 is a Saturday
+    # a start on a day that already has a note leaves it alone
+    before = (v / "2026-08-28.md").read_text()
+    assert ap.apply_intent({"kind": "start", "vault": "Documents", "day": "2026-08-28", "text": ""}) is None
+    assert (v / "2026-08-28.md").read_text() == before
+
+@skill_present
 def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))

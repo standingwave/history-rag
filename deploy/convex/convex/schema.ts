@@ -9,7 +9,8 @@ import { authTables } from "@convex-dev/auth/server";
 
 export const want = v.union(v.literal("done"), v.literal("open"));
 export const intentKind = v.union(
-  v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"), v.literal("attach"));
+  v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"), v.literal("attach"),
+  v.literal("start"));
 
 export default defineSchema({
   ...authTables,

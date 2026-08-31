@@ -278,6 +278,10 @@ def apply_intent(intent: dict) -> str | None:
         return f"vault {intent['vault']!r} is not configured on this Mac"
     path = os.path.join(vault, f"{intent['day']}.md")
     kind = intent.get("kind") or "toggle"
+    if kind == "start":
+        if not os.path.isfile(path):
+            _write(path, start_lines(path, intent["day"]))
+        return None
     if os.path.isfile(path):
         lines = _read(path)
     elif kind == "add":

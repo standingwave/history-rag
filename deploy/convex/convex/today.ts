@@ -188,6 +188,27 @@ export const add = mutation({
   },
 });
 
+/* Begin the day's note without adding a task: the Mac carries open tasks
+   forward and adds the day's routines, then pushes the result. Nothing is
+   shown optimistically — what carries is only known on the Mac. */
+export const startDay = mutation({
+  args: { day: v.string() },
+  handler: async (ctx, { day }) => {
+    await requireUser(ctx);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bad day");
+    const has = await ctx.db.query("items")
+      .withIndex("by_source_day", (q) => q.eq("source", "tasks").eq("day", day)).first();
+    if (has) throw new Error(`${day} already has tasks`);
+    const queued = await ctx.db.query("taskIntents")
+      .withIndex("by_appliedAt", (q) => q.eq("appliedAt", undefined)).collect();
+    if (queued.some((i) => i.kind === "start" && i.day === day)) return null;
+    const vault = await vaultFor(ctx, day);
+    return await ctx.db.insert("taskIntents", {
+      kind: "start", chunkId: "", day, vault, text: "", requestedAt: Date.now(),
+    });
+  },
+});
+
 export const edit = mutation({
   args: { id: v.string(), newText: v.string() },
   handler: async (ctx, { id, newText }) => {
@@ -342,7 +363,7 @@ export const intents = query({
     await requireUser(ctx);
     const rows = await ctx.db.query("taskIntents").order("desc").take(20);
     return rows.map((r) => ({
-      id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", text: r.text, want: r.want ?? null,
+      id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", day: r.day, text: r.text, want: r.want ?? null,
       newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "") : null,
       parent: r.parent ?? null,
       requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
