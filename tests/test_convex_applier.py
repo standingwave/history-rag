@@ -144,6 +144,61 @@ def test_start_creates_the_note_without_adding(tmp_path, monkeypatch):
     assert ap.apply_intent({"kind": "start", "vault": "Documents", "day": "2026-08-28", "text": ""}) is None
     assert (v / "2026-08-28.md").read_text() == before
 
+def test_applies_day_tags():
+    assert ap._applies([], "2026-08-31")
+    assert ap._applies(["mon"], "2026-08-31")            # a Monday
+    assert not ap._applies(["tue"], "2026-08-31")
+    assert ap._applies(["weekday"], "2026-08-31")
+    assert not ap._applies(["weekend"], "2026-08-31")
+    assert ap._applies(["weekend"], "2026-09-05")        # a Saturday
+
+@skill_present
+def test_routine_template_add_edit_delete():
+    tpl = ["- [ ] brush teeth", "- [ ] gym #mon #wed", "\t- [ ] stretch"]
+    new, err = ap.routine_add_tpl(tpl, "meditate", ["weekday"])
+    assert err is None and new[-1] == "- [ ] meditate #weekday"
+    new, err = ap.routine_add_tpl(tpl, "  GYM ", [])
+    assert new is None and "already" in err
+    new, err = ap.routine_edit_tpl(tpl, "gym", "lift weights", None)
+    assert err is None and new[1] == "- [ ] lift weights #mon #wed"   # tags kept
+    assert new[2] == "\t- [ ] stretch"                                # block kept
+    new, err = ap.routine_edit_tpl(tpl, "gym", None, ["sat"])
+    assert err is None and new[1] == "- [ ] gym #sat"
+    new, err = ap.routine_edit_tpl(tpl, "gym", None, [])
+    assert err is None and new[1] == "- [ ] gym"                      # [] = every day
+    new, err = ap.routine_edit_tpl(tpl, "gym", "brush teeth", None)
+    assert new is None and "already" in err
+    new, err = ap.routine_delete_tpl(tpl, "gym")
+    assert err is None and new == ["- [ ] brush teeth"]
+    new, err = ap.routine_delete_tpl(tpl, "nope")
+    assert new is None and "not found" in err
+
+@skill_present
+def test_routine_add_intent_hits_template_and_today(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-31.md").write_text("- [ ] existing\n")             # a Monday
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    err = ap.apply_intent({"kind": "routineAdd", "vault": "Documents",
+                           "day": "2026-08-31", "text": "meditate", "days": ["mon"]})
+    assert err is None
+    tpl = v / "Templates" / "Daily Tasks Template.md"
+    assert tpl.read_text().strip() == "- [ ] meditate #mon"
+    note = (v / "2026-08-31.md").read_text().split("\n")
+    assert "## Routine" in note and "- [ ] meditate" in note
+    # a schedule that skips today stays out of the note
+    err = ap.apply_intent({"kind": "routineAdd", "vault": "Documents",
+                           "day": "2026-08-31", "text": "mow lawn", "days": ["sat"]})
+    assert err is None
+    assert "mow lawn" not in (v / "2026-08-31.md").read_text()
+    assert "- [ ] mow lawn #sat" in tpl.read_text()
+    # edit and delete route through apply_intent too
+    assert ap.apply_intent({"kind": "routineEdit", "vault": "Documents", "day": "routine",
+                            "text": "mow lawn", "newText": "mow the lawn"}) is None
+    assert "- [ ] mow the lawn #sat" in tpl.read_text()
+    assert ap.apply_intent({"kind": "routineDelete", "vault": "Documents", "day": "routine",
+                            "text": "meditate"}) is None
+    assert "meditate" not in tpl.read_text()
+
 @skill_present
 def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()

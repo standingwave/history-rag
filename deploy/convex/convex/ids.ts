@@ -58,3 +58,9 @@ export function normTask(text: string): string {
 export function taskChunkId(vault: string, text: string): string {
   return "tasks:" + sha256Hex(`${vault}\0${normTask(text)}`).slice(0, 26);
 }
+
+/* A routine template entry — distinct from any daily instance of the same
+   text (sources/tasks.py routine_chunk_id mirrors). */
+export function routineChunkId(vault: string, text: string): string {
+  return "tasks:" + sha256Hex(`${vault}\0routine\0${normTask(text)}`).slice(0, 26);
+}

@@ -53,6 +53,7 @@ export const upsert = internalAction({
 /* Per-source counters behind archive.stats. A delete can't shrink the
    day range exactly; rebuildStats fixes that whenever it matters. */
 export async function bump(ctx: { db: any }, source: string, delta: number, day?: string) {
+  if (day && !/^\d{4}-/.test(day)) day = undefined;   // sentinel days ("routine") aren't dates
   const row = await ctx.db.query("stats").withIndex("by_source", (q: any) => q.eq("source", source)).unique();
   if (!row) {
     if (delta > 0) await ctx.db.insert("stats", { source, count: delta, earliestDay: day ?? "", latestDay: day ?? "", updatedAt: Date.now() });
@@ -139,6 +140,7 @@ export const statsPage = internalQuery({
     for (const r of page.page) {
       const a = acc[r.source] ?? (acc[r.source] = { n: 0, lo: "", hi: "" });
       a.n++;
+      if (!/^\d{4}-/.test(r.day)) continue;           // sentinel days aren't dates
       if (r.day && (!a.lo || r.day < a.lo)) a.lo = r.day;
       if (r.day > a.hi) a.hi = r.day;
     }

@@ -32,7 +32,49 @@ function timeOnly(ts: string) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 function title(t: Item) {
-  return t.text.split("\n", 1)[0].replace(/^Task: /, "");
+  return t.text.split("\n", 1)[0].replace(/^(Task|Routine): /, "");
+}
+
+/* ── routine schedules: the template's day tags, picked with a segmented
+   bar; "pick days" opens seven letter toggles. [] = every day. ── */
+const DAY_TAGS7 = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+type Sched = { kind: "daily" | "weekday" | "weekend" | "pick"; days: string[] };
+const schedTags = (s: Sched): string[] =>
+  s.kind === "daily" ? [] : s.kind === "pick" ? s.days : [s.kind];
+function toSched(days: string[]): Sched {
+  if (!days.length) return { kind: "daily", days: [] };
+  if (days.length === 1 && days[0] === "weekday") return { kind: "weekday", days: [] };
+  if (days.length === 1 && days[0] === "weekend") return { kind: "weekend", days: [] };
+  return { kind: "pick", days: days.filter((d) => DAY_TAGS7.includes(d)) };
+}
+function schedLabel(days: string[]): string {
+  if (!days.length) return "daily";
+  if (days.length === 1 && days[0] === "weekday") return "weekdays";
+  if (days.length === 1 && days[0] === "weekend") return "weekend";
+  return days.map((d) => d[0].toUpperCase() + d.slice(1, 3)).join(" ");
+}
+function SchedulePicker({ sched, setSched }: { sched: Sched; setSched: (s: Sched) => void }) {
+  return (
+    <>
+      <div className="cbar sbar">
+        {([["daily", "daily"], ["weekday", "weekdays"], ["weekend", "weekend"], ["pick", "pick days"]] as const)
+          .map(([k, lbl]) => <button key={k} className={sched.kind === k ? "sel" : ""}
+            onClick={() => setSched({ kind: k, days: k === "pick" && !sched.days.length ? ["mon", "wed", "fri"] : sched.days })}>
+            {lbl}</button>)}
+      </div>
+      {sched.kind === "pick" && (
+        <div className="dayrow">
+          {DAY_TAGS7.map((d, i) => <button key={d} className={`dtl ${sched.days.includes(d) ? "on" : ""}`}
+            onClick={() => {
+              const has = sched.days.includes(d);
+              if (has && sched.days.length === 1) return;
+              setSched({ ...sched, days: DAY_TAGS7.filter((x) => (x === d) !== sched.days.includes(x)) });
+            }}>{DAY_LETTERS[i]}</button>)}
+        </div>
+      )}
+    </>
+  );
 }
 /* Re-render every `ms` while mounted: elapsed counters, intent ages. */
 export function useTick(ms: number, on = true) {
@@ -96,7 +138,9 @@ export function Today() {
   const hour = new Date().getHours();
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
-  if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close} />;
+  if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close}
+    onRoutines={() => open("routines")} />;
+  if (sheet === "routines") return <RoutinesSheet onBack={() => history.back()} />;
   if (sheet === "agenda") return <AgendaSheet day={day} agenda={agenda} onBack={close} onOpen={openId} />;
   if (sheet === "brief") return <BriefSheet brief={brief} onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
@@ -164,6 +208,7 @@ type Acts = {
   onSubEdit: (text: string, newText: string) => void; onSubDelete: (text: string) => void;
   onAttach: (text: string) => void;
   onAttachFile: (file: File, onProgress: (loaded: number, total: number) => void) => Promise<void>;
+  onMakeRoutine: (days: string[]) => void;
 };
 type Busy = { label: string; young: boolean };
 function busyLabel(b?: Busy) {
@@ -212,7 +257,7 @@ function SubRow({ s, acts, mode, setMode, busy }:
 /* One task. `acts` makes it editable: the row ends in a faint … that opens
    the action strip (edit · delete); edit swaps the text for an underlined
    input in place; delete asks once, naming what the block takes with it. */
-type Mode = "acts" | "edit" | "delete" | null;
+type Mode = "acts" | "edit" | "delete" | "routine" | null;
 function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, setMode }:
   { t: Item; compact?: boolean; acts?: Acts; fixed?: boolean; placeholder?: Busy; busy?: Busy;
     subBusy?: Record<string, Busy>; mode?: Mode; setMode?: (m: Mode) => void }) {
@@ -235,6 +280,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
       .then(() => setUpload(null), (e) => setUpload({ file, loaded: 0, err: String(e instanceof Error ? e.message : e) }));
   };
   const [subDraft, setSubDraft] = useState("");
+  const [sched, setSched] = useState<Sched>({ kind: "daily", days: [] });
   const subRef = useRef<HTMLInputElement>(null);
   const addSub = () => {
     const v = subDraft.trim();
@@ -278,7 +324,17 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
           <button onClick={startEdit}>edit</button>
           <button onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>subtask</button>
           <button onClick={() => { setOpen(true); setAttaching("pick"); setMode?.(null); }}>attach</button>
+          <button onClick={() => { setSched({ kind: "daily", days: [] }); setMode?.("routine"); }}>routine…</button>
           <button className="danger" onClick={() => setMode?.("delete")}>delete</button>
+        </div>
+      )}
+      {mode === "routine" && (
+        <div className="schedwrap">
+          <SchedulePicker sched={sched} setSched={setSched} />
+          <div className="savebar">
+            <button className="go" onClick={() => { acts?.onMakeRoutine(schedTags(sched)); setMode?.(null); }}>make routine</button>
+            <button className="cancelv" onClick={() => setMode?.(null)}>cancel</button>
+          </div>
         </div>
       )}
       {mode === "delete" && (
@@ -355,12 +411,16 @@ function uploadWithProgress(url: string, file: File, onProgress: (loaded: number
   });
 }
 
-const KIND_VERB: Record<string, string> = { toggle: "apply", add: "add", edit: "edit", delete: "delete", attach: "attach" };
+const KIND_VERB: Record<string, string> = {
+  toggle: "apply", add: "add", edit: "edit", delete: "delete", attach: "attach",
+  routineAdd: "add routine", routineEdit: "edit routine", routineDelete: "delete routine",
+};
 
-function TasksSheet({ day, tasks, latest, onBack }:
-  { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void }) {
+function TasksSheet({ day, tasks, latest, onBack, onRoutines }:
+  { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void; onRoutines: () => void }) {
   const toggle = useMutation(api.today.toggle);
   const startDay = useMutation(api.today.startDay);
+  const routineAdd = useMutation(api.today.routineAdd);
   const add = useMutation(api.today.add);
   const edit = useMutation(api.today.edit);
   const remove = useMutation(api.today.remove);
@@ -374,7 +434,9 @@ function TasksSheet({ day, tasks, latest, onBack }:
   const intents = useQuery(api.today.intents, {});
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
-  const [active, setActive] = useState<{ id: string; mode: "acts" | "edit" | "delete" } | null>(null);
+  const [routineOn, setRoutineOn] = useState(false);
+  const [sched, setSched] = useState<Sched>({ kind: "daily", days: [] });
+  const [active, setActive] = useState<{ id: string; mode: NonNullable<Mode> } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   useTick(5000, (intents ?? []).some((i: any) => !i.appliedAt && !i.error));
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -392,7 +454,8 @@ function TasksSheet({ day, tasks, latest, onBack }:
     const text = draft.trim();
     if (!text) { setComposing(false); return; }
     setDraft("");
-    add({ day, text }).catch(fail);
+    if (routineOn) { routineAdd({ day, text, days: schedTags(sched) }).catch(fail); setRoutineOn(false); }
+    else add({ day, text }).catch(fail);
     inputRef.current?.focus();
   };
   useEffect(() => { if (composing) inputRef.current?.scrollIntoView({ block: "nearest" }); }, [composing]);
@@ -410,6 +473,7 @@ function TasksSheet({ day, tasks, latest, onBack }:
       const storageId = await uploadWithProgress(url, file, onProgress);
       await attachFile({ id: t.id, storageId: storageId as Id<"_storage">, name: file.name });
     },
+    onMakeRoutine: (days) => void routineAdd({ day, text: title(t), days }).catch(fail),
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
@@ -457,18 +521,145 @@ function TasksSheet({ day, tasks, latest, onBack }:
       {openT.map((t) => row(t))}
       {doneT.map((t) => row(t))}
       {composing && (
-        <div className="trow composer">
-          <span className="glyph">○</span>
-          <input ref={inputRef} autoFocus placeholder="new task" value={draft} onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
-          <button className="go" onClick={submit}>add</button>
-          <button className="cancelv" onClick={() => setComposing(false)}>cancel</button>
-        </div>
+        <>
+          <div className="trow composer">
+            <span className="glyph">{routineOn ? "↻" : "○"}</span>
+            <input ref={inputRef} autoFocus placeholder={routineOn ? "new routine" : "new task"}
+              value={draft} onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
+            <button className={`cancelv ${routineOn ? "ron" : ""}`} onClick={() => setRoutineOn(!routineOn)}>routine</button>
+            <button className="go" onClick={submit}>add</button>
+            <button className="cancelv" onClick={() => setComposing(false)}>cancel</button>
+          </div>
+          {routineOn && <div className="schedwrap"><SchedulePicker sched={sched} setSched={setSched} /></div>}
+        </>
       )}
       {routine.length > 0 && <p className="sect">ROUTINE</p>}
       {routine.map((t) => row(t, true))}
+      <p><button className="lnk" onClick={onRoutines}>routines ›</button></p>
       {vault && <p><a href={`obsidian://open?vault=${encodeURIComponent(vault)}&file=${day}`}>open today's note in Obsidian ↗</a></p>}
       {!inputOpen && <button className="fab" aria-label="add a task" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
+    </section>
+  );
+}
+
+/* The routine template, one row per entry with its schedule at the right;
+   edit / days / delete per row, the + composer at the bottom. Writes queue
+   for the Mac exactly like task writes. */
+function RoutinesSheet({ onBack }: { onBack: () => void }) {
+  const routines = useQuery(api.today.routines, {});
+  const intents = useQuery(api.today.intents, {});
+  const routineAdd = useMutation(api.today.routineAdd);
+  const routineEdit = useMutation(api.today.routineEdit);
+  const routineRemove = useMutation(api.today.routineRemove);
+  const { push: fail, view: errView } = useErrors();
+  const [active, setActive] = useState<{ id: string; mode: "acts" | "edit" | "days" | "delete" } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [rowSched, setRowSched] = useState<Sched>({ kind: "daily", days: [] });
+  const [composing, setComposing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sched, setSched] = useState<Sched>({ kind: "daily", days: [] });
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  useTick(5000, (intents ?? []).some((i: any) => !i.appliedAt && !i.error));
+  const mine = (i: any) => String(i.kind).startsWith("routine");
+  const unapplied = (intents ?? []).filter((i: any) => mine(i) && !i.appliedAt && !i.error);
+  const errors = (intents ?? []).filter((i: any) =>
+    mine(i) && i.error && Date.now() - i.requestedAt < 3600e3 && !dismissed.has(i.id));
+  const oldest = unapplied.reduce((m: number, i: any) => Math.min(m, i.requestedAt), Infinity);
+  const stalled = unapplied.length > 0 && Date.now() - oldest > YOUNG_MS;
+  const busyFor: Record<string, Busy> = {};
+  for (const i of unapplied) {
+    const b: Busy = { label: { routineAdd: "adding", routineEdit: "editing", routineDelete: "deleting" }[i.kind as string] ?? i.kind,
+                      young: Date.now() - i.requestedAt < YOUNG_MS };
+    busyFor[i.chunkId] = b;
+    if (i.newId) busyFor[i.newId] = b;
+  }
+  const list = (routines ?? []) as Item[];
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) { setComposing(false); return; }
+    setDraft("");
+    routineAdd({ day: localDay(), text, days: schedTags(sched) }).catch(fail);
+  };
+  const saveEdit = (t: Item) => {
+    const v = editDraft.trim();
+    if (v && v !== title(t)) routineEdit({ id: t.id, newText: v }).catch(fail);
+    setActive(null);
+  };
+  return (
+    <section className="tasks-sheet">
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
+        <span>↻ Routines · {list.length}</span></div>
+      {stalled && <div className="wait"><span>{unapplied.length} change{unapplied.length > 1 ? "s" : ""} waiting for the Mac</span>
+        <span className="muted">since {new Date(oldest).toTimeString().slice(0, 5)}</span></div>}
+      {errView}
+      {errors.map((e: any) =>
+        <ErrBox key={e.id} onClose={() => setDismissed((d) => new Set(d).add(e.id))}>
+          couldn't {KIND_VERB[e.kind] ?? e.kind} "{e.text}": {e.error}</ErrBox>)}
+      {!routines && <Skeleton widths={[70, 55, 62]} style={{ margin: "8px 0" }} />}
+      {routines && !list.length && <p className="muted">no routines yet — a routine is added to every day it's scheduled for</p>}
+      {list.map((t) => {
+        const busy = t.pending ? busyFor[t.id] : undefined;
+        const open = active?.id === t.id;
+        const mode = open ? active!.mode : null;
+        const days: string[] = t.meta.days ?? [];
+        if (mode === "edit") return (
+          <div key={t.id} className="trow"><div className="tline edit">
+            <span className="glyph">↻</span>
+            <input autoFocus value={editDraft} onChange={(e) => setEditDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") saveEdit(t); if (e.key === "Escape") setActive(null); }} />
+            <button className="go" onClick={() => saveEdit(t)}>save</button>
+            <button className="lnk" onClick={() => setActive(null)}>✕</button>
+          </div></div>
+        );
+        return (
+          <div key={t.id} className={`trow ${t.pending ? "pending" : ""}`}>
+            <div className="tline">
+              <span className={`glyph ${busy?.young ? "pulse" : ""}`}>↻</span>
+              <span className="ttext">{title(t)}</span>
+              {busy ? busyLabel(busy) : <span className="sched">{schedLabel(days)}</span>}
+              {!t.pending && <button className={`more ${mode ? "on" : ""}`} aria-label="actions"
+                onClick={() => setActive(open ? null : { id: t.id, mode: "acts" })}>…</button>}
+            </div>
+            {mode === "acts" && (
+              <div className="cbar">
+                <button onClick={() => { setEditDraft(title(t)); setActive({ id: t.id, mode: "edit" }); }}>edit</button>
+                <button onClick={() => { setRowSched(toSched(days)); setActive({ id: t.id, mode: "days" }); }}>days</button>
+                <button className="danger" onClick={() => setActive({ id: t.id, mode: "delete" })}>delete</button>
+                <button onClick={() => setActive(null)}>✕</button>
+              </div>
+            )}
+            {mode === "days" && (
+              <div className="schedwrap">
+                <SchedulePicker sched={rowSched} setSched={setRowSched} />
+                <div className="savebar">
+                  <button className="go" onClick={() => { routineEdit({ id: t.id, days: schedTags(rowSched) }).catch(fail); setActive(null); }}>save</button>
+                  <button className="cancelv" onClick={() => setActive(null)}>cancel</button>
+                </div>
+              </div>
+            )}
+            {mode === "delete" && (
+              <div className="confirm">delete routine<span className="muted small">&nbsp;(today's copy stays)</span>:
+                <button className="yes" onClick={() => { routineRemove({ id: t.id }).catch(fail); setActive(null); }}>Yes</button>
+                <button className="no" onClick={() => setActive(null)}>No</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {composing && (
+        <>
+          <div className="trow composer">
+            <span className="glyph">↻</span>
+            <input autoFocus placeholder="new routine" value={draft} onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
+            <button className="go" onClick={submit}>add</button>
+            <button className="cancelv" onClick={() => setComposing(false)}>cancel</button>
+          </div>
+          <div className="schedwrap"><SchedulePicker sched={sched} setSched={setSched} /></div>
+        </>
+      )}
+      {!composing && <button className="fab" aria-label="add a routine" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
     </section>
   );
 }

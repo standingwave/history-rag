@@ -82,7 +82,9 @@ def shape(row: tuple, embedding: list | None) -> dict:
     """(id, source, timestamp, location, text, meta_json) -> upsert item."""
     cid, source, ts, location, text, meta_json = row
     meta = json.loads(meta_json) if meta_json else {}
-    day, month = local_day(ts)
+    # Routine template entries recur; they belong to no day, and the
+    # sentinel keeps them out of every by-day reader.
+    day, month = ("routine", "") if meta.get("routine") else local_day(ts)
     fvals = filter_values(source, day, month, location or "", meta)
     item = {"chunkId": cid, "source": source, "timestamp": ts or "",
             "day": day, "month": month, "location": location or "",

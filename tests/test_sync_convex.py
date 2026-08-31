@@ -39,6 +39,12 @@ def test_shape_row():
     assert it["chunkId"] == "tasks:abc" and it["day"] and it["month"] == it["day"][:7]
     assert it["embedding"] == [0.1, 0.2] and it["meta"] == {"done": False}
 
+def test_shape_routine_gets_sentinel_day():
+    it = sc.shape(("tasks:r1", "tasks", "2026-08-31T19:00:00+00:00",
+                   "Templates/Daily Tasks Template.md#0", "Routine: gym",
+                   json.dumps({"routine": True, "days": ["mon"]})), None)
+    assert it["day"] == "routine" and it["month"] == ""
+
 def test_unpack_float32(monkeypatch):
     monkeypatch.setattr(sc.config, "CONVEX_DIM", 3)
     blob = struct.pack("3f", 1.0, 0.5, -0.25)

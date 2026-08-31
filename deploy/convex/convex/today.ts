@@ -11,7 +11,7 @@ import {
 } from "./_generated/server";
 import { requireUser } from "./auth";
 import { want } from "./schema";
-import { taskChunkId, normTask } from "./ids";
+import { taskChunkId, routineChunkId, normTask } from "./ids";
 import { bump } from "./sync";
 
 function pub(row: {
@@ -43,6 +43,7 @@ export const latestTaskDay = query({
     const row = await ctx.db
       .query("items")
       .withIndex("by_source_timestamp", (q) => q.eq("source", "tasks"))
+      .filter((q) => q.neq(q.field("day"), "routine"))
       .order("desc")
       .first();
     return row?.day ?? null;
@@ -232,6 +233,113 @@ export const edit = mutation({
   },
 });
 
+/* ── routines: entries in the vault's daily-tasks template
+   (wip/SPEC-routines.md). Identity is routineChunkId — never colliding
+   with a daily instance of the same text — and rows live under the
+   sentinel day "routine", which no by-day reader matches. ── */
+
+const DAY_TAGS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun", "weekday", "weekend"];
+function checkDays(days: string[]) {
+  for (const d of days) if (!DAY_TAGS.includes(d)) throw new Error(`bad day tag "${d}"`);
+}
+
+export const routines = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const rows = await ctx.db.query("items")
+      .withIndex("by_source_day", (q) => q.eq("source", "tasks").eq("day", "routine"))
+      .collect();
+    rows.sort((a, b) => (a.meta?.order ?? 0) - (b.meta?.order ?? 0));
+    return rows.filter((r) => !r.hidden).map(pub);
+  },
+});
+
+async function routineRow(ctx: { db: any }, id: string) {
+  const row = await byChunkId(ctx, id);
+  if (!row || row.source !== "tasks" || !row.meta?.routine) throw new Error("not a routine");
+  if (row.pending) throw new Error("that routine is still being applied");
+  return row;
+}
+function routinePlaceholder(vault: string, text: string, days: string[], order: number) {
+  return {
+    chunkId: routineChunkId(vault, text), source: "tasks", timestamp: new Date().toISOString(),
+    day: "routine", month: "", location: `Templates/Daily Tasks Template.md#${order}`,
+    text: `Routine: ${text}`,
+    meta: { vault, routine: true, done: false, days, section: "", order,
+            subtasks: [], attachments: [], notes: [] },
+    entryId: "", contentHash: "", pending: true,
+  };
+}
+
+/* `day` is the phone's local today, so the Mac can also drop the new
+   routine into today's note when the schedule includes it. */
+export const routineAdd = mutation({
+  args: { day: v.string(), text: v.string(), days: v.array(v.string()) },
+  handler: async (ctx, { day, text, days }) => {
+    await requireUser(ctx);
+    text = text.trim();
+    if (!text) throw new Error("empty routine");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bad day");
+    checkDays(days);
+    const vault = await vaultFor(ctx, day);
+    const id = routineChunkId(vault, text);
+    const dup = await byChunkId(ctx, id);
+    if (dup && !dup.hidden) throw new Error("a routine with that text already exists");
+    const row = routinePlaceholder(vault, text, days, await nextOrder(ctx, "routine"));
+    if (dup) await ctx.db.replace(dup._id, row);
+    else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1); }
+    return await ctx.db.insert("taskIntents", {
+      kind: "routineAdd", chunkId: id, day, vault, text, days, requestedAt: Date.now(),
+    });
+  },
+});
+
+export const routineEdit = mutation({
+  args: { id: v.string(), newText: v.optional(v.string()), days: v.optional(v.array(v.string())) },
+  handler: async (ctx, { id, newText, days }) => {
+    await requireUser(ctx);
+    const row = await routineRow(ctx, id);
+    const text = taskText(row).replace(/^Routine: /, "");
+    if (days) checkDays(days);
+    const vault = String(row.meta?.vault ?? "");
+    newText = newText?.trim();
+    if (newText && normTask(newText) !== normTask(text)) {
+      const newId = routineChunkId(vault, newText);
+      const dup = await byChunkId(ctx, newId);
+      if (dup && !dup.hidden) throw new Error("a routine with that text already exists");
+      const fresh = routinePlaceholder(vault, newText, days ?? row.meta?.days ?? [], row.meta?.order ?? 0);
+      if (dup) await ctx.db.replace(dup._id, fresh);
+      else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1); }
+      await ctx.db.patch(row._id, { pending: true, hidden: true });
+      return await ctx.db.insert("taskIntents", {
+        kind: "routineEdit", chunkId: id, day: "routine", vault, text, newText, days,
+        requestedAt: Date.now(),
+      });
+    }
+    if (!days) return null;
+    const prior = { days: row.meta?.days ?? [] };
+    await ctx.db.patch(row._id, { meta: { ...row.meta, days }, pending: true });
+    return await ctx.db.insert("taskIntents", {
+      kind: "routineEdit", chunkId: id, day: "routine", vault, text, days, prior,
+      requestedAt: Date.now(),
+    });
+  },
+});
+
+export const routineRemove = mutation({
+  args: { id: v.string() },
+  handler: async (ctx, { id }) => {
+    await requireUser(ctx);
+    const row = await routineRow(ctx, id);
+    await ctx.db.patch(row._id, { pending: true, hidden: true });
+    return await ctx.db.insert("taskIntents", {
+      kind: "routineDelete", chunkId: id, day: "routine", vault: String(row.meta?.vault ?? ""),
+      text: taskText(row).replace(/^Routine: /, ""), requestedAt: Date.now(),
+    });
+  },
+});
+
 /* ── subtasks: one level under a task; identity is the parent's row, the
    change is to its meta.subtasks[] and the intent carries `parent`. ── */
 
@@ -364,7 +472,8 @@ export const intents = query({
     const rows = await ctx.db.query("taskIntents").order("desc").take(20);
     return rows.map((r) => ({
       id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", day: r.day, text: r.text, want: r.want ?? null,
-      newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "") : null,
+      newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "")
+        : r.kind === "routineEdit" && r.newText ? routineChunkId(r.vault, r.newText) : null,
       parent: r.parent ?? null,
       requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
     }));
@@ -385,6 +494,7 @@ export const pendingIntents = internalQuery({
       fileUrl: urls[i],
       id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
       text: r.text, want: r.want ?? null, newText: r.newText ?? null, parent: r.parent ?? null,
+      days: r.days ?? null,
       requestedAt: r.requestedAt, storageId: r.storageId ?? null,
     }));
   },
@@ -419,6 +529,21 @@ export const applyIntent = internalMutation({
         break;
       }
       case "delete":
+        if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
+        break;
+      case "routineAdd":
+        if (row?.pending) { await ctx.db.delete(row._id); await bump(ctx, "tasks", -1); }
+        break;
+      case "routineEdit": {
+        if (intent.newText) {
+          const fresh = await byChunkId(ctx, routineChunkId(intent.vault, intent.newText));
+          if (fresh?.pending) { await ctx.db.delete(fresh._id); await bump(ctx, "tasks", -1); }
+        }
+        if (row) await ctx.db.patch(row._id,
+          { pending: false, hidden: false, meta: { ...row.meta, ...(intent.prior ?? {}) } });
+        break;
+      }
+      case "routineDelete":
         if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
         break;
     }

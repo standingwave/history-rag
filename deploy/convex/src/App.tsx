@@ -39,7 +39,7 @@ export function App() {
               history.pushState(null, "", "#");
               dispatchEvent(new PopStateEvent("popstate"));
             } else location.reload();
-          }}>Oriel</button>
+          }}><img src="/icon.svg" alt="" />Oriel</button>
         <Authenticated>
           <button className="lnk" onClick={() => void signOut()}>sign out</button>
         </Authenticated>

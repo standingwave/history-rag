@@ -24,13 +24,15 @@ template and are indexed unless [tasks] index_routine is off.
 
 Reads through obsidian.iter_notes — the vault list is [obsidian] vaults.
 """
-import hashlib, re
+import hashlib, os, re
 from collections import defaultdict
 from sources.common import SECRET_RE
 from sources import obsidian
 
 MAX_CHARS = 2000
 ROUTINE = "Routine"
+TEMPLATE_REL = "Templates/Daily Tasks Template.md"
+DAY_TAG_RE = re.compile(r"\s*#(mon|tue|wed|thu|fri|sat|sun|weekday|weekend)\b", re.I)
 TASK_RE = re.compile(r"^(\s*)([-*]\s+)\[( |x|X)\]\s?(.*)$")
 EMBED_RE = re.compile(r"^\s*!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$")
 HEADING_RE = re.compile(r"^#{1,6}\s+(.*?)\s*$")
@@ -96,6 +98,28 @@ def _embed_text(task: dict) -> str:
         out.append("\t" * max(1, st["depth"] // 4) + st["text"])
     return "\n".join(out)[:MAX_CHARS]
 
+def iter_routines(vaults=None):
+    """(vault, mtime_iso, task, days) per routine template entry. `days` is
+    the lowercased day tags from the head line ([] = every day); the task's
+    text has them stripped."""
+    for vault in (obsidian._vaults() if vaults is None else vaults):
+        path = os.path.join(vault, TEMPLATE_REL)
+        try:
+            with open(path, errors="replace") as f:
+                body = f.read()
+        except OSError:
+            continue
+        vname = os.path.basename(vault.rstrip("/"))
+        ts = obsidian._mtime_iso(path)
+        for t in parse_note(body):
+            days = [m.lower() for m in DAY_TAG_RE.findall(t["text"])]
+            yield vname, ts, {**t, "text": DAY_TAG_RE.sub("", t["text"]).strip()}, days
+
+def routine_chunk_id(vname: str, text: str) -> str:
+    """Distinct from the daily instance of the same text (ids.ts mirrors)."""
+    return "tasks:" + hashlib.sha256(
+        f"{vname}\0routine\0{_norm(text)}".encode()).hexdigest()[:26]
+
 def iter_daily(vaults=None):
     """(vault, date, tasks) per daily note, via the shared vault reader."""
     for vname, rel, body, _ts in obsidian.iter_notes(vaults):
@@ -116,6 +140,26 @@ def iter_chunks(vaults=None):
             entry["dates"].add(day)
             if entry["latest"] is None or day > entry["latest"][0]:
                 entry["latest"] = (day, t)
+    if routine_ok:
+        for vname, ts, t, days in iter_routines(vaults):
+            if not t["text"] or SECRET_RE.search(t["text"]):
+                continue
+            yield routine_chunk_id(vname, t["text"]), ("Routine: " + t["text"])[:MAX_CHARS], {
+                "source": "tasks",
+                "timestamp": ts,
+                "location": f"{TEMPLATE_REL}#{t['line']}",
+                "meta": {
+                    "vault": vname,
+                    "routine": True,
+                    "done": False,
+                    "days": days,
+                    "section": "",
+                    "order": t["line"],
+                    "subtasks": t["subtasks"],
+                    "attachments": t["attachments"],
+                    "notes": t["notes"],
+                },
+            }
     for (vname, norm), entry in sorted(life.items()):
         day, t = entry["latest"]
         if t["section"] == ROUTINE and not routine_ok:

@@ -107,6 +107,24 @@ def test_routine_indexed_unless_turned_off(vault, monkeypatch):
     monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "false")
     assert "brush teeth and shower" not in _by_text(tasks.iter_chunks())
 
+def test_template_entries_become_routine_chunks(vault, monkeypatch):
+    (vault / "Templates").mkdir()
+    (vault / "Templates" / "Daily Tasks Template.md").write_text(
+        "- [ ] brush teeth and shower\n- [ ] gym #mon #wed\n\t- [ ] stretch\n")
+    chunks = {c[0]: c for c in tasks.iter_chunks()}
+    cid = tasks.routine_chunk_id("Documents", "gym")
+    _, text, rec = chunks[cid]
+    assert text == "Routine: gym"
+    assert rec["meta"]["routine"] is True and rec["meta"]["days"] == ["mon", "wed"]
+    assert rec["meta"]["subtasks"][0]["text"] == "stretch"
+    assert rec["location"] == "Templates/Daily Tasks Template.md#1"
+    # the routine definition never collides with a daily instance's chunk
+    daily = [c for c in chunks.values() if c[1] == "Task: brush teeth and shower"]
+    assert daily and daily[0][0] != tasks.routine_chunk_id("Documents", "brush teeth and shower")
+    # routine gating covers the template too
+    monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "false")
+    assert cid not in {c[0] for c in tasks.iter_chunks()}
+
 def test_secret_bearing_task_dropped(vault):
     assert not any("API_KEY" in c[1] for c in tasks.iter_chunks())
 

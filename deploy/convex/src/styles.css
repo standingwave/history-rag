@@ -18,7 +18,8 @@ body { margin: 0; background: #121215; color: #e8e8eb; font: 16px/1.45 -apple-sy
    word widens the page on a phone. */
 .col > *, section > * { min-width: 0; max-width: 100%; }
 .hdr { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 2px 12px; min-width: 0; }
-.wordmark { font-size: 16px; font-weight: 650; letter-spacing: -.01em; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; font-family: inherit; }
+.wordmark { font-size: 16px; font-weight: 650; letter-spacing: -.01em; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px; }
+.wordmark img { width: 22px; height: 22px; border-radius: 6px; }
 .muted { color: #a6a6af; }
 .small { font-size: .8rem; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
@@ -183,3 +184,15 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .tile .glyph { padding: 0 2px; }
 .tline .glyph, .sub .glyph { padding: 8px 8px 8px 2px; }
 .cancelv { background: none; border: 0; color: #a6a6af; font: inherit; font-size: .85rem; padding: 8px 6px; cursor: pointer; flex: none; }
+
+/* Routines (wip/SPEC-routines.md): schedule bar, day-letter toggles, the
+   composer's routine switch, and the schedule label at a row's right. */
+.schedwrap { margin: 2px 0 8px 26px; }
+.cbar.sbar { margin: 0 0 6px; }
+.cbar.sbar button.sel { background: #26262c; color: #e8e8eb; font-weight: 600; }
+.dayrow { display: flex; gap: 8px; margin: 0 0 8px; }
+.dayrow .dtl { width: 38px; height: 38px; border-radius: 50%; border: 1px solid #2a2a30; background: none; color: #a6a6af; font: inherit; font-size: .85rem; cursor: pointer; flex: none; }
+.dayrow .dtl.on { border-color: #8ab4f8; color: #e8e8eb; background: #8ab4f81a; }
+.savebar { display: flex; gap: 14px; align-items: center; min-height: 44px; }
+.cancelv.ron { color: #facc15; }
+.sched { color: #a6a6af; font-family: ui-monospace, Menlo, monospace; font-size: .75rem; flex: none; padding-left: 6px; }

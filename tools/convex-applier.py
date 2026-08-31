@@ -256,6 +256,89 @@ def start_lines(path: str, day: str) -> list:
         pass                      # no template, or a bad date
     return lines
 
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+def _applies(days: list, day: str) -> bool:
+    """Whether a routine's day tags include `day` ([] = every day)."""
+    import datetime as dt
+    if not days:
+        return True
+    wd = WEEKDAYS[dt.date.fromisoformat(day).weekday()]
+    return (wd in days or ("weekday" in days and wd in WEEKDAYS[:5])
+            or ("weekend" in days and wd in WEEKDAYS[5:]))
+
+def _tpl_find(lines: list, text: str):
+    """The one template entry whose tag-stripped text matches: (task, None)
+    or (None, error)."""
+    sk = skill()
+    hits = [t for t in sk.parse(lines) if t.parent is None
+            and _norm(sk.DAY_TAG_RE.sub("", t.text)) == _norm(text)]
+    if not hits:
+        return None, "routine not found in the template"
+    if len(hits) > 1:
+        return None, "routine text is ambiguous in the template"
+    return hits[0], None
+
+def routine_add_tpl(lines: list, text: str, days: list):
+    sk = skill()
+    if any(_norm(sk.DAY_TAG_RE.sub("", t.text)) == _norm(text)
+           for t in sk.parse(lines) if t.parent is None):
+        return None, "a routine with that text already exists"
+    return lines + [sk.task_line("", text) + "".join(f" #{d}" for d in days)], None
+
+def routine_edit_tpl(lines: list, text: str, new_text: str | None, days: list | None):
+    """Rewrite the head line; the block (subtasks, notes) stays. `days`
+    None keeps the existing tags, [] clears them to every-day."""
+    sk = skill()
+    t, err = _tpl_find(lines, text)
+    if err:
+        return None, err
+    if new_text and _norm(new_text) != _norm(text):
+        clash, _ = _tpl_find(lines, new_text)
+        if clash is not None:
+            return None, "a routine with that text already exists"
+    m = sk.TASK_RE.match(lines[t.i])
+    clean = (new_text or text).strip()
+    tags = ("".join(f" #{d}" for d in days) if days is not None
+            else "".join(f" #{d.lower()}" for d in sk.DAY_TAG_RE.findall(t.text)))
+    new = list(lines)
+    new[t.i] = f"{m.group(1)}{m.group(2)}[{m.group(3)}] {clean}{tags}"
+    return new, None
+
+def routine_delete_tpl(lines: list, text: str):
+    t, err = _tpl_find(lines, text)
+    if err:
+        return None, err
+    return lines[: t.i] + lines[t.end :], None
+
+def apply_routine(vault: str, intent: dict) -> str | None:
+    """A template change; a routineAdd that applies today also lands in
+    today's note (if it exists) so it needn't wait for tomorrow."""
+    sk = skill()
+    tpath = os.path.join(vault, sk.TEMPLATE)
+    lines = _read(tpath) if os.path.isfile(tpath) else []
+    kind = intent["kind"]
+    if kind == "routineAdd":
+        new, err = routine_add_tpl(lines, intent["text"], intent.get("days") or [])
+    elif kind == "routineEdit":
+        new, err = routine_edit_tpl(lines, intent["text"], intent.get("newText"),
+                                    intent.get("days"))
+    else:
+        new, err = routine_delete_tpl(lines, intent["text"])
+    if err:
+        return err
+    os.makedirs(os.path.dirname(tpath), exist_ok=True)
+    _write(tpath, new)
+    if kind == "routineAdd" and _applies(intent.get("days") or [], intent["day"]):
+        npath = os.path.join(vault, f"{intent['day']}.md")
+        if os.path.isfile(npath):
+            nlines = _read(npath)
+            if not any(_norm(t.text) == _norm(intent["text"])
+                       for t in sk.parse(nlines) if t.parent is None):
+                sk.append_block(nlines, [sk.task_line("", intent["text"])], routine=True)
+                _write(npath, nlines)
+    return None
+
 def vault_path(name: str) -> str | None:
     for v in config.get_paths("obsidian", "vaults", "CLAUDE_RAG_OBSIDIAN_VAULTS"):
         if os.path.basename(v.rstrip("/")) == name:
@@ -278,6 +361,8 @@ def apply_intent(intent: dict) -> str | None:
         return f"vault {intent['vault']!r} is not configured on this Mac"
     path = os.path.join(vault, f"{intent['day']}.md")
     kind = intent.get("kind") or "toggle"
+    if kind in ("routineAdd", "routineEdit", "routineDelete"):
+        return apply_routine(vault, intent)
     if kind == "start":
         if not os.path.isfile(path):
             _write(path, start_lines(path, intent["day"]))
