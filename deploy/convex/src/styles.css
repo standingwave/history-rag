@@ -18,7 +18,7 @@ body { margin: 0; background: #121215; color: #e8e8eb; font: 16px/1.45 -apple-sy
    word widens the page on a phone. */
 .col > *, section > * { min-width: 0; max-width: 100%; }
 .hdr { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 2px 12px; min-width: 0; }
-.wordmark { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+.wordmark { font-size: 16px; font-weight: 650; letter-spacing: -.01em; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; font-family: inherit; }
 .muted { color: #a6a6af; }
 .small { font-size: .8rem; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
