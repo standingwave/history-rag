@@ -10,7 +10,9 @@ img, video, table, pre, textarea, input, select, button { max-width: 100%; }
    zooms back — the "page wider than the screen" symptom. */
 input, select, textarea { font-size: 16px; }
 body { margin: 0; background: #121215; color: #e8e8eb; font: 16px/1.45 -apple-system, system-ui, sans-serif; }
-.col { max-width: 44rem; width: 100%; margin: 0 auto; padding: 14px 16px 56px; min-width: 0; }
+/* Standalone PWA: the page runs under the status bar (black-translucent),
+   so the top padding grows by the safe-area inset. */
+.col { max-width: 44rem; width: 100%; margin: 0 auto; padding: calc(14px + env(safe-area-inset-top)) 16px calc(56px + env(safe-area-inset-bottom)); min-width: 0; }
 /* Layout rule: every flex/grid child that can hold text gets min-width: 0,
    and grid tracks use minmax(0, 1fr) — otherwise min-content of one long
    word widens the page on a phone. */
