@@ -64,11 +64,7 @@ export function Skeleton({ widths, style }: { widths: number[]; style?: React.CS
 function period(h: number) {
   return h < 5 ? "night" : h < 12 ? "morning" : h < 18 ? "day" : "night";
 }
-const ORDER: Record<string, string[]> = {
-  morning: ["agenda", "tasks", "brief"],
-  day: ["agenda", "tasks", "brief"],
-  night: ["agenda", "brief", "tasks"],
-};
+const ORDER = ["agenda", "tasks", "brief"];
 
 export function Today() {
   const [day, setDay] = useState(localDay());
@@ -121,7 +117,7 @@ export function Today() {
           <button className="lnk" onClick={() => open("browse")}>browse</button>
         </span>
       </div>
-      <div className="grid">{ORDER[period(hour)].map((id) => tiles[id])}</div>
+      <div className="grid">{ORDER.map((id) => tiles[id])}</div>
     </section>
   );
 }
