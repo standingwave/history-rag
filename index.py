@@ -329,6 +329,10 @@ def main():
                         flush(batch)
                         batch = []
                 flush(batch)
+                # Refresh updates don't go through flush; a refresh-only run
+                # (e.g. tasks carried to a new day) must still commit.
+                if refreshed - refreshed0:
+                    db.commit()
             except requests.exceptions.ConnectionError:
                 raise
             except Exception as e:

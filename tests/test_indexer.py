@@ -41,6 +41,18 @@ def test_meta_only_change_is_refreshed(scratch_db, fake_embed, monkeypatch):
     db = open_db(scratch_db)
     assert '"done": true' in db.execute("SELECT meta FROM chunks WHERE id='a1'").fetchone()[0]
 
+def test_refresh_only_run_commits_without_run_record(scratch_db, fake_embed, monkeypatch):
+    """A run that only refreshes (nothing embedded) must persist even with
+    --no-run-record — the applier's kick after start-day is exactly that."""
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-08-30T00:00:00+00:00"))])])
+    run_index(monkeypatch, [mk_source("alpha",
+        [("a1", "same text", rec("alpha", ts="2026-08-31T00:00:00+00:00"))])],
+        argv=("--no-run-record",))
+    db = open_db(scratch_db)
+    ts = db.execute("SELECT timestamp FROM chunks WHERE id='a1'").fetchone()[0]
+    assert ts == "2026-08-31T00:00:00+00:00"
+
 def test_source_isolation_and_partial_batch_dropped(scratch_db, fake_embed,
                                                     monkeypatch, capsys):
     sources = [
