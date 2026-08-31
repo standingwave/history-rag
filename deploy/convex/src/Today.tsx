@@ -627,7 +627,7 @@ function AgendaSheet({ day, agenda, onBack, onOpen }:
               const s = mins(x.start), en = Math.min(mins(x.end), 1440);
               const past = x.end.getTime() < Date.now() && day === localDay();
               // Shorter than two text lines: one line, time and title inline.
-              const h = Math.max(21, ((en - s) / 60) * HOUR_PX - 2);
+              const h = Math.max(25, ((en - s) / 60) * HOUR_PX - 2);
               const slim = h < 38;
               return (
                 <button key={x.e.id} className={`ev ${slim ? "slim" : ""} ${past ? "past" : ""}`}
