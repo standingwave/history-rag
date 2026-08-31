@@ -626,11 +626,15 @@ function AgendaSheet({ day, agenda, onBack, onOpen }:
             {laid.map((x) => {
               const s = mins(x.start), en = Math.min(mins(x.end), 1440);
               const past = x.end.getTime() < Date.now() && day === localDay();
+              // Shorter than two text lines: one line, time and title inline.
+              const h = Math.max(21, ((en - s) / 60) * HOUR_PX - 2);
+              const slim = h < 38;
               return (
-                <button key={x.e.id} className={`ev ${past ? "past" : ""}`} onClick={() => onOpen(x.e.id)}
-                  style={{ top: top(s), height: Math.max(24, ((en - s) / 60) * HOUR_PX - 2),
+                <button key={x.e.id} className={`ev ${slim ? "slim" : ""} ${past ? "past" : ""}`}
+                  onClick={() => onOpen(x.e.id)}
+                  style={{ top: top(s), height: h,
                            left: `${(x.col / x.cols) * 100}%`, width: `calc(${100 / x.cols}% - 3px)` }}>
-                  <span className="evt">{hhmm(x.start.toISOString())}–{hhmm(x.end.toISOString())}</span>
+                  <span className="evt">{hhmm(x.start.toISOString())}{slim ? "" : `–${hhmm(x.end.toISOString())}`}</span>
                   <span className="evn">{describe(x.e).title}</span>
                 </button>
               );
