@@ -35,10 +35,10 @@ export function Row({ c, right, onOpen }: { c: Chunk; right?: string; onOpen: (i
 /* A date input that says what it is when empty: label, calendar glyph, and
    the chosen date (or "any"); the native picker sits invisibly on top so a
    tap still opens it. */
-export function DateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+export function DateField({ label, value, onChange }: { label?: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="datef">
-      <span className="dlab">{label}</span>
+      {label && <span className="dlab">{label}</span>}
       <span className={`dval ${value ? "" : "muted"}`}>{value || "any"}</span>
       <span className="dglyph" aria-hidden>📅</span>
       <input type="date" value={value} onChange={(e) => onChange(e.target.value)} />
@@ -317,8 +317,9 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   return (
     <Sheet title="Browse" onBack={onBack}>
       <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
-        <DateField label="from" value={since} onChange={setSince} />
-        <DateField label="to" value={until} onChange={setUntil} />
+        <DateField value={since} onChange={setSince} />
+        <span className="muted small" style={{ alignSelf: "center", flex: "none" }}>to</span>
+        <DateField value={until} onChange={setUntil} />
         <button className="primary" disabled={busy}>go</button>
       </form>
       <div className="frow">
