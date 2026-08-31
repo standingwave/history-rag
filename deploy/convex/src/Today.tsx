@@ -103,7 +103,7 @@ export function Today() {
   if (sheet === "browse") return <BrowseSheet onBack={close} onOpen={openId} />;
 
   const tiles: Record<string, JSX.Element> = {
-    tasks: <TasksTile key="tasks" tasks={tasks} hour={hour} waiting={waiting} onOpen={() => open("tasks")} />,
+    tasks: <TasksTile key="tasks" tasks={tasks} waiting={waiting} onOpen={() => open("tasks")} />,
     agenda: <AgendaTile key="agenda" agenda={agenda} upcoming={upcoming} onOpen={() => open("agenda")} />,
     brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
   };
@@ -122,13 +122,13 @@ export function Today() {
   );
 }
 
-function TasksTile({ tasks, hour, waiting, onOpen }: { tasks?: Item[]; hour: number; waiting: number; onOpen: () => void }) {
-  const night = period(hour) === "night";
+function TasksTile({ tasks, waiting, onOpen }: { tasks?: Item[]; waiting: number; onOpen: () => void }) {
   const list = tasks ?? [];
   const main = list.filter((t) => t.meta.section !== "Routine");
   const done = main.filter((t) => t.meta.done);
-  const shown = (night ? done : main.filter((t) => !t.meta.done)).slice(0, 5);
-  const more = (night ? done : main.filter((t) => !t.meta.done)).length - shown.length;
+  const open = main.filter((t) => !t.meta.done);
+  const shown = [...open, ...done].slice(0, 5);
+  const more = open.length - Math.min(open.length, 5);
   return (
     <button className="tile large" onClick={onOpen}>
       <div className="thead"><span style={{ color: "#facc15" }}>☑ Tasks</span>
