@@ -52,13 +52,20 @@ function kfmt(n: number) { return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ?
    count; with `sel`/`onToggle` the chips double as the source selector. */
 export function StatsStrip({ sel, onToggle }: { sel?: Set<string>; onToggle?: (s: string) => void }) {
   const st = useQuery(api.archive.stats, {});
+  // Without a selector the chips are informational; start with just the
+  // summary line and let it expand to the per-source counts.
+  const [expanded, setExpanded] = useState(!!sel);
   if (!st) return <div className="stats"><span className="skel" style={{ width: "55%", margin: "2px 0 8px" }} /><div className="chips">{[52, 60, 64, 56, 48].map((w, i) => <span key={i} className="chip skel" style={{ width: w, height: "1.6em", border: 0 }} />)}</div></div>;
   const lo = st.sources.reduce((m, r) => (r.earliestDay && (!m || r.earliestDay < m) ? r.earliestDay : m), "");
   const hi = st.sources.reduce((m, r) => (r.latestDay > m ? r.latestDay : m), "");
   return (
     <div className="stats">
-      <p className="muted small mono">{kfmt(st.total)} chunks · {st.sources.length} sources · {lo.slice(0, 7)} → {hi}</p>
-      <div className="chips">
+      {sel
+        ? <p className="muted small mono">{kfmt(st.total)} chunks · {st.sources.length} sources · {lo.slice(0, 7)} → {hi}</p>
+        : <button className="lnk mono small" style={{ display: "block", padding: "2px 0 6px" }} onClick={() => setExpanded(!expanded)}>
+            {kfmt(st.total)} chunks · {st.sources.length} sources · {lo.slice(0, 7)} → {hi} {expanded ? "▾" : "›"}
+          </button>}
+      {(sel ? true : expanded) && <div className="chips">
         {st.sources.map((r) => {
           const on = sel ? sel.has(r.source) : true;
           return (
@@ -70,7 +77,7 @@ export function StatsStrip({ sel, onToggle }: { sel?: Set<string>; onToggle?: (s
             </button>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }
