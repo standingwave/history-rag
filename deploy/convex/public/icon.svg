@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs><linearGradient id="dawn" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fde047"/><stop offset=".55" stop-color="#facc15"/><stop offset="1" stop-color="#f472b6"/>
+  </linearGradient></defs>
+  <rect width="100" height="100" fill="#121215"/>
+  <g fill="url(#dawn)">
+    <path d="M32 78 V46 a18 20 0 0 1 8 -17 V78 Z" opacity=".55"/>
+    <path d="M44 78 V27.5 a18 20 0 0 1 12 0 V78 Z"/>
+    <path d="M60 78 V29 a18 20 0 0 1 8 17 V78 Z" opacity=".55"/>
+  </g>
+</svg>
