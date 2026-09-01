@@ -59,6 +59,18 @@ export default defineSchema({
     latestDay: v.string(),
     updatedAt: v.number(),
   }).index("by_source", ["source"]),
+  /* Countdown timers (wip/SPEC-timers.md) — pure phone state, no Mac
+     involvement. Running = endsAt set; paused = remainingMs set; done and
+     repeat cycles are derived from the clock, never stored. Dismiss
+     deletes the row. */
+  timers: defineTable({
+    label: v.string(),
+    durationMs: v.number(),
+    repeat: v.optional(v.boolean()),
+    endsAt: v.optional(v.number()),
+    remainingMs: v.optional(v.number()),
+    startedAt: v.number(),
+  }),
   /* The dashboard's standing question, answered by Ask on a schedule
      (brief.ts); the newest row is the tile. */
   briefs: defineTable({

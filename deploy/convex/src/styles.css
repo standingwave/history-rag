@@ -196,3 +196,30 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .savebar { display: flex; gap: 14px; align-items: center; min-height: 44px; }
 .cancelv.ron { color: #facc15; }
 .sched { color: #a6a6af; font-family: ui-monospace, Menlo, monospace; font-size: .75rem; flex: none; padding-left: 6px; }
+
+/* ── timers (wip/SPEC-timers.md): the dashboard's slim ticking bar and
+   the timers sheet. done = accent + pulse until dismissed. ── */
+.tbar { border: 1px solid #2a3242; background: #141a24; border-radius: 12px; padding: 2px 12px; margin: 0 0 10px; cursor: pointer; }
+.brow { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: .9rem; }
+.brow + .brow { border-top: 1px solid #1c2430; }
+.bglyph { color: #8ab4f8; flex: none; width: 18px; text-align: center; }
+.blabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btime { font-family: ui-monospace, Menlo, monospace; font-size: .88rem; flex: none; font-variant-numeric: tabular-nums; }
+.pstate { font-size: .74rem; color: #94949e; flex: none; }
+.brow.tpaused .bglyph, .brow.tpaused .blabel, .brow.tpaused .btime { color: #94949e; }
+.brow.tdone .bglyph, .brow.tdone .blabel, .brow.tdone .btime { color: #facc15; }
+.brow.tdone { animation: pulse 1.2s ease-in-out infinite; }
+.brow .bx { background: none; border: 0; font: inherit; cursor: pointer; color: #94949e; padding: 8px 0 8px 12px; flex: none; }
+.timerrow { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #1e1e23; padding: 10px 0; min-height: 62px; }
+.tbig { font-family: ui-monospace, Menlo, monospace; font-size: 1.55rem; flex: none; min-width: 92px; font-variant-numeric: tabular-nums; }
+.tmid { flex: 1; min-width: 0; }
+.tlab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tmeta { font-size: .76rem; color: #94949e; }
+.timerrow.tpaused .tbig, .timerrow.tpaused .tlab { color: #94949e; }
+.timerrow.tdone .tbig, .timerrow.tdone .tlab { color: #facc15; }
+.timerrow.tdone .tbig { animation: pulse 1.2s ease-in-out infinite; }
+.timerrow .tstop { color: #f87171; }
+.chips.tchips { gap: 8px; margin: 8px 0; }
+.tchips .chip { font-size: .88rem; padding: 8px 13px; border-radius: 10px; min-height: 40px; color: #c8c8cf; }
+.tchips .chip:active { background: #2a2a30; }
+.composer input.tmin { flex: none; width: 56px; text-align: center; }

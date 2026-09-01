@@ -9,6 +9,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { SearchSheet, AskSheet, BrowseSheet, Detail, Row, Answer } from "./Archive";
 import { useAction } from "convex/react";
 import { shortDate, hhmm, Linkify, describe } from "./render";
+import { derive, fmt as fmtLeft, durLabel } from "../convex/timerMath";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -131,6 +132,7 @@ export function Today() {
   // now" where it's used.
   const upcoming = useQuery(api.today.upcoming, { after: new Date(day + "T00:00:00").toISOString() });
   const latest = useQuery(api.today.latestTaskDay, {});
+  const timers = useQuery(api.timers.list, {});
   const intents = useQuery(api.today.intents, {});
   const waiting = (intents ?? []).filter((i: any) => !i.appliedAt && !i.error).length;
   const starting = (intents ?? []).some((i: any) => i.kind === "start" && !i.appliedAt && !i.error);
@@ -141,6 +143,7 @@ export function Today() {
   if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close}
     onRoutines={() => open("routines")} />;
   if (sheet === "routines") return <RoutinesSheet onBack={() => history.back()} />;
+  if (sheet === "timers") return <TimersSheet timers={timers} onBack={close} />;
   if (sheet === "agenda") return <AgendaSheet day={day} agenda={agenda} onBack={close} onOpen={openId} />;
   if (sheet === "brief") return <BriefSheet brief={brief} onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
@@ -161,9 +164,11 @@ export function Today() {
         <span>
           <button className="lnk" onClick={() => open("search")}>search</button>{" · "}
           <button className="lnk" onClick={() => open("ask")}>ask</button>{" · "}
-          <button className="lnk" onClick={() => open("browse")}>browse</button>
+          <button className="lnk" onClick={() => open("browse")}>browse</button>{" · "}
+          <button className="lnk" onClick={() => open("timers")}>timers</button>
         </span>
       </div>
+      <TimersBar timers={timers} onOpen={() => open("timers")} />
       <div className="grid">{ORDER.map((id) => tiles[id])}</div>
     </section>
   );
@@ -660,6 +665,170 @@ function RoutinesSheet({ onBack }: { onBack: () => void }) {
         </>
       )}
       {!composing && <button className="fab" aria-label="add a routine" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
+    </section>
+  );
+}
+
+/* ── timers (wip/SPEC-timers.md): pure Convex state, no Mac. A running
+   timer is an absolute endsAt the client counts down from; repeat cycles
+   and "done" are derived, so a ringing timer looks the same on every
+   device and dismiss anywhere clears everywhere. ── */
+type Timer = {
+  id: string; label: string; durationMs: number; repeat?: boolean;
+  endsAt?: number; remainingMs?: number; startedAt: number;
+};
+
+/* iOS only lets pages play sound after a tap, so start/resume/pause
+   unlock the context; without it the ring is visual only. */
+let audioCtx: AudioContext | null = null;
+function unlockAudio() {
+  try {
+    audioCtx ??= new AudioContext();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+  } catch { /* no audio support; the visual ring still works */ }
+}
+function chime() {
+  navigator.vibrate?.(200);
+  const ac = audioCtx;
+  if (!ac || ac.state !== "running") return;
+  for (const d of [0, 0.22]) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880; o.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(0.12, ac.currentTime + d);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + d + 0.18);
+    o.start(ac.currentTime + d); o.stop(ac.currentTime + d + 0.2);
+  }
+}
+
+/* Chime once per crossing (one-shot end, repeat cycle boundary), on
+   whichever timer surface is mounted. lastSeen outlives the components,
+   so a ring that happened while another sheet was open sounds as soon as
+   the bar or the timers sheet is back. */
+const lastSeen = new Map<string, { st: string; cycle: number }>();
+function ringCheck(timers: Timer[]) {
+  const now = Date.now();
+  const alive = new Set(timers.map((t) => t.id));
+  for (const id of [...lastSeen.keys()]) if (!alive.has(id)) lastSeen.delete(id);
+  for (const t of timers) {
+    const s = derive(t, now), prev = lastSeen.get(t.id);
+    if (prev && ((s.st === "done" && prev.st === "running") || s.cycle > prev.cycle)) chime();
+    lastSeen.set(t.id, { st: s.st, cycle: s.cycle });
+  }
+}
+
+/* Flash the tab/app title while a one-shot is ringing. */
+function useRingTitle(ringing: boolean) {
+  useEffect(() => {
+    if (!ringing) return;
+    const base = document.title;
+    let on = false;
+    const t = setInterval(() => { on = !on; document.title = on ? "⏰ done — Oriel" : base; }, 1000);
+    return () => { clearInterval(t); document.title = base; };
+  }, [ringing]);
+}
+
+/* The dashboard's slim ticking bar; exists only while timers do. */
+function TimersBar({ timers, onOpen }: { timers?: Timer[]; onOpen: () => void }) {
+  const dismiss = useMutation(api.timers.dismiss);
+  const list = timers ?? [];
+  useTick(500, list.length > 0);
+  useEffect(() => ringCheck(list));
+  const now = Date.now();
+  useRingTitle(list.some((t) => derive(t, now).st === "done"));
+  if (!list.length) return null;
+  return (
+    <div className="tbar" role="button" tabIndex={0} onClick={onOpen}>
+      {list.map((t) => {
+        const s = derive(t, now);
+        return (
+          <div key={t.id} className={`brow ${s.st === "paused" ? "tpaused" : ""} ${s.st === "done" ? "tdone" : ""}`}>
+            <span className="bglyph">{t.repeat ? "↻" : "⏱"}</span>
+            <span className="blabel">{t.label || durLabel(t.durationMs)}</span>
+            {s.st === "paused" && <span className="pstate">paused</span>}
+            {s.st === "done"
+              ? <>
+                  <span className="btime">done</span>
+                  <button className="bx" aria-label="dismiss"
+                    onClick={(e) => { e.stopPropagation(); void dismiss({ id: t.id as Id<"timers"> }); }}>✕</button>
+                </>
+              : <span className="btime">{fmtLeft(s.left)}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const TIMER_PRESETS: [number, string][] = [[3, "3m"], [5, "5m"], [10, "10m"], [15, "15m"], [25, "25m"], [45, "45m"], [60, "1h"]];
+
+function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void }) {
+  const start = useMutation(api.timers.start);
+  const pause = useMutation(api.timers.pause);
+  const resume = useMutation(api.timers.resume);
+  const dismiss = useMutation(api.timers.dismiss);
+  const { push: fail, view: errView } = useErrors();
+  const [mins, setMins] = useState("");
+  const [label, setLabel] = useState("");
+  const [rep, setRep] = useState(false);
+  const list = timers ?? [];
+  useTick(500, list.length > 0);
+  useEffect(() => ringCheck(list));
+  const now = Date.now();
+  useRingTitle(list.some((t) => derive(t, now).st === "done"));
+  const go = (label: string, durationMs: number, repeat = false) => {
+    unlockAudio();
+    void start({ label, durationMs, repeat: repeat || undefined }).catch(fail);
+  };
+  const custom = () => {
+    const m = parseFloat(mins);
+    if (!m || m <= 0) return;
+    go(label.trim(), Math.round(m * 60_000), rep);
+    setMins(""); setLabel(""); setRep(false);
+  };
+  return (
+    <section className="tasks-sheet">
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
+        <span>⏱ Timers · {list.length}</span></div>
+      {errView}
+      {!timers && <Skeleton widths={[70, 55]} style={{ margin: "8px 0" }} />}
+      {timers && !list.length && <p className="muted">no timers running</p>}
+      {list.map((t) => {
+        const s = derive(t, now);
+        const meta = t.repeat ? `↻ every ${durLabel(t.durationMs)}` : `${durLabel(t.durationMs)} timer`;
+        const id = t.id as Id<"timers">;
+        return (
+          <div key={t.id} className={`timerrow ${s.st === "paused" ? "tpaused" : ""} ${s.st === "done" ? "tdone" : ""}`}>
+            <span className="tbig">{fmtLeft(s.left)}</span>
+            <div className="tmid">
+              <div className="tlab">{t.label || durLabel(t.durationMs)}</div>
+              <div className="tmeta">{s.st === "done" ? "done" : meta}{s.st === "paused" ? " · paused" : ""}</div>
+            </div>
+            {s.st === "done"
+              ? <button className="lnk" onClick={() => void dismiss({ id }).catch(fail)}>dismiss</button>
+              : <>
+                  <button className="lnk" onClick={() => {
+                    unlockAudio();
+                    void (s.st === "paused" ? resume({ id }) : pause({ id })).catch(fail);
+                  }}>{s.st === "paused" ? "resume" : "pause"}</button>
+                  <button className="lnk tstop" aria-label="stop" onClick={() => void dismiss({ id }).catch(fail)}>✕</button>
+                </>}
+          </div>
+        );
+      })}
+      <p className="sect">NEW TIMER</p>
+      <div className="chips tchips">
+        {TIMER_PRESETS.map(([m, l]) =>
+          <button key={l} className="chip" onClick={() => go("", m * 60_000)}>{l}</button>)}
+      </div>
+      <div className="trow composer">
+        <input className="tmin" inputMode="decimal" placeholder="min" value={mins}
+          onChange={(e) => setMins(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") custom(); }} />
+        <input placeholder="label (optional)" value={label} onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") custom(); }} />
+        <button className={`cancelv ${rep ? "ron" : ""}`} onClick={() => setRep(!rep)}>repeat</button>
+        <button className="go" onClick={custom}>start</button>
+      </div>
     </section>
   );
 }
