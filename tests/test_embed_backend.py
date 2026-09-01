@@ -1,7 +1,9 @@
 """Query-embed backend dispatch: the default stays on Ollama with the exact
-request shape it always sent; nomic-api sends the API's shape with the key;
-anything else fails loudly (a typo'd backend must not silently fall through
-to Ollama and quietly query the wrong space)."""
+request shape it always sent; anything else fails loudly (a typo'd backend
+must not silently fall through to Ollama and quietly query the wrong
+space). Hosted backends were removed with the Lambda (2026-09-01) — the
+Convex app embeds queries server-side, and formerly-hosted names must now
+fail like any other unknown backend."""
 import pytest
 import config, server
 
@@ -37,74 +39,10 @@ def test_default_backend_is_ollama_unchanged(capture_post):
     assert len(vec) == config.DIM
 
 
-def test_nomic_backend_sends_api_shape(capture_post, monkeypatch):
-    monkeypatch.setattr(config, "EMBED_BACKEND", "nomic-api")
-    monkeypatch.setattr(config, "NOMIC_API_KEY", "sekret")
-    server._embed("hello")
-    assert capture_post["url"] == config.NOMIC_API_URL
-    assert capture_post["json"] == {"model": config.NOMIC_API_MODEL,
-                                    "task_type": config.NOMIC_TASK_TYPE,
-                                    "dimensionality": config.DIM,
-                                    "texts": ["hello"]}
-    assert capture_post["headers"]["Authorization"] == "Bearer sekret"
-
-
-def test_mixedbread_backend_sends_api_shape(monkeypatch):
-    monkeypatch.setattr(config, "EMBED_BACKEND", "mixedbread-api")
-    monkeypatch.setattr(config, "MXBAI_API_KEY", "sekret")
-    calls = {}
-
-    class _MxResp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"data": [{"embedding": [0.0] * config.DIM}]}
-
-    def post(url, **kw):
-        calls["url"] = url
-        calls.update(kw)
-        return _MxResp()
-
-    monkeypatch.setattr(server.requests, "post", post)
-    vec = server._embed("hello")
-    assert calls["url"] == config.MXBAI_API_URL
-    assert calls["json"] == {"model": config.MXBAI_API_MODEL,
-                             "input": ["hello"],   # default: no query prompt
-                             "dimensions": config.DIM,
-                             "normalized": True,
-                             "encoding_format": "float"}
-    assert calls["headers"]["Authorization"] == "Bearer sekret"
-    assert len(vec) == config.DIM
-
-
-def test_hf_inference_backend_sends_api_shape(monkeypatch):
-    monkeypatch.setattr(config, "EMBED_BACKEND", "hf-inference")
-    monkeypatch.setattr(config, "HF_TOKEN", "sekret")
-    calls = {}
-
-    class _HfResp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return [[0.0] * config.DIM]        # array of arrays
-
-    def post(url, **kw):
-        calls["url"] = url
-        calls.update(kw)
-        return _HfResp()
-
-    monkeypatch.setattr(server.requests, "post", post)
-    vec = server._embed("hello")
-    assert calls["url"] == config.HF_INFERENCE_URL
-    assert calls["json"] == {"inputs": "hello"}
-    assert calls["headers"]["Authorization"] == "Bearer sekret"
-    assert len(vec) == config.DIM
-
-
-def test_unknown_backend_raises(capture_post, monkeypatch):
-    monkeypatch.setattr(config, "EMBED_BACKEND", "bogus")
-    with pytest.raises(ValueError, match="bogus"):
+@pytest.mark.parametrize("backend", ["bogus", "nomic-api", "mixedbread-api",
+                                     "hf-inference"])
+def test_non_ollama_backends_raise(capture_post, monkeypatch, backend):
+    monkeypatch.setattr(config, "EMBED_BACKEND", backend)
+    with pytest.raises(ValueError, match=backend):
         server._embed("hello")
     assert "url" not in capture_post                 # nothing was sent

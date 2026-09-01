@@ -81,15 +81,12 @@ DB_PATH = os.path.expanduser(get("core", "db", "CLAUDE_RAG_DB",
 OLLAMA = str(get("core", "ollama", "CLAUDE_RAG_OLLAMA",
                  "http://localhost:11434")).rstrip("/") + "/api/embed"
 
-# Query-time embedding backend: "ollama" (the default; everything above) or
-# a hosted API serving the same weights — for deployments with no Ollama
-# (deploy/lambda). "nomic-api" pairs with nomic-embed-text indexes,
-# "mixedbread-api" or "hf-inference" with mxbai-embed-large ones (Mixedbread
-# goes cold after ~1 min idle and takes 8–40 s to answer; Hugging Face
-# Inference serves the same weights at ~0.2 s warm, ~3.5 s after long
-# idle). Hosted runtimes may apply
-# prompt prefixes the local index never saw, so vector parity must be
-# verified (tools/eval-embed-parity.py) before pointing a real index at one.
+# Query-time embedding backend: "ollama" only since the Lambda retired
+# (2026-09-01) — server.py rejects anything else. The hosted-API constants
+# below stay for tools/eval-embed-parity.py, which verifies that a hosted
+# endpoint (today: the Convex app's Hugging Face Inference embeds) matches
+# the local index — hosted runtimes may apply prompt prefixes the index
+# never saw, so parity must be verified before trusting one.
 # Keys are env-only: secrets don't belong in the TOML.
 EMBED_BACKEND = str(get("core", "embed_backend",
                         "CLAUDE_RAG_EMBED_BACKEND", "ollama"))

@@ -62,23 +62,19 @@ claude mcp add history -- ~/.claude/rag-venv/bin/python "$(pwd)/server.py"
   in-process and returns a cited answer. Provider-agnostic via two
   adapters (`openai-compatible` covers OpenAI/OpenRouter/Groq/Ollama-style
   endpoints; `anthropic` the Messages API), configured as named presets in
-  `[ask.models]`. Used by the remote replica's Ask mode.
+  `[ask.models]`.
 - `com.user.history-index.plist` — launchd template to re-index on an interval
   (see "Keep it fresh").
 - [`TESTING.md`](TESTING.md) — the minimal test plan, plus known bugs to pin.
-- `deploy/lambda/` — optional read-only replica on AWS Lambda: phone access
-  via a claude.ai connector plus a browser UI. See "Remote replica".
+- `deploy/convex/` — the phone/web app (Convex): dashboard, tasks, search,
+  ask, timers. See "Remote access".
 - `tools/` — dev loop and maintenance: `refresh.py` (the scheduled chain:
   index → prune → backup → sync, each step isolated, outcomes recorded in
   the `runs` table), `smoke.py` (exercise every tool path
   in-process after a change; warns if the running MCP server predates your
   edits), `kick.sh` (trigger the launchd refresh and print its stats block),
   `backup.py` (daily dated copies of the sole-copy DBs), `sync-s3.py` (push
-  the index to S3 for the optional remote replica),
-  `hist.py` (stdlib-only terminal client for that replica: `hist search
-  "the proxy bug" -k 5`, `hist ask "when did I…?"` from any machine
-  holding the secret URL; suggested
-  `alias hist='python3 <repo>/tools/hist.py'`),
+  the index to S3 as an off-machine backup),
   `eval-model.py` / `migrate-model.py` (embedding-model evaluation and
   archive-safe switching), `eval-embed-parity.py` (verify a hosted embedding
   API matches the local index's vector space),
@@ -129,8 +125,7 @@ apps = ["apple"]          # enables the calendar source; exclude_calendars = [..
 prune = ["calendar"]      # sources pruned on each scheduled refresh
 
 [ask]                     # /search "Ask" mode: named model presets; keys
-max_turns = 8             # env-only via each preset's key_env. See
-                          # deploy/lambda/README.md "Ask mode".
+max_turns = 8             # env-only via each preset's key_env.
 # [[ask.models]]
 # name = "haiku"
 # backend = "anthropic"           # or "openai-compatible" (+ base_url)
@@ -525,38 +520,13 @@ After indexing (step 2) and registering (step 3):
   embeds your query at call time). Start it: `open -a Ollama`.
 - Tool returns nothing → the index is empty or stale; re-run index.py.
 
-## Remote replica (optional)
-Everything above is local-only. `deploy/lambda/` adds a read-only replica
-on AWS Lambda: the Mac stays the single writer, the scheduled refresh
-pushes the index to S3 on change, and the function serves the same four
-MCP tools behind a secret-path URL usable as a claude.ai custom connector
-(phone/web/desktop).
+## Remote access
 
-The same endpoint serves a browser UI — a static client (`ui.html` +
-`ui.js`, no framework) that calls the MCP tools from the page, sized for
-phones, with three stateful tabs:
-- **Search** — semantic search with source chips and one date-range
-  idiom (Any time · 7d · 30d · Custom); results are ledger rows with
-  match highlighting, each expanding in place into the full chunk,
-  meta, and per-source context.
-- **Ask** — a prompt to a model that works the history tools and answers
-  with typed source-chip citations that reveal their excerpt in place.
-  Ask is an explicit POST — it can never run from a link or navigation.
-  Models are named presets (`[ask.models]`, any OpenAI-compatible or
-  Anthropic endpoint); the picker offers whichever presets have keys in
-  the function env. An answer that cites nothing is flagged as
-  ungrounded, with a sources-required retry.
-- **Browse** — the window listing by day with range presets and a
-  summaries-only view of the day-shape and digest rollups.
-
-Auth for the page is a one-time `/login?token=<secret>` that sets a
-cookie, so page URLs and browser history never carry the credential;
-the secret-path URL keeps working for MCP clients and `hist`.
-
-`tools/hist.py` gives the same search and ask from any terminal holding
-the URL. Code deploys ride GitHub Actions on pushes to main (OIDC role,
-no stored keys). Setup, secrets, ask presets, and runbook:
-[`deploy/lambda/README.md`](deploy/lambda/README.md).
+The AWS Lambda replica (read-only MCP + browser UI over the same index)
+was retired 2026-09-01; the S3 copy of the index remains as an
+off-machine backup. Phone/web access is the Convex app in
+`deploy/convex/` — its own build, auth, and deployment, with the Mac as
+the single writer pushing chunks via `tools/sync-convex.py`.
 
 ## Notes
 - One chunk per Claude message, per unique shell command, and per day-per-app.

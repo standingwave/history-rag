@@ -10,7 +10,7 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 def load_script(relpath: str, name: str = ""):
     """Import a repo script that lives outside a package (tools/*.py,
-    deploy/lambda/app.py) as a module."""
+    scripts without a .py-importable home) as a module."""
     p = _ROOT / relpath
     spec = importlib.util.spec_from_file_location(
         name or p.stem.replace("-", "_"), p)

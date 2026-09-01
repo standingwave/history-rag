@@ -29,7 +29,7 @@ class AskError(RuntimeError):
 
 def presets() -> list:
     """[ask.models] entries whose key is actually present (an empty
-    key_env means keyless — always available). On the Lambda there is no
+    key_env means keyless — always available). A hosted deployment has no
     TOML, so the list may arrive as JSON in CLAUDE_RAG_ASK_MODELS."""
     raw = config.get("ask", "models", "CLAUDE_RAG_ASK_MODELS", [])
     if isinstance(raw, str):

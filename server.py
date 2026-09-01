@@ -52,44 +52,16 @@ def _db():
     return db
 
 def _embed(text: str):
-    if config.EMBED_BACKEND == "nomic-api":
-        r = requests.post(config.NOMIC_API_URL,
-                          headers={"Authorization":
-                                   f"Bearer {config.NOMIC_API_KEY}"},
-                          json={"model": config.NOMIC_API_MODEL,
-                                "task_type": config.NOMIC_TASK_TYPE,
-                                "dimensionality": config.DIM,
-                                "texts": [text]}, timeout=60)
-        r.raise_for_status()
-        return r.json()["embeddings"][0]
-    if config.EMBED_BACKEND == "mixedbread-api":
-        r = requests.post(config.MXBAI_API_URL,
-                          headers={"Authorization":
-                                   f"Bearer {config.MXBAI_API_KEY}"},
-                          json={"model": config.MXBAI_API_MODEL,
-                                "input": [config.MXBAI_QUERY_PROMPT + text],
-                                "dimensions": config.DIM,
-                                "normalized": True,
-                                "encoding_format": "float"}, timeout=60)
-        r.raise_for_status()
-        return r.json()["data"][0]["embedding"]
-    if config.EMBED_BACKEND == "hf-inference":
-        r = requests.post(config.HF_INFERENCE_URL,
-                          headers={"Authorization":
-                                   f"Bearer {config.HF_TOKEN}"},
-                          json={"inputs": config.MXBAI_QUERY_PROMPT + text},
-                          timeout=60)
-        r.raise_for_status()
-        v = r.json()
-        return v[0] if isinstance(v[0], list) else v
+    # Ollama only since the Lambda retired (2026-09-01): hosted query
+    # backends existed for deployments with no Ollama; the Convex app does
+    # its own hosted embedding server-side (convex/search.ts).
     if config.EMBED_BACKEND == "ollama":
         r = requests.post(config.OLLAMA, json={"model": config.EMBED_MODEL,
                                                "input": text}, timeout=60)
         r.raise_for_status()
         return r.json()["embeddings"][0]
     raise ValueError(f"unknown embed backend {config.EMBED_BACKEND!r} "
-                     f"(want 'ollama', 'nomic-api', 'mixedbread-api', "
-                     f"or 'hf-inference')")
+                     f"(only 'ollama' since the Lambda retired)")
 
 def _bound_to_utc(bound: str, end_of_day: bool = False) -> str:
     """Normalize a since/until bound to a UTC ISO string for lexicographic
