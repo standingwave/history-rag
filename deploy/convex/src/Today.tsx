@@ -674,9 +674,11 @@ function RoutinesSheet({ onBack }: { onBack: () => void }) {
    and "done" are derived, so a ringing timer looks the same on every
    device and dismiss anywhere clears everywhere. ── */
 type Timer = {
-  id: string; label: string; durationMs: number; repeat?: boolean;
+  id: string; label: string; durationMs: number; repeat?: boolean; up?: boolean;
   endsAt?: number; remainingMs?: number; startedAt: number;
 };
+const timerGlyph = (t: Timer) => (t.up ? "◷" : t.repeat ? "↻" : "⏱");
+const timerName = (t: Timer) => t.label || (t.up ? "stopwatch" : durLabel(t.durationMs));
 
 /* iOS only lets pages play sound after a tap, so start/resume/pause
    unlock the context; without it the ring is visual only. */
@@ -742,8 +744,8 @@ function TimersBar({ timers, onOpen }: { timers?: Timer[]; onOpen: () => void })
         const s = derive(t, now);
         return (
           <div key={t.id} className={`brow ${s.st === "paused" ? "tpaused" : ""} ${s.st === "done" ? "tdone" : ""}`}>
-            <span className="bglyph">{t.repeat ? "↻" : "⏱"}</span>
-            <span className="blabel">{t.label || durLabel(t.durationMs)}</span>
+            <span className="bglyph">{timerGlyph(t)}</span>
+            <span className="blabel">{timerName(t)}</span>
             {s.st === "paused" && <span className="pstate">paused</span>}
             {s.st === "done"
               ? <>
@@ -751,7 +753,7 @@ function TimersBar({ timers, onOpen }: { timers?: Timer[]; onOpen: () => void })
                   <button className="bx" aria-label="dismiss"
                     onClick={(e) => { e.stopPropagation(); void dismiss({ id: t.id as Id<"timers"> }); }}>✕</button>
                 </>
-              : <span className="btime">{fmtLeft(s.left)}</span>}
+              : <span className="btime">{fmtLeft(s.left, t.up)}</span>}
           </div>
         );
       })}
@@ -760,6 +762,45 @@ function TimersBar({ timers, onOpen }: { timers?: Timer[]; onOpen: () => void })
 }
 
 const TIMER_PRESETS: [number, string][] = [[3, "3m"], [5, "5m"], [10, "10m"], [15, "15m"], [25, "25m"], [45, "45m"], [60, "1h"]];
+
+/* Lock-screen alerts: one Web Push subscription per install, stored in
+   Convex; timers:start schedules the actual send. On iOS this needs the
+   app added to the home screen (16.4+). */
+function urlB64(s: string) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const b = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+function useAlerts() {
+  const vapid = useQuery(api.push.vapidPublicKey, {});
+  const save = useMutation(api.push.subscribe);
+  const [state, setState] = useState<"checking" | "unsupported" | "off" | "on" | "denied">("checking");
+  useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setState("unsupported"); return;
+    }
+    if (Notification.permission === "denied") { setState("denied"); return; }
+    navigator.serviceWorker.getRegistration()
+      .then((r) => r?.pushManager.getSubscription() ?? null)
+      .then((s) => setState(s ? "on" : "off"))
+      .catch(() => setState("off"));
+  }, []);
+  const enable = async () => {
+    if (!vapid) throw new Error("push isn't configured on the server");
+    if ((await Notification.requestPermission()) !== "granted") {
+      setState("denied");
+      throw new Error("notifications are blocked for Oriel");
+    }
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(vapid) });
+    const j = sub.toJSON();
+    await save({ endpoint: sub.endpoint, keys: { p256dh: j.keys!.p256dh, auth: j.keys!.auth },
+                 ua: navigator.userAgent.slice(0, 80) });
+    setState("on");
+  };
+  return { state, configured: !!vapid, enable };
+}
 
 function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void }) {
   const start = useMutation(api.timers.start);
@@ -775,9 +816,10 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
   useEffect(() => ringCheck(list));
   const now = Date.now();
   useRingTitle(list.some((t) => derive(t, now).st === "done"));
-  const go = (label: string, durationMs: number, repeat = false) => {
+  const alerts = useAlerts();
+  const go = (label: string, durationMs: number, repeat = false, up = false) => {
     unlockAudio();
-    void start({ label, durationMs, repeat: repeat || undefined }).catch(fail);
+    void start({ label, durationMs, repeat: repeat || undefined, up: up || undefined }).catch(fail);
   };
   const custom = () => {
     const m = parseFloat(mins);
@@ -794,13 +836,14 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
       {timers && !list.length && <p className="muted">no timers running</p>}
       {list.map((t) => {
         const s = derive(t, now);
-        const meta = t.repeat ? `↻ every ${durLabel(t.durationMs)}` : `${durLabel(t.durationMs)} timer`;
+        const meta = t.up ? "stopwatch"
+          : t.repeat ? `↻ every ${durLabel(t.durationMs)}` : `${durLabel(t.durationMs)} timer`;
         const id = t.id as Id<"timers">;
         return (
           <div key={t.id} className={`timerrow ${s.st === "paused" ? "tpaused" : ""} ${s.st === "done" ? "tdone" : ""}`}>
-            <span className="tbig">{fmtLeft(s.left)}</span>
+            <span className="tbig">{fmtLeft(s.left, t.up)}</span>
             <div className="tmid">
-              <div className="tlab">{t.label || durLabel(t.durationMs)}</div>
+              <div className="tlab">{timerName(t)}</div>
               <div className="tmeta">{s.st === "done" ? "done" : meta}{s.st === "paused" ? " · paused" : ""}</div>
             </div>
             {s.st === "done"
@@ -819,6 +862,7 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
       <div className="chips tchips">
         {TIMER_PRESETS.map(([m, l]) =>
           <button key={l} className="chip" onClick={() => go("", m * 60_000)}>{l}</button>)}
+        <button className="chip" onClick={() => go("", 0, false, true)}>◷ stopwatch</button>
       </div>
       <div className="trow composer">
         <input className="tmin" inputMode="decimal" placeholder="min" value={mins}
@@ -829,6 +873,14 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
         <button className={`cancelv ${rep ? "ron" : ""}`} onClick={() => setRep(!rep)}>repeat</button>
         <button className="go" onClick={custom}>start</button>
       </div>
+      <p className="muted small">
+        {alerts.state === "on" && "lock-screen alerts are on for this device"}
+        {alerts.state === "off" && (alerts.configured
+          ? <button className="lnk" onClick={() => void alerts.enable().catch(fail)}>enable lock-screen alerts</button>
+          : "lock-screen alerts aren't configured on the server")}
+        {alerts.state === "denied" && "notifications are blocked — allow them in Settings to get lock-screen alerts"}
+        {alerts.state === "unsupported" && "for lock-screen alerts, add Oriel to your home screen first"}
+      </p>
     </section>
   );
 }

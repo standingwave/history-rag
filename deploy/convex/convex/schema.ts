@@ -59,18 +59,29 @@ export default defineSchema({
     latestDay: v.string(),
     updatedAt: v.number(),
   }).index("by_source", ["source"]),
-  /* Countdown timers (wip/SPEC-timers.md) — pure phone state, no Mac
-     involvement. Running = endsAt set; paused = remainingMs set; done and
-     repeat cycles are derived from the clock, never stored. Dismiss
-     deletes the row. */
+  /* Countdown timers and stopwatches (wip/SPEC-timers.md) — pure phone
+     state, no Mac involvement. Running = endsAt set; paused = remainingMs
+     set; done and repeat cycles are derived from the clock, never stored.
+     A stopwatch (up) reuses the fields inverted: endsAt is the adjusted
+     start, remainingMs the paused elapsed. Dismiss deletes the row.
+     alarmId is the scheduled push for the next cycle end. */
   timers: defineTable({
     label: v.string(),
     durationMs: v.number(),
     repeat: v.optional(v.boolean()),
+    up: v.optional(v.boolean()),
     endsAt: v.optional(v.number()),
     remainingMs: v.optional(v.number()),
     startedAt: v.number(),
+    alarmId: v.optional(v.id("_scheduled_functions")),
   }),
+  /* Web Push subscriptions (timers' lock-screen alerts), one per
+     browser/PWA install; dead endpoints are pruned on send failure. */
+  pushSubs: defineTable({
+    endpoint: v.string(),
+    keys: v.object({ p256dh: v.string(), auth: v.string() }),
+    ua: v.optional(v.string()),
+  }).index("by_endpoint", ["endpoint"]),
   /* The dashboard's standing question, answered by Ask on a schedule
      (brief.ts); the newest row is the tile. */
   briefs: defineTable({

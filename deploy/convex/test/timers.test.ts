@@ -31,6 +31,15 @@ test("repeat rolls into cycle k with left in (0, duration]", () => {
   assert.deepEqual(derive({ ...t, endsAt: now + 1 }, now), { st: "running", left: 1, cycle: 0 });
 });
 
+test("stopwatch counts up and never rings", () => {
+  const now = 1_000_000_000, t = { durationMs: 0, up: true };
+  // endsAt is the (adjusted) start; left is elapsed
+  assert.deepEqual(derive({ ...t, endsAt: now - 90_000 }, now), { st: "running", left: 90_000, cycle: 0 });
+  assert.deepEqual(derive({ ...t, endsAt: now }, now), { st: "running", left: 0, cycle: 0 });
+  assert.deepEqual(derive({ ...t, remainingMs: 30_000 }, now), { st: "paused", left: 30_000, cycle: 0 });
+  assert.deepEqual(derive({ ...t }, now), { st: "paused", left: 0, cycle: 0 });
+});
+
 test("fmt", () => {
   assert.equal(fmt(161_000), "2:41");
   assert.equal(fmt(999), "0:01");        // ceil: never shows 0:00 while time remains
@@ -38,6 +47,9 @@ test("fmt", () => {
   assert.equal(fmt(-5), "0:00");
   assert.equal(fmt(3600_000), "1:00:00");
   assert.equal(fmt(5 * 3600_000 + 62_000), "5:01:02");
+  // stopwatch elapsed floors: 0:00 until a full second has passed
+  assert.equal(fmt(999, true), "0:00");
+  assert.equal(fmt(61_000, true), "1:01");
 });
 
 test("durLabel", () => {
