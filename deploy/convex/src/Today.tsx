@@ -170,6 +170,9 @@ export function Today() {
       </div>
       <TimersBar timers={timers} onOpen={() => open("timers")} />
       <div className="grid">{ORDER.map((id) => tiles[id])}</div>
+      <p className="muted small" style={{ textAlign: "center", marginTop: 18 }}>
+        <a href="/guide.html">how to use Oriel ›</a>
+      </p>
     </section>
   );
 }

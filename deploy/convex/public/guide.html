@@ -1,0 +1,266 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>How to use Oriel</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: #0a0a0c; color: #e8e8eb; font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+.page { max-width: 60rem; margin: 0 auto; padding: 28px 20px 80px; }
+
+/* hero */
+.hero { padding: 36px 0 8px; }
+.hero .wordmark { font-size: 2rem; font-weight: 650; letter-spacing: -.02em; }
+.hero .tag { color: #a6a6af; font-size: 1.05rem; max-width: 34rem; margin: 8px 0 0; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 0; }
+.toc a { color: #a6a6af; border: 1px solid #2a2a30; border-radius: 999px; padding: 4px 12px; font-size: .82rem; text-decoration: none; }
+.toc a:hover { color: #e8e8eb; border-color: #55555e; }
+
+/* sections: phone left, prose right; stacks on narrow screens */
+section.step { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align-items: start; padding: 40px 0 8px; border-top: 1px solid #1e1e23; margin-top: 40px; }
+@media (max-width: 720px) { section.step { grid-template-columns: 1fr; } }
+.prose h2 { font-size: 1.25rem; margin: 0 0 10px; letter-spacing: -.01em; }
+.prose h2 .n { color: #55555e; font-weight: 500; margin-right: 10px; font-variant-numeric: tabular-nums; }
+.prose p { color: #c8c8cf; margin: 0 0 12px; max-width: 36rem; }
+.prose .hint { color: #94949e; font-size: .88rem; border-left: 2px solid #2a2a30; padding-left: 12px; }
+.prose kbd, .glyphchip { display: inline-block; border: 1px solid #2a2a30; border-radius: 6px; background: #16161a; padding: 0 7px; font: inherit; font-size: .85em; }
+.key { display: grid; grid-template-columns: 2.2em 1fr; gap: 4px 10px; font-size: .88rem; color: #a6a6af; margin: 10px 0; max-width: 34rem; }
+.key b { color: #e8e8eb; font-weight: 500; }
+
+/* phone mock (app tokens) */
+.phone { width: 300px; background: #121215; border: 1px solid #2a2a30; border-radius: 22px; padding: 12px 14px 20px; font-size: 14px; position: relative; overflow: hidden; }
+.muted { color: #a6a6af; } .small { font-size: .78rem; } .mono { font-family: ui-monospace, Menlo, monospace; font-size: .85em; }
+.hdr { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 2px 8px; }
+.wm { font-weight: 650; }
+.daterow { display: flex; justify-content: space-between; gap: 10px; margin: 2px 0 10px; font-size: .82rem; color: #a6a6af; }
+.tile { background: #9a9aa312; border: 1px solid #2a2a30; border-radius: 12px; padding: 9px 10px; margin-bottom: 8px; }
+.thead { display: flex; justify-content: space-between; font-weight: 600; font-size: .82rem; margin-bottom: 5px; }
+.trow { padding: 3px 0; display: flex; gap: 7px; align-items: baseline; }
+.glyph { color: #8ab4f8; } .done { color: #94949e; text-decoration: line-through; }
+.pend .glyph, .pend { color: #facc15; text-decoration: none; }
+.lrow { display: flex; gap: 8px; font-size: .82rem; padding: 3px 0; } .lrow .time { color: #94949e; min-width: 3em; }
+.sect { font-size: .6rem; letter-spacing: .12em; color: #94949e; margin: 8px 0 2px; }
+.fab { position: absolute; right: 14px; bottom: 16px; width: 38px; height: 38px; border-radius: 50%; background: #e8e8eb; color: #121215; font-size: 1.35rem; line-height: 38px; text-align: center; box-shadow: 0 4px 14px #0008; }
+.acts { display: flex; gap: 5px; flex-wrap: wrap; padding: 4px 0 2px 22px; }
+.act { border: 1px solid #2a2a30; border-radius: 999px; color: #c8c8cf; font-size: .72rem; padding: 2px 8px; }
+.act.danger { color: #f87171; border-color: #f8717155; }
+.md-h { font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; color: #94949e; margin: 8px 0 2px; }
+.bullet { font-size: .82rem; padding: 1px 0 1px 10px; } .cite { color: #8ab4f8; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
+.chip { border: 1px solid #2a2a30; border-radius: 999px; color: #a6a6af; font-size: .7rem; padding: 2px 8px; }
+.chip.on { color: #e8e8eb; background: #9a9aa312; }
+.inputrow { display: flex; gap: 6px; margin: 6px 0; }
+.inputrow .inp { flex: 1; background: #0d0d10; border: 1px solid #2a2a30; border-radius: 8px; padding: 6px 9px; color: #94949e; font-size: .82rem; }
+.inputrow .go { background: #e8e8eb; color: #121215; border-radius: 8px; padding: 6px 10px; font-weight: 600; font-size: .82rem; }
+.cal { position: relative; height: 200px; margin-top: 6px; }
+.hline { position: absolute; left: 0; right: 0; border-top: 1px solid #1e1e23; font-size: .62rem; color: #55555e; }
+.ev { position: absolute; left: 2.6em; right: 0; border-left: 2px solid #f472b6; border-radius: 6px; background: #f472b61a; padding: 2px 6px; font-size: .74rem; overflow: hidden; }
+.ev .t { display: block; font-size: .62rem; color: #f8a8ce; }
+.nowline { position: absolute; left: 2.4em; right: 0; border-top: 1px solid #f472b6; }
+.wait { display: flex; justify-content: space-between; font-size: .74rem; color: #facc15; background: #facc1512; border: 1px solid #facc1533; border-radius: 8px; padding: 5px 8px; margin: 0 0 8px; }
+.errbox { font-size: .74rem; color: #f87171; background: #f8717112; border: 1px solid #f8717133; border-radius: 8px; padding: 5px 8px; margin: 0 0 8px; }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+.pulse { animation: pulse 1.2s ease-in-out infinite; }
+.answer-p { font-size: .82rem; color: #c8c8cf; }
+.tmbar { border: 1px solid #3d4f78; background: #16202e; border-radius: 10px; padding: 2px 9px; margin: 0 0 8px; box-shadow: 0 0 10px #8ab4f826; font-size: .8rem; }
+.tmbrow { display: flex; gap: 7px; align-items: center; padding: 4px 0; }
+.tmbrow + .tmbrow { border-top: 1px solid #22304a; }
+.tmtime { font-family: ui-monospace, Menlo, monospace; color: #8ab4f8; font-weight: 600; margin-left: auto; }
+.tmrow { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #1e1e23; font-size: .82rem; }
+.tmbig { font-family: ui-monospace, Menlo, monospace; font-size: 1.25rem; color: #8ab4f8; min-width: 3.4em; }
+footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; color: #55555e; font-size: .8rem; }
+</style></head><body><div class="page">
+
+<div class="hero">
+  <div class="wordmark">Oriel</div>
+  <p class="tag">Your day, and everything behind it. Tasks, agenda, and a daily brief on the front; a searchable history of what you did, read, wrote, and planned behind it.</p>
+  <nav class="toc">
+    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#agenda">Agenda</a><a href="#brief">Last 24 h</a>
+    <a href="#timers">Timers</a><a href="#search">Search</a><a href="#ask">Ask</a><a href="#browse">Browse</a><a href="#pending">What yellow means</a>
+  </nav>
+</div>
+
+<section class="step" id="dash">
+  <div class="phone">
+    <div class="hdr"><span class="wm">Oriel</span><span class="muted small">sign out</span></div>
+    <div class="daterow"><span>Sat Aug 30 · day</span><span>search · ask · browse · timers</span></div>
+    <div class="tile"><div class="thead"><span style="color:#f472b6">Agenda</span><span class="muted">3 events ›</span></div>
+      <div class="lrow"><span class="time">09:00</span><span>Stand-up</span></div>
+      <div class="lrow" style="color:#f472b6"><span class="time">14:00</span><span style="color:#e8e8eb">Dentist</span></div>
+      <div class="lrow"><span class="time">16:30</span><span>Call with Sam</span></div></div>
+    <div class="tile"><div class="thead"><span style="color:#facc15">☑ Tasks</span><span class="muted">2/5 done ›</span></div>
+      <div class="trow"><span class="glyph">○</span><span>reply to Sam about the invoice</span></div>
+      <div class="trow"><span class="glyph">○</span><span>water the plants</span></div>
+      <p class="muted small" style="margin:2px 0 0">+1 more · 2 done · 2 routine</p></div>
+    <div class="tile"><div class="thead"><span style="color:#a78bfa">Last 24 h</span><span class="muted">2 h ago ›</span></div>
+      <div class="md-h">Work</div><div class="bullet">• Shipped the release, 57 shell commands</div>
+      <div class="md-h">Browsing</div><div class="bullet">• Researched flights to Lisbon</div></div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">1</span>The dashboard</h2>
+    <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and <b>Last 24 h</b> (evenings flip the last two). Tap any tile to open its full view; <b>search · ask · browse</b> in the corner open the history tools.</p>
+    <p>Everything is live: change the note on your Mac, tick a box on your phone — every open copy updates within seconds.</p>
+    <p class="hint">Add it to your home screen (Share → Add to Home Screen) and it behaves like an app.</p>
+  </div>
+</section>
+
+<section class="step" id="tasks">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>☑ Tasks · 2/5 done · Sat Aug 30</span></div>
+    <div class="trow"><span class="glyph">○</span><span style="flex:1">reply to Sam about the invoice</span><span class="muted small">1/3</span><span class="muted">…</span></div>
+    <div class="acts"><span class="act">edit</span><span class="act">+ subtask</span><span class="act">📎 attach</span><span class="act danger">delete</span></div>
+    <div class="trow pend"><span class="glyph pulse">○</span><span style="flex:1;color:#c8c8cf">book dentist</span><span class="small pulse">adding…</span></div>
+    <div class="trow done"><span class="glyph">●</span><span>push the release</span></div>
+    <p class="sect">ROUTINE</p>
+    <div class="trow"><span class="glyph">○</span><span>walk</span></div>
+    <div class="inputrow"><span class="glyph" style="color:#facc15">○</span><span class="inp">new task</span><span class="go">add</span></div>
+    <div class="fab">+</div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">2</span>Tasks</h2>
+    <p>The list is your Obsidian daily note — Oriel reads it and writes it back. Tap a circle to tick a task. The floating <span class="glyphchip">+</span> adds one; the faint <span class="glyphchip">…</span> at a row's end opens <b>edit · + subtask · 📎 attach · delete</b>.</p>
+    <p>Tap a task's text to expand it: subtasks (tickable, with their own <span class="glyphchip">…</span>), attachments, links, and how long it's been on the list.</p>
+    <p><b>📎 attach</b> takes a link, a note line, or a photo/file — photos upload with a progress bar and land in the vault's attachments folder.</p>
+    <p class="hint">Every change is applied to the note by your Mac. If the Mac is asleep, changes queue and land when it wakes — see <a href="#pending">what yellow means</a>.</p>
+  </div>
+</section>
+
+<section class="step" id="agenda">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>Agenda · Sat Aug 30</span></div>
+    <div class="chips"><span class="chip on" style="color:#f472b6">Team offsite</span></div>
+    <div class="cal">
+      <div class="hline" style="top:0">09:00</div>
+      <div class="hline" style="top:50px">10:00</div>
+      <div class="hline" style="top:100px">11:00</div>
+      <div class="hline" style="top:150px">12:00</div>
+      <div class="ev" style="top:4px;height:40px"><span class="t">09:00–09:45</span>Stand-up</div>
+      <div class="ev" style="top:54px;height:44px;right:50%"><span class="t">10:00–10:50</span>1:1 Sam</div>
+      <div class="ev" style="top:54px;height:70px;left:calc(2.6em + 50%)"><span class="t">10:00–11:20</span>Design review</div>
+      <div class="nowline" style="top:120px"></div>
+    </div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">3</span>Agenda</h2>
+    <p>The tile shows what's next; the full view is a day calendar — events sized by their real duration, overlaps side by side, all-day events as chips on top, and a pink line for <i>now</i>.</p>
+    <p>Tap an event block to read its details: notes, attendees, which calendar it's from.</p>
+    <p class="hint">When today is done, the tile shows the next thing coming: <span class="mono">next: Flight to Lisbon · Fri Sep 12 · 07:40</span>.</p>
+  </div>
+</section>
+
+<section class="step" id="brief">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>Last 24 h</span></div>
+    <p class="muted small">What did I do over the previous 24 hours?</p>
+    <div class="md-h">Work &amp; Development</div>
+    <div class="bullet">• Shipped the release after 57 shell commands <span class="cite">[1]</span></div>
+    <div class="bullet">• Long pairing session on the task UI <span class="cite">[2]</span></div>
+    <div class="md-h">Browsing</div>
+    <div class="bullet">• Researched flights to Lisbon <span class="cite">[3]</span></div>
+    <div class="md-h">Life</div>
+    <div class="bullet">• 70 minutes of Slay the Spire after midnight <span class="cite">[4]</span></div>
+    <p class="muted small mono" style="margin-top:8px">haiku · 2 h ago · 7 s · 4 sources</p>
+    <div class="chips"><span class="chip">refresh now</span></div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">4</span>Last 24 h</h2>
+    <p>A model reads your history and writes a short brief of the previous 24 hours, refreshed every few hours in the background. The tile shows the opening; the full view has every bullet ending in a numbered mark.</p>
+    <p>Tap a <span class="cite">[1]</span> to jump to the actual thing it came from — the session, the page, the note. The brief never claims what the history can't back.</p>
+    <p class="hint"><b>refresh now</b> re-runs it on demand — takes 5–15 seconds.</p>
+  </div>
+</section>
+
+<section class="step" id="timers">
+  <div class="phone">
+    <div class="daterow"><span>‹ back</span><span>⏱ Timers · 3</span></div>
+    <div class="tmrow"><span class="tmbig">2:41</span><div style="flex:1"><div>tea</div><div class="muted small">3m timer</div></div><span class="small" style="color:#8ab4f8">pause</span><span class="small" style="color:#f87171">✕</span></div>
+    <div class="tmrow"><span class="tmbig">27:12</span><div style="flex:1"><div>stretch</div><div class="muted small">↻ every 30m</div></div><span class="small" style="color:#8ab4f8">pause</span><span class="small" style="color:#f87171">✕</span></div>
+    <div class="tmrow" style="color:#94949e"><span class="tmbig" style="color:#94949e">14:05</span><div style="flex:1"><div>run errands</div><div class="muted small">stopwatch · paused</div></div><span class="small" style="color:#8ab4f8">resume</span><span class="small" style="color:#f87171">✕</span></div>
+    <p class="sect">NEW TIMER</p>
+    <div class="chips"><span class="chip">3m</span><span class="chip">5m</span><span class="chip">10m</span><span class="chip">15m</span><span class="chip">25m</span><span class="chip">45m</span><span class="chip">1h</span><span class="chip">◷ stopwatch</span></div>
+    <div class="inputrow"><span class="inp" style="flex:0 0 3.2em;text-align:center">min</span><span class="inp">label (optional)</span><span class="go">start</span></div>
+    <p class="muted small" style="margin:8px 0 0">lock-screen alerts are on for this device</p>
+    <p class="sect" style="margin-top:14px">MEANWHILE, ON THE DASHBOARD</p>
+    <div class="tmbar">
+      <div class="tmbrow"><span class="glyph">⏱</span><span>tea</span><span class="tmtime">2:41</span></div>
+      <div class="tmbrow"><span class="glyph">↻</span><span>stretch</span><span class="tmtime">27:12</span></div>
+    </div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">5</span>Timers</h2>
+    <p>Open <b>timers</b> from the dashboard corner. Chips start a countdown in one tap; the custom row takes minutes, an optional label, and a <b>repeat</b> toggle for every-N-minutes reminders (stretch, eye break). <b>◷ stopwatch</b> counts up instead.</p>
+    <p>While anything runs, a glowing bar sits at the top of the dashboard with the live countdowns — tap it to get back to the sheet. When a timer finishes it chimes, turns yellow, and pulses until you dismiss it; a repeat chimes each round and rolls straight into the next.</p>
+    <p>Timers live in Convex, not on one phone: the same countdown ticks on every signed-in device, and pausing or dismissing anywhere updates everywhere.</p>
+    <p class="hint"><b>enable lock-screen alerts</b> (once per device) makes finished timers notify you even when Oriel is closed. On iPhone this needs the app added to the home screen.</p>
+  </div>
+</section>
+
+<section class="step" id="search">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>Search</span></div>
+    <p class="muted small mono">229k chunks · 10 sources · 2017-05 → today</p>
+    <div class="chips"><span class="chip on">email</span><span class="chip on">browser</span><span class="chip on">notes</span><span class="chip on">tasks</span><span class="chip">…</span></div>
+    <div class="inputrow"><span class="inp">that pasta place in Rome</span><span class="go">go</span></div>
+    <div class="lrow"><span style="color:#60a5fa" class="small">browser</span><span style="flex:1">Trattoria Da Enzo al 29</span><span class="muted small">May 12</span></div>
+    <div class="lrow"><span style="color:#a78bfa" class="small">notes</span><span style="flex:1">Rome trip — restaurants</span><span class="muted small">May 8</span></div>
+    <div class="lrow"><span style="color:#34d399" class="small">email</span><span style="flex:1">Reservation confirmed — Da Enzo</span><span class="muted small">May 11</span></div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">6</span>Search</h2>
+    <p>Search by meaning, not keywords — "that pasta place in Rome" finds the reservation email, the browsing, and your own note about it. The chips narrow to specific sources; the date fields narrow to a window.</p>
+    <p>Every hit opens into a reading view with its surroundings: the email thread, the note's other sections, the day's browsing on that site.</p>
+  </div>
+</section>
+
+<section class="step" id="ask">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>Ask</span></div>
+    <div class="inputrow"><span class="inp">when did I last repot the hoya?</span><span class="go">ask</span></div>
+    <p class="answer-p">You repotted the hoya on <b>June 14</b> — it's in your plants note <span class="cite">[1]</span>, and the task "repot hoya" was checked off the same day <span class="cite">[2]</span>. You bought the pot on June 12 <span class="cite">[3]</span>.</p>
+    <p class="muted small mono">haiku · 3 turns · 9 s</p>
+  </div>
+  <div class="prose">
+    <h2><span class="n">7</span>Ask</h2>
+    <p>A question instead of a query. A model searches your history itself, reads what it finds, and answers with citations you can tap. Pick the model by speed and cost in the dropdown.</p>
+    <p class="hint">Search is instant and shows you everything; Ask takes seconds and reads it for you. Reach for Ask when the answer needs putting together.</p>
+  </div>
+</section>
+
+<section class="step" id="browse">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>Browse</span></div>
+    <div class="chips"><span class="chip">‹ day</span><span class="chip">day ›</span><span class="chip on">summaries</span></div>
+    <div class="lrow"><span class="muted small">Aug 29</span></div>
+    <div class="lrow"><span style="color:#fb923c" class="small">usage</span><span style="flex:1">6 h 12 m across 9 apps</span></div>
+    <div class="lrow"><span style="color:#f59e0b" class="small">digest</span><span style="flex:1">Day: mostly deploy work, one outing</span></div>
+    <div class="lrow"><span style="color:#60a5fa" class="small">browser</span><span style="flex:1">Convex dashboard — usage</span><span class="muted small">11:42</span></div>
+    <div class="lrow"><span style="color:#facc15" class="small">tasks</span><span style="flex:1">book dentist</span><span class="muted small">00:00</span></div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">8</span>Browse</h2>
+    <p>A timeline of any day or range, newest first, with day-level summaries on top and every raw item under them. <b>‹ day / day ›</b> steps through; the source dropdown narrows to one kind of thing.</p>
+    <p class="hint">Good for "what was I doing that Tuesday?" when you don't have a search term.</p>
+  </div>
+</section>
+
+<section class="step" id="pending">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>☑ Tasks · 2/5 done · Sat Aug 30</span></div>
+    <div class="wait"><span>2 changes waiting for the Mac</span><span>since 14:02</span></div>
+    <div class="errbox">couldn't add "book dentist": a task with that text already exists</div>
+    <div class="trow pend"><span class="glyph pulse">○</span><span style="flex:1;color:#c8c8cf">call the plumber</span><span class="small pulse">adding…</span></div>
+    <div class="trow pend"><span class="glyph">○</span><span style="flex:1;color:#c8c8cf">order filters</span><span class="small">queued</span></div>
+    <div class="trow"><span class="glyph">○</span><span>water the plants</span></div>
+  </div>
+  <div class="prose">
+    <h2><span class="n">9</span>What yellow means</h2>
+    <p>Your notes live on your Mac; the phone sends changes to it. The colours tell you where a change is:</p>
+    <div class="key">
+      <b class="pulse" style="color:#facc15">○</b><span><b>pulsing yellow</b> — sent, in flight; usually settles in seconds</span>
+      <b style="color:#facc15">○</b><span><b>still yellow · "queued"</b> — the Mac is asleep; it will apply the moment it wakes. Nothing is lost.</span>
+      <b style="color:#f87171">▭</b><span><b>red box</b> — that change couldn't be applied; the app undid it and says why</span>
+    </div>
+    <p class="hint">The dashboard's Tasks tile shows "· 1 waiting" whenever something is still queued.</p>
+  </div>
+</section>
+
+<footer>Oriel · personal — history stays in your own Convex deployment and your vault.</footer>
+</div></body></html>
