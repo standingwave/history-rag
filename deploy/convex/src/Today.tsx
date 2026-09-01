@@ -985,6 +985,9 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
   useTick(1000, busy);
   const rstat = useQuery(api.reminders.status, {});
   const setPref = useMutation(api.reminders.setPref);
+  const mintApproval = useMutation(api.oauth.approvalCode);
+  const [approval, setApproval] = useState<{ code: string; expiresAt: number } | null>(null);
+  useTick(1000, !!approval);
   const { push: fail, view: errView } = useErrors();
   const run = () => { setBusy(true); setT0(Date.now()); refresh({}).catch(fail).finally(() => setBusy(false)); };
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
@@ -1017,6 +1020,12 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
                   onClick={() => void setPref({ name: "digestPush", value: true })}>turn on</button></>}
         </p>
       )}
+      <p className="muted small">
+        {approval && approval.expiresAt > Date.now()
+          ? <>claude.ai code: <span className="mono" style={{ color: "#e8e8eb", fontSize: "1rem" }}>{approval.code}</span>
+              {" · "}{Math.max(0, Math.ceil((approval.expiresAt - Date.now()) / 1000))} s — enter it on the connect page</>
+          : <button className="lnk" onClick={() => void mintApproval({}).then(setApproval).catch(fail)}>connect claude.ai…</button>}
+      </p>
     </section>
   );
 }

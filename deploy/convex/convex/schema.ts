@@ -96,6 +96,34 @@ export default defineSchema({
     name: v.string(),
     value: v.any(),
   }).index("by_name", ["name"]),
+  /* The MCP connector's OAuth (wip/SPEC-convex-mcp.md): claude.ai
+     self-registers (DCR), the grant is approved with a code minted by the
+     signed-in app, and bearers are stored hashed. Revoke = delete rows. */
+  oauthClients: defineTable({
+    clientId: v.string(),
+    redirectUris: v.array(v.string()),
+    name: v.optional(v.string()),
+  }).index("by_clientId", ["clientId"]),
+  oauthCodes: defineTable({
+    codeHash: v.string(),
+    clientId: v.string(),
+    redirectUri: v.string(),
+    challenge: v.string(),        // PKCE S256 challenge
+    expiresAt: v.number(),
+    used: v.boolean(),
+  }).index("by_codeHash", ["codeHash"]),
+  oauthTokens: defineTable({
+    tokenHash: v.string(),
+    clientId: v.string(),
+    expiresAt: v.number(),
+  }).index("by_tokenHash", ["tokenHash"]),
+  /* 8-digit approval codes the app mints; entering one on the authorize
+     page is what turns a claude.ai auth request into a grant. */
+  mcpApprovals: defineTable({
+    code: v.string(),
+    expiresAt: v.number(),
+    used: v.boolean(),
+  }).index("by_code", ["code"]),
   /* The dashboard's standing question, answered by Ask on a schedule
      (brief.ts); the newest row is the tile. */
   briefs: defineTable({

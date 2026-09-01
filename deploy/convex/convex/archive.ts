@@ -204,14 +204,19 @@ export const config = query({
 
 /* ── history_stats ────────────────────────────────────────────────────── */
 
+async function statsCore(ctx: QueryCtx) {
+  const rows = await ctx.db.query("stats").collect();
+  rows.sort((a, b) => b.count - a.count);
+  return { total: rows.reduce((n, r) => n + r.count, 0),
+           sources: rows.map(({ source, count, earliestDay, latestDay, updatedAt }) =>
+             ({ source, count, earliestDay, latestDay, updatedAt })) };
+}
+
 export const stats = query({
   args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    const rows = await ctx.db.query("stats").collect();
-    rows.sort((a, b) => b.count - a.count);
-    return { total: rows.reduce((n, r) => n + r.count, 0),
-             sources: rows.map(({ source, count, earliestDay, latestDay, updatedAt }) =>
-               ({ source, count, earliestDay, latestDay, updatedAt })) };
-  },
+  handler: async (ctx) => { await requireUser(ctx); return statsCore(ctx); },
+});
+export const statsInternal = internalQuery({
+  args: {},
+  handler: (ctx) => statsCore(ctx),
 });
