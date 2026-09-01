@@ -18,7 +18,6 @@ body { margin: 0; background: #0a0a0c; color: #e8e8eb; font: 16px/1.5 -apple-sys
 section.step { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align-items: start; padding: 40px 0 8px; border-top: 1px solid #1e1e23; margin-top: 40px; }
 @media (max-width: 720px) { section.step { grid-template-columns: 1fr; } }
 .prose h2 { font-size: 1.25rem; margin: 0 0 10px; letter-spacing: -.01em; }
-.prose h2 .n { color: #55555e; font-weight: 500; margin-right: 10px; font-variant-numeric: tabular-nums; }
 .prose p { color: #c8c8cf; margin: 0 0 12px; max-width: 36rem; }
 .prose .hint { color: #94949e; font-size: .88rem; border-left: 2px solid #2a2a30; padding-left: 12px; }
 .prose kbd, .glyphchip { display: inline-block; border: 1px solid #2a2a30; border-radius: 6px; background: #16161a; padding: 0 7px; font: inherit; font-size: .85em; }
@@ -66,10 +65,14 @@ section.step { display: grid; grid-template-columns: 300px 1fr; gap: 28px; align
 .tmtime { font-family: ui-monospace, Menlo, monospace; color: #8ab4f8; font-weight: 600; margin-left: auto; }
 .tmrow { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid #1e1e23; font-size: .82rem; }
 .tmbig { font-family: ui-monospace, Menlo, monospace; font-size: 1.25rem; color: #8ab4f8; min-width: 3.4em; }
+.backapp { margin: 0 0 8px; font-size: .85rem; }
+.secnav { font-size: .82rem; margin-top: 18px; }
+.secnav .sep { color: #55555e; margin: 0 4px; }
 footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; color: #55555e; font-size: .8rem; }
-</style></head><body><div class="page">
+</style></head><body><div class="page" id="top">
 
 <div class="hero">
+  <p class="backapp"><a href="/">‹ open Oriel</a></p>
   <div class="wordmark">Oriel</div>
   <p class="tag">Your day, and everything behind it. Tasks, agenda, and a daily brief on the front; a searchable history of what you did, read, wrote, and planned behind it.</p>
   <nav class="toc">
@@ -95,10 +98,11 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
       <div class="md-h">Browsing</div><div class="bullet">• Researched flights to Lisbon</div></div>
   </div>
   <div class="prose">
-    <h2><span class="n">1</span>The dashboard</h2>
+    <h2>The dashboard</h2>
     <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and <b>Last 24 h</b> (evenings flip the last two). Tap any tile to open its full view; <b>search · ask · browse</b> in the corner open the history tools.</p>
     <p>Everything is live: change the note on your Mac, tick a box on your phone — every open copy updates within seconds.</p>
     <p class="hint">Add it to your home screen (Share → Add to Home Screen) and it behaves like an app.</p>
+    <p class="secnav"><a href="#tasks">next: Tasks ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -115,11 +119,12 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="fab">+</div>
   </div>
   <div class="prose">
-    <h2><span class="n">2</span>Tasks</h2>
+    <h2>Tasks</h2>
     <p>The list is your Obsidian daily note — Oriel reads it and writes it back. Tap a circle to tick a task. The floating <span class="glyphchip">+</span> adds one; the faint <span class="glyphchip">…</span> at a row's end opens <b>edit · + subtask · 📎 attach · delete</b>.</p>
     <p>Tap a task's text to expand it: subtasks (tickable, with their own <span class="glyphchip">…</span>), attachments, links, and how long it's been on the list.</p>
     <p><b>📎 attach</b> takes a link, a note line, or a photo/file — photos upload with a progress bar and land in the vault's attachments folder.</p>
     <p class="hint">Every change is applied to the note by your Mac. If the Mac is asleep, changes queue and land when it wakes — see <a href="#pending">what yellow means</a>.</p>
+    <p class="secnav"><a href="#agenda">next: Agenda ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -139,10 +144,11 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     </div>
   </div>
   <div class="prose">
-    <h2><span class="n">3</span>Agenda</h2>
+    <h2>Agenda</h2>
     <p>The tile shows what's next; the full view is a day calendar — events sized by their real duration, overlaps side by side, all-day events as chips on top, and a pink line for <i>now</i>.</p>
     <p>Tap an event block to read its details: notes, attendees, which calendar it's from.</p>
     <p class="hint">When today is done, the tile shows the next thing coming: <span class="mono">next: Flight to Lisbon · Fri Sep 12 · 07:40</span>.</p>
+    <p class="secnav"><a href="#brief">next: Last 24 h ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -161,10 +167,11 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="chips"><span class="chip">refresh now</span></div>
   </div>
   <div class="prose">
-    <h2><span class="n">4</span>Last 24 h</h2>
+    <h2>Last 24 h</h2>
     <p>A model reads your history and writes a short brief of the previous 24 hours, refreshed every few hours in the background. The tile shows the opening; the full view has every bullet ending in a numbered mark.</p>
     <p>Tap a <span class="cite">[1]</span> to jump to the actual thing it came from — the session, the page, the note. The brief never claims what the history can't back.</p>
     <p class="hint"><b>refresh now</b> re-runs it on demand — takes 5–15 seconds.</p>
+    <p class="secnav"><a href="#timers">next: Timers ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -185,11 +192,12 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     </div>
   </div>
   <div class="prose">
-    <h2><span class="n">5</span>Timers</h2>
+    <h2>Timers</h2>
     <p>Open <b>timers</b> from the dashboard corner. Chips start a countdown in one tap; the custom row takes minutes, an optional label, and a <b>repeat</b> toggle for every-N-minutes reminders (stretch, eye break). <b>◷ stopwatch</b> counts up instead.</p>
     <p>While anything runs, a glowing bar sits at the top of the dashboard with the live countdowns — tap it to get back to the sheet. When a timer finishes it chimes, turns yellow, and pulses until you dismiss it; a repeat chimes each round and rolls straight into the next.</p>
     <p>Timers live in Convex, not on one phone: the same countdown ticks on every signed-in device, and pausing or dismissing anywhere updates everywhere.</p>
     <p class="hint"><b>enable lock-screen alerts</b> (once per device) makes finished timers notify you even when Oriel is closed. On iPhone this needs the app added to the home screen.</p>
+    <p class="secnav"><a href="#search">next: Search ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -204,9 +212,10 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="lrow"><span style="color:#34d399" class="small">email</span><span style="flex:1">Reservation confirmed — Da Enzo</span><span class="muted small">May 11</span></div>
   </div>
   <div class="prose">
-    <h2><span class="n">6</span>Search</h2>
+    <h2>Search</h2>
     <p>Search by meaning, not keywords — "that pasta place in Rome" finds the reservation email, the browsing, and your own note about it. The chips narrow to specific sources; the date fields narrow to a window.</p>
     <p>Every hit opens into a reading view with its surroundings: the email thread, the note's other sections, the day's browsing on that site.</p>
+    <p class="secnav"><a href="#ask">next: Ask ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -218,9 +227,10 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <p class="muted small mono">haiku · 3 turns · 9 s</p>
   </div>
   <div class="prose">
-    <h2><span class="n">7</span>Ask</h2>
+    <h2>Ask</h2>
     <p>A question instead of a query. A model searches your history itself, reads what it finds, and answers with citations you can tap. Pick the model by speed and cost in the dropdown.</p>
     <p class="hint">Search is instant and shows you everything; Ask takes seconds and reads it for you. Reach for Ask when the answer needs putting together.</p>
+    <p class="secnav"><a href="#browse">next: Browse ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -235,9 +245,10 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="lrow"><span style="color:#facc15" class="small">tasks</span><span style="flex:1">book dentist</span><span class="muted small">00:00</span></div>
   </div>
   <div class="prose">
-    <h2><span class="n">8</span>Browse</h2>
+    <h2>Browse</h2>
     <p>A timeline of any day or range, newest first, with day-level summaries on top and every raw item under them. <b>‹ day / day ›</b> steps through; the source dropdown narrows to one kind of thing.</p>
     <p class="hint">Good for "what was I doing that Tuesday?" when you don't have a search term.</p>
+    <p class="secnav"><a href="#pending">next: What yellow means ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
@@ -251,7 +262,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="trow"><span class="glyph">○</span><span>water the plants</span></div>
   </div>
   <div class="prose">
-    <h2><span class="n">9</span>What yellow means</h2>
+    <h2>What yellow means</h2>
     <p>Your notes live on your Mac; the phone sends changes to it. The colours tell you where a change is:</p>
     <div class="key">
       <b class="pulse" style="color:#facc15">○</b><span><b>pulsing yellow</b> — sent, in flight; usually settles in seconds</span>
@@ -259,8 +270,9 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
       <b style="color:#f87171">▭</b><span><b>red box</b> — that change couldn't be applied; the app undid it and says why</span>
     </div>
     <p class="hint">The dashboard's Tasks tile shows "· 1 waiting" whenever something is still queued.</p>
+    <p class="secnav"><a href="/">open Oriel ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
-<footer>Oriel · personal — history stays in your own Convex deployment and your vault.</footer>
+<footer><a href="/">open Oriel ›</a> · Oriel · personal — history stays in your own Convex deployment and your vault.</footer>
 </div></body></html>
