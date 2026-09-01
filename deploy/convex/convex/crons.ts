@@ -13,4 +13,7 @@ crons.interval("warm embedding endpoint", { minutes: 3 }, internal.search.warmEm
 crons.interval("last-day brief", { hours: 3 }, internal.brief.generate, {});
 /* Event reminders: push ~10 min before agenda events (SPEC-event-reminders). */
 crons.interval("event reminders", { minutes: 5 }, internal.reminders.sweep, {});
+/* Morning digest: fires once per local morning; the tick itself decides
+   whether it's 06:00 yet in the timezone pref (SPEC-morning-digest). */
+crons.interval("morning digest", { minutes: 15 }, internal.pushNode.digestTick, {});
 export default crons;

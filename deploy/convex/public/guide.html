@@ -76,7 +76,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
   <div class="wordmark">Oriel</div>
   <p class="tag">Your day, and everything behind it. Tasks, agenda, and a daily brief on the front; a searchable history of what you did, read, wrote, and planned behind it.</p>
   <nav class="toc">
-    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#agenda">Agenda</a><a href="#brief">Last 24 h</a>
+    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#agenda">Agenda</a><a href="#brief">Digest</a>
     <a href="#timers">Timers</a><a href="#search">Search</a><a href="#ask">Ask</a><a href="#browse">Browse</a><a href="#pending">What yellow means</a>
   </nav>
 </div>
@@ -93,13 +93,13 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
       <div class="trow"><span class="glyph">○</span><span>reply to Sam about the invoice</span></div>
       <div class="trow"><span class="glyph">○</span><span>water the plants</span></div>
       <p class="muted small" style="margin:2px 0 0">+1 more · 2 done · 2 routine</p></div>
-    <div class="tile"><div class="thead"><span style="color:#a78bfa">Last 24 h</span><span class="muted">2 h ago ›</span></div>
+    <div class="tile"><div class="thead"><span style="color:#a78bfa">Digest</span><span class="muted">2 h ago ›</span></div>
       <div class="md-h">Work</div><div class="bullet">• Shipped the release, 57 shell commands</div>
       <div class="md-h">Browsing</div><div class="bullet">• Researched flights to Lisbon</div></div>
   </div>
   <div class="prose">
     <h2>The dashboard</h2>
-    <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and <b>Last 24 h</b> (evenings flip the last two). Tap any tile to open its full view; <b>search · ask · browse</b> in the corner open the history tools.</p>
+    <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and the <b>Digest</b> (evenings flip the last two). Tap any tile to open its full view; <b>search · ask · browse</b> in the corner open the history tools.</p>
     <p>Everything is live: change the note on your Mac, tick a box on your phone — every open copy updates within seconds.</p>
     <p class="hint">Add it to your home screen (Share → Add to Home Screen) and it behaves like an app.</p>
     <p class="secnav"><a href="#tasks">next: Tasks ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
@@ -148,13 +148,15 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <p>The tile shows what's next; the full view is a day calendar — events sized by their real duration, overlaps side by side, all-day events as chips on top, and a pink line for <i>now</i>.</p>
     <p>Tap an event block to read its details: notes, attendees, which calendar it's from.</p>
     <p class="hint">When today is done, the tile shows the next thing coming: <span class="mono">next: Flight to Lisbon · Fri Sep 12 · 07:40</span>.</p>
-    <p class="secnav"><a href="#brief">next: Last 24 h ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
+    <p class="secnav"><a href="#brief">next: Digest ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
 
 <section class="step" id="brief">
   <div class="phone">
-    <div class="daterow"><span>‹ Oriel</span><span>Last 24 h</span></div>
+    <div class="daterow"><span>‹ Oriel</span><span>Digest</span></div>
+    <p style="font-size:.82rem;color:#c8c8cf">3 events · next 14:00 Dentist · 2 open tasks</p>
+    <p class="sect">LAST 24 H</p>
     <p class="muted small">What did I do over the previous 24 hours?</p>
     <div class="md-h">Work &amp; Development</div>
     <div class="bullet">• Shipped the release after 57 shell commands <span class="cite">[1]</span></div>
@@ -167,9 +169,9 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <div class="chips"><span class="chip">refresh now</span></div>
   </div>
   <div class="prose">
-    <h2>Last 24 h</h2>
-    <p>A model reads your history and writes a short brief of the previous 24 hours, refreshed every few hours in the background. The tile shows the opening; the full view has every bullet ending in a numbered mark.</p>
-    <p>Tap a <span class="cite">[1]</span> to jump to the actual thing it came from — the session, the page, the note. The brief never claims what the history can't back.</p>
+    <h2>Digest</h2>
+    <p>The day at a glance: a top line with today’s events, the next one coming, and open tasks — and beneath it, a short model-written brief of the previous 24 hours (refreshed every few hours), every bullet ending in a numbered mark.</p>
+    <p>Tap a <span class="cite">[1]</span> to jump to the actual thing it came from — the session, the page, the note. The brief never claims what the history can't back. Each morning at 06:00 the digest also arrives as a notification: <span class="mono">8 events · first 09:00 Stand-up · 7 open tasks</span>.</p>
     <p class="hint"><b>refresh now</b> re-runs it on demand — takes 5–15 seconds.</p>
     <p class="secnav"><a href="#timers">next: Timers ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>

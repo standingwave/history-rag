@@ -8,7 +8,9 @@ import webpush from "web-push";
 import { v } from "convex/values";
 import { internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { reminderTitle, reminderBody } from "./reminderMath";
+import {
+  reminderTitle, reminderBody, localDayHour, digestTitle, digestBody,
+} from "./reminderMath";
 
 async function fanout(ctx: ActionCtx,
                       payload: { title: string; body: string; tag: string; url?: string }) {
@@ -47,4 +49,27 @@ export const sendEvent = internalAction({
     tag: a.tag,
     url: a.url,
   }),
+});
+
+/* Morning digest: cron-ticked every 15 min; sends once per local day,
+   in the 06:00–09:59 window (a phone enabled at noon waits for tomorrow
+   rather than getting a "morning" digest at lunch). markSent lands
+   before the send — a duplicate morning is worse than a missed one. */
+export const digestTick = internalAction({
+  args: {},
+  handler: async (ctx) => {
+    const st = await ctx.runQuery(internal.digest.state, {});
+    if (!st.on || !st.subscribed) return;
+    const now = Date.now();
+    const { day, hour } = localDayHour(now, st.timezone);
+    if (hour < 6 || hour >= 10 || st.sentDay === day) return;
+    const facts = await ctx.runQuery(internal.digest.facts, { day });
+    await ctx.runMutation(internal.digest.markSent, { day });
+    await fanout(ctx, {
+      title: digestTitle(now, st.timezone),
+      body: digestBody(facts, st.timezone),
+      tag: "digest",
+      url: "/#w=digest",
+    });
+  },
 });

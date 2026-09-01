@@ -10,7 +10,7 @@ import { internal } from "./_generated/api";
 import { requireUser } from "./auth";
 import { due, eventTitle, LEAD_MS, SWEEP_MS, DEFAULT_TZ } from "./reminderMath";
 
-async function pref(ctx: QueryCtx, name: string) {
+export async function pref(ctx: QueryCtx, name: string) {
   const row = await ctx.db.query("prefs")
     .withIndex("by_name", (q) => q.eq("name", name)).unique();
   return row?.value;
@@ -22,6 +22,7 @@ export const status = query({
     await requireUser(ctx);
     return {
       remindEvents: (await pref(ctx, "remindEvents")) !== false,
+      digestPush: (await pref(ctx, "digestPush")) !== false,
       timezone: (await pref(ctx, "timezone")) ?? DEFAULT_TZ,
       subscribed: !!(await ctx.db.query("pushSubs").first()),
     };
@@ -30,7 +31,7 @@ export const status = query({
 
 export const setPref = mutation({
   args: {
-    name: v.union(v.literal("remindEvents"), v.literal("timezone")),
+    name: v.union(v.literal("remindEvents"), v.literal("timezone"), v.literal("digestPush")),
     value: v.any(),
   },
   handler: async (ctx, { name, value }) => {

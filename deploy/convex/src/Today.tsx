@@ -107,7 +107,7 @@ export function Skeleton({ widths, style }: { widths: number[]; style?: React.CS
 function period(h: number) {
   return h < 5 ? "night" : h < 12 ? "morning" : h < 18 ? "day" : "night";
 }
-const ORDER = ["agenda", "tasks", "brief"];
+const ORDER = ["agenda", "tasks", "digest"];
 
 export function Today() {
   const [day, setDay] = useState(localDay());
@@ -145,7 +145,8 @@ export function Today() {
   if (sheet === "routines") return <RoutinesSheet onBack={() => history.back()} />;
   if (sheet === "timers") return <TimersSheet timers={timers} onBack={close} />;
   if (sheet === "agenda") return <AgendaSheet day={day} agenda={agenda} onBack={close} onOpen={openId} />;
-  if (sheet === "brief") return <BriefSheet brief={brief} onBack={close} onOpen={openId} />;
+  if (sheet === "digest") return <DigestSheet brief={brief} agenda={agenda} tasks={tasks} latest={latest}
+    onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
   if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
   if (sheet === "ask") return <AskSheet onBack={close} onOpen={openId} />;
@@ -155,7 +156,8 @@ export function Today() {
     tasks: <TasksTile key="tasks" tasks={tasks} waiting={waiting} starting={starting}
       onStart={() => startDay({ day })} onOpen={() => open("tasks")} />,
     agenda: <AgendaTile key="agenda" agenda={agenda} upcoming={upcoming} onOpen={() => open("agenda")} />,
-    brief: <BriefTile key="brief" brief={brief} onOpen={() => open("brief")} />,
+    digest: <DigestTile key="digest" brief={brief} agenda={agenda} tasks={tasks} latest={latest}
+      onOpen={() => open("digest")} />,
   };
   return (
     <section>
@@ -942,13 +944,31 @@ function AgendaTile({ agenda, upcoming, onOpen }: { agenda?: Item[]; upcoming?: 
   );
 }
 
-/* "What did I do over the previous 24 hours?" — the stored answer, rendered
-   the same way as the sheet but compact and clamped with a fade. */
-function BriefTile({ brief, onOpen }: { brief?: Brief; onOpen: () => void }) {
+/* The day ahead in one line: events, the next one, open tasks. Shared by
+   the Digest tile and sheet; the 06:00 push composes its own server-side
+   (digest.facts) because it must run with no client open. */
+function dayAhead(agenda?: Item[], tasks?: Item[], latest?: string | null) {
+  if (!agenda || !tasks) return "";
+  const now = Date.now();
+  const next = agenda.find((e) => timeOnly(e.timestamp) !== "all day" && new Date(e.timestamp).getTime() > now);
+  const parts = [agenda.length ? `${agenda.length} event${agenda.length > 1 ? "s" : ""}` : "no events"];
+  if (next) parts.push(`next ${hhmm(next.timestamp)} ${describe(next).title}`);
+  const main = tasks.filter((t) => t.meta.section !== "Routine");
+  const open = main.filter((t) => !t.meta.done);
+  parts.push(main.length ? `${open.length} open task${open.length === 1 ? "" : "s"}`
+    : latest ? `tasks to carry from ${dayLabel(latest)}` : "no tasks yet");
+  return parts.join(" · ");
+}
+
+/* The digest: today at a glance on top, the last-24h brief beneath. */
+function DigestTile({ brief, agenda, tasks, latest, onOpen }:
+  { brief?: Brief; agenda?: Item[]; tasks?: Item[]; latest?: string | null; onOpen: () => void }) {
+  const line = dayAhead(agenda, tasks, latest);
   return (
     <button className="tile large brief" onClick={onOpen}>
-      <div className="thead"><span style={{ color: "#a78bfa" }}>Last 24 h</span>
+      <div className="thead"><span style={{ color: "#a78bfa" }}>Digest</span>
         <span className="muted">{brief?.generatedAt ? ago(brief.generatedAt) : ""} ›</span></div>
+      {line && <p className="dayline">{line}</p>}
       {!brief && <Skeleton widths={[92, 84, 60]} style={{ margin: "6px 0" }} />}
       {brief && !brief.answer && <p className="muted">{brief.lastError ? `couldn't answer: ${brief.lastError.error}` : "not generated yet — open to run it"}</p>}
       {brief?.answer && <div className="clamp"><Answer text={brief.answer} compact /></div>}
@@ -956,17 +976,23 @@ function BriefTile({ brief, onOpen }: { brief?: Brief; onOpen: () => void }) {
   );
 }
 
-function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => void; onOpen: (id: string) => void }) {
+function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
+  { brief?: Brief; agenda?: Item[]; tasks?: Item[]; latest?: string | null;
+    onBack: () => void; onOpen: (id: string) => void }) {
   const refresh = useAction(api.brief.refresh);
   const [busy, setBusy] = useState(false);
   const [t0, setT0] = useState(0);
   useTick(1000, busy);
+  const rstat = useQuery(api.reminders.status, {});
+  const setPref = useMutation(api.reminders.setPref);
   const { push: fail, view: errView } = useErrors();
   const run = () => { setBusy(true); setT0(Date.now()); refresh({}).catch(fail).finally(() => setBusy(false)); };
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>Last 24 h</span></div>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>Digest</span></div>
+      <p className="dayline">{dayAhead(agenda, tasks, latest)}</p>
+      <p className="sect">LAST 24 H</p>
       <p className="muted small">{brief?.question ?? "…"}</p>
       {errView}
       {brief?.lastError && !busy && <ErrBox>refresh {ago(brief.lastError.at)} failed: {brief.lastError.error}</ErrBox>}
@@ -980,6 +1006,17 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
         {brief.model} · {ago(brief.generatedAt)} · {((brief.ms ?? 0) / 1000).toFixed(0)} s{brief.note ? ` · ${brief.note}` : ""}
         {brief.citations.length === 0 ? " · no sources cited" : ` · ${brief.citations.length} sources`}</p>}
       <div className="cbar slim"><button disabled={busy} className={busy ? "pulse" : ""} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></div>
+      {rstat && (
+        <p className="muted small" style={{ marginTop: 14 }}>
+          {!rstat.subscribed
+            ? "for the morning digest push, enable lock-screen alerts in timers"
+            : rstat.digestPush
+              ? <>morning digest at 06:00 · <button className="lnk"
+                  onClick={() => void setPref({ name: "digestPush", value: false })}>on</button></>
+              : <>morning digest off · <button className="lnk"
+                  onClick={() => void setPref({ name: "digestPush", value: true })}>turn on</button></>}
+        </p>
+      )}
     </section>
   );
 }

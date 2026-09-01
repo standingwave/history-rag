@@ -225,3 +225,6 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .tchips .chip { font-size: .88rem; padding: 8px 13px; border-radius: 10px; min-height: 40px; color: #c8c8cf; }
 .tchips .chip:active { background: #2a2a30; }
 .composer input.tmin { flex: none; width: 56px; text-align: center; }
+
+/* digest: the day-ahead line above the last-24h brief */
+.dayline { color: #c8c8cf; font-size: .85rem; margin: 0 0 8px; }
