@@ -82,6 +82,20 @@ export default defineSchema({
     keys: v.object({ p256dh: v.string(), auth: v.string() }),
     ua: v.optional(v.string()),
   }).index("by_endpoint", ["endpoint"]),
+  /* Event reminders (wip/SPEC-event-reminders.md): one row per reminder
+     sent, keyed by event chunk + the start it was sent for, so a moved
+     event reminds again at its new time. GC'd by the sweep after 48 h. */
+  eventReminders: defineTable({
+    chunkId: v.string(),
+    start: v.string(),
+    sentAt: v.number(),
+  }).index("by_chunk_start", ["chunkId", "start"]),
+  /* Per-feature switches: remindEvents (bool), timezone (IANA name).
+     Absent row = the feature's default. */
+  prefs: defineTable({
+    name: v.string(),
+    value: v.any(),
+  }).index("by_name", ["name"]),
   /* The dashboard's standing question, answered by Ask on a schedule
      (brief.ts); the newest row is the tile. */
   briefs: defineTable({

@@ -988,9 +988,16 @@ function BriefSheet({ brief, onBack, onOpen }: { brief?: Brief; onBack: () => vo
    (overlaps share the width), all-day events as chips above, a line for
    now. Tap a block for the reading view. */
 const HOUR_PX = 52;
+/* "America/Los_Angeles" → "Pacific"; anything else shows its city. */
+const tzLabel = (tz: string) =>
+  tz === "America/Los_Angeles" ? "Pacific" : (tz.split("/").pop() ?? tz).replace(/_/g, " ");
+
 function AgendaSheet({ day, agenda, onBack, onOpen }:
   { day: string; agenda?: Item[]; onBack: () => void; onOpen: (id: string) => void }) {
   useTick(60_000, day === localDay());
+  const rstat = useQuery(api.reminders.status, {});
+  const setPref = useMutation(api.reminders.setPref);
+  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const evs = (agenda ?? []).map((e) => ({ e, ...evTimes(e) }));
   const allDay = evs.filter((x) => x.allDay);
   const timed = evs.filter((x) => !x.allDay).sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -1055,6 +1062,22 @@ function AgendaSheet({ day, agenda, onBack, onOpen }:
               );
             })}
           </div>
+        </div>
+      )}
+      {rstat && (
+        <div className="muted small" style={{ marginTop: 14 }}>
+          {!rstat.subscribed
+            ? <p>for event reminders, enable lock-screen alerts in timers</p>
+            : rstat.remindEvents
+              ? <p>event reminders: 10 min before · <button className="lnk"
+                  onClick={() => void setPref({ name: "remindEvents", value: false })}>on</button></p>
+              : <p>event reminders off · <button className="lnk"
+                  onClick={() => void setPref({ name: "remindEvents", value: true })}>turn on</button></p>}
+          <p>notification times: {tzLabel(rstat.timezone)}
+            {deviceTz && deviceTz !== rstat.timezone && <>{" · "}<button className="lnk"
+              onClick={() => void setPref({ name: "timezone", value: deviceTz })}>
+              use device timezone ({deviceTz})</button></>}
+          </p>
         </div>
       )}
     </section>

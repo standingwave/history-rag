@@ -11,4 +11,6 @@ crons.interval("warm embedding endpoint", { minutes: 3 }, internal.search.warmEm
    loop is a few cents, so every 3 hours keeps it fresh without waste;
    the sheet's refresh runs it on demand. */
 crons.interval("last-day brief", { hours: 3 }, internal.brief.generate, {});
+/* Event reminders: push ~10 min before agenda events (SPEC-event-reminders). */
+crons.interval("event reminders", { minutes: 5 }, internal.reminders.sweep, {});
 export default crons;
