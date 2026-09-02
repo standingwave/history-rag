@@ -228,3 +228,28 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 
 /* digest: the day-ahead line above the last-24h brief */
 .dayline { color: #c8c8cf; font-size: .85rem; margin: 0 0 8px; }
+
+/* ── quick capture + decluttering (wip/SPEC-quick-capture.md) ── */
+.gear { background: none; border: 0; color: #a6a6af; font: inherit; font-size: 1.1rem; padding: 2px 0; cursor: pointer; }
+.veil { position: fixed; inset: 0; background: #000a; z-index: 5; }
+.cappanel { position: fixed; left: 0; right: 0; bottom: 0; background: #17171b; border-top: 1px solid #2a2a30; border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); z-index: 6; max-width: 44rem; margin: 0 auto; }
+.capin { width: 100%; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; font: inherit; font-size: 16px; outline: 0; resize: none; padding: 4px 0 8px; }
+.vrow { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+.vpill { background: none; border: 1px solid #2a2a30; border-radius: 999px; padding: 7px 14px; font: inherit; font-size: .88rem; color: #a6a6af; cursor: pointer; }
+.vpill.on { border-color: #8ab4f8; color: #e8e8eb; background: #8ab4f81a; }
+.crow { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid #1e1e23; font-size: .95rem; align-items: baseline; min-width: 0; }
+.crow .ct { color: #94949e; font-family: ui-monospace, Menlo, monospace; font-size: .78rem; flex: none; }
+.crow .cx { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.crow .st { flex: none; font-size: .76rem; }
+.crow.pend { color: #facc15; }
+.crow.pend .cx { color: #c8c8cf; }
+.srow { display: flex; align-items: center; gap: 10px; min-height: 50px; border-bottom: 1px solid #1e1e23; font-size: .95rem; }
+.srow .sub { display: block; color: #94949e; font-size: .78rem; }
+.srow .val { margin-left: auto; color: #a6a6af; font-size: .88rem; flex: none; text-align: right; }
+.tog { margin-left: auto; width: 46px; height: 27px; border-radius: 999px; background: #2a2a30; border: 0; position: relative; flex: none; cursor: pointer; transition: background .15s; padding: 0; }
+.tog::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #94949e; transition: left .15s, background .15s; }
+.tog.on { background: #8ab4f8; }
+.tog.on::after { left: 22px; background: #121215; }
+.codebox { font: 600 1.15rem ui-monospace, Menlo, monospace; letter-spacing: .1em; color: #e8e8eb; }
+.htabs { margin: 0 0 12px; }
+.offstage { display: none; }

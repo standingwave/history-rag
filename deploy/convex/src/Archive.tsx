@@ -82,11 +82,11 @@ export function StatsStrip({ sel, onToggle }: { sel?: Set<string>; onToggle?: (s
   );
 }
 
-function Sheet({ title, onBack, children, stats }:
-  { title: string; onBack: () => void; children: ReactNode; stats?: ReactNode }) {
+function Sheet({ title, onBack, children, stats, bare }:
+  { title: string; onBack: () => void; children: ReactNode; stats?: ReactNode; bare?: boolean }) {
   return (
     <section>
-      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>{title}</span></div>
+      {!bare && <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>{title}</span></div>}
       {stats ?? <StatsStrip />}
       {children}
     </section>
@@ -120,7 +120,7 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
 
 /* ── search ───────────────────────────────────────────────────────────── */
 
-export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+export function SearchSheet({ onBack, onOpen, bare }: { onBack: () => void; onOpen: (id: string) => void; bare?: boolean }) {
   const live = useAction(api.search.search);
   const [q, setQ] = useState("");
   const [since, setSince] = useState("");
@@ -160,7 +160,7 @@ export function SearchSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   const elapsed = busy ? (performance.now() - t0) / 1000 : 0;
 
   return (
-    <Sheet title="Search" onBack={onBack} stats={<StatsStrip sel={sel} onToggle={toggle} />}>
+    <Sheet title="Search" onBack={onBack} bare={bare} stats={<StatsStrip sel={sel} onToggle={toggle} />}>
       <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="anything you did, read, wrote, or planned" />
         <button className="primary" disabled={busy || !q}>go</button>
@@ -225,7 +225,7 @@ export function Answer({ text, onOpen, compact }: { text: string; onOpen?: (id: 
   return <div className={`answer ${compact ? "compact" : ""}`}>{out}</div>;
 }
 
-export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+export function AskSheet({ onBack, onOpen, bare }: { onBack: () => void; onOpen: (id: string) => void; bare?: boolean }) {
   const ask = useAction(api.ask.ask);
   const cfg = useQuery(api.archive.config, {});
   const models: any[] = cfg?.models ?? [];
@@ -249,7 +249,7 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
 
 
   return (
-    <Sheet title="Ask" onBack={onBack}>
+    <Sheet title="Ask" onBack={onBack} bare={bare}>
       <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="a question about your history" />
         <button className="primary" disabled={busy || !q || !models.length}>ask</button>
@@ -279,7 +279,7 @@ export function AskSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: 
 
 /* ── browse ───────────────────────────────────────────────────────────── */
 
-export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (id: string) => void }) {
+export function BrowseSheet({ onBack, onOpen, bare }: { onBack: () => void; onOpen: (id: string) => void; bare?: boolean }) {
   const convex = useConvex();
   const today = localDay();
   const [since, setSince] = useState(today);
@@ -315,7 +315,7 @@ export function BrowseSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (i
   const label = since === until ? since : `${since} – ${until}`;
 
   return (
-    <Sheet title="Browse" onBack={onBack}>
+    <Sheet title="Browse" onBack={onBack} bare={bare}>
       <form className="frow" onSubmit={(e) => { e.preventDefault(); void run(); }}>
         <DateField value={since} onChange={setSince} />
         <span className="muted small" style={{ alignSelf: "center", flex: "none" }}>to</span>

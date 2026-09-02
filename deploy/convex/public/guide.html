@@ -76,15 +76,15 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
   <div class="wordmark">Oriel</div>
   <p class="tag">Your day, and everything behind it. Tasks, agenda, and a daily brief on the front; a searchable history of what you did, read, wrote, and planned behind it.</p>
   <nav class="toc">
-    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#agenda">Agenda</a><a href="#brief">Digest</a>
+    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#capture">Capture</a><a href="#agenda">Agenda</a><a href="#brief">Digest</a>
     <a href="#timers">Timers</a><a href="#search">Search</a><a href="#ask">Ask</a><a href="#browse">Browse</a><a href="#pending">What yellow means</a>
   </nav>
 </div>
 
 <section class="step" id="dash">
   <div class="phone">
-    <div class="hdr"><span class="wm">Oriel</span><span class="muted small">sign out</span></div>
-    <div class="daterow"><span>Sat Aug 30 · day</span><span>search · ask · browse · timers</span></div>
+    <div class="hdr"><span class="wm">Oriel</span><span class="muted small">sign out · ⚙</span></div>
+    <div class="daterow"><span>Sat Aug 30 · day</span><span>history · timers</span></div>
     <div class="tile"><div class="thead"><span style="color:#f472b6">Agenda</span><span class="muted">3 events ›</span></div>
       <div class="lrow"><span class="time">09:00</span><span>Stand-up</span></div>
       <div class="lrow" style="color:#f472b6"><span class="time">14:00</span><span style="color:#e8e8eb">Dentist</span></div>
@@ -99,7 +99,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
   </div>
   <div class="prose">
     <h2>The dashboard</h2>
-    <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and the <b>Digest</b> (evenings flip the last two). Tap any tile to open its full view; <b>search · ask · browse</b> in the corner open the history tools.</p>
+    <p>One screen, three tiles, reordered by time of day: <b>Agenda</b> always on top, then <b>Tasks</b> and the <b>Digest</b> (evenings flip the last two). Tap any tile to open its full view; <b>history</b> in the corner opens Search / Ask / Browse as tabs of one sheet, and <b>⚙</b> holds every setting. The floating <span class="glyphchip">+</span> is quick capture — see below.</p>
     <p>Everything is live: change the note on your Mac, tick a box on your phone — every open copy updates within seconds.</p>
     <p class="hint">Add it to your home screen (Share → Add to Home Screen) and it behaves like an app.</p>
     <p class="secnav"><a href="#tasks">next: Tasks ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
@@ -124,6 +124,26 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <p>Tap a task's text to expand it: subtasks (tickable, with their own <span class="glyphchip">…</span>), attachments, links, and how long it's been on the list.</p>
     <p><b>📎 attach</b> takes a link, a note line, or a photo/file — photos upload with a progress bar and land in the vault's attachments folder.</p>
     <p class="hint">Every change is applied to the note by your Mac. If the Mac is asleep, changes queue and land when it wakes — see <a href="#pending">what yellow means</a>.</p>
+    <p class="secnav"><a href="#capture">next: Capture ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
+  </div>
+</section>
+
+<section class="step" id="capture">
+  <div class="phone">
+    <div class="daterow"><span>‹ Oriel</span><span>✎ Capture · Tue Sep 2</span></div>
+    <div class="sect">TODAY</div>
+    <div class="lrow"><span class="time">12:40</span><span>idea: routine streaks in the routines sheet</span></div>
+    <div class="lrow"><span class="time">14:02</span><span>check the attic insulation quote</span></div>
+    <div class="lrow pend" style="color:#facc15"><span class="time">14:31</span><span style="color:#c8c8cf">call about the van</span><span class="small pulse">adding…</span></div>
+    <div class="inputrow" style="margin-top:10px"><span class="inp">capture a thought…</span></div>
+    <div class="chips"><span class="chip on">✎ note</span><span class="chip">○ task</span><span class="chip" style="background:#e8e8eb;color:#121215;font-weight:600">add</span></div>
+    <div class="fab">+</div>
+  </div>
+  <div class="prose">
+    <h2>Capture</h2>
+    <p>The dashboard's <span class="glyphchip">+</span> opens a composer from anywhere on the home screen: type a thought and it lands in today's daily note under <b>Notes</b> as <span class="mono">- 14:31 call about the van</span>. One tap on <b>○ task</b> makes it a task instead.</p>
+    <p>The capture sheet lists everything you've captured today with the usual <a href="#pending">yellow lifecycle</a> — and if today's note doesn't exist yet, capturing starts the day for you (template, carried tasks and all).</p>
+    <p class="hint">Captured notes become searchable in History a few minutes after your Mac writes them.</p>
     <p class="secnav"><a href="#agenda">next: Agenda ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
@@ -186,7 +206,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <p class="sect">NEW TIMER</p>
     <div class="chips"><span class="chip">3m</span><span class="chip">5m</span><span class="chip">10m</span><span class="chip">15m</span><span class="chip">25m</span><span class="chip">45m</span><span class="chip">1h</span><span class="chip">◷ stopwatch</span></div>
     <div class="inputrow"><span class="inp" style="flex:0 0 3.2em;text-align:center">min</span><span class="inp">label (optional)</span><span class="go">start</span></div>
-    <p class="muted small" style="margin:8px 0 0">lock-screen alerts are on for this device</p>
+    
     <p class="sect" style="margin-top:14px">MEANWHILE, ON THE DASHBOARD</p>
     <div class="tmbar">
       <div class="tmbrow"><span class="glyph">⏱</span><span>tea</span><span class="tmtime">2:41</span></div>
@@ -205,7 +225,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
 
 <section class="step" id="search">
   <div class="phone">
-    <div class="daterow"><span>‹ Oriel</span><span>Search</span></div>
+    <div class="daterow"><span>‹ Oriel</span><span>History · search</span></div>
     <p class="muted small mono">229k chunks · 10 sources · 2017-05 → today</p>
     <div class="chips"><span class="chip on">email</span><span class="chip on">browser</span><span class="chip on">notes</span><span class="chip on">tasks</span><span class="chip">…</span></div>
     <div class="inputrow"><span class="inp">that pasta place in Rome</span><span class="go">go</span></div>
@@ -223,7 +243,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
 
 <section class="step" id="ask">
   <div class="phone">
-    <div class="daterow"><span>‹ Oriel</span><span>Ask</span></div>
+    <div class="daterow"><span>‹ Oriel</span><span>History · ask</span></div>
     <div class="inputrow"><span class="inp">when did I last repot the hoya?</span><span class="go">ask</span></div>
     <p class="answer-p">You repotted the hoya on <b>June 14</b> — it's in your plants note <span class="cite">[1]</span>, and the task "repot hoya" was checked off the same day <span class="cite">[2]</span>. You bought the pot on June 12 <span class="cite">[3]</span>.</p>
     <p class="muted small mono">haiku · 3 turns · 9 s</p>
@@ -238,7 +258,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
 
 <section class="step" id="browse">
   <div class="phone">
-    <div class="daterow"><span>‹ Oriel</span><span>Browse</span></div>
+    <div class="daterow"><span>‹ Oriel</span><span>History · browse</span></div>
     <div class="chips"><span class="chip">‹ day</span><span class="chip">day ›</span><span class="chip on">summaries</span></div>
     <div class="lrow"><span class="muted small">Aug 29</span></div>
     <div class="lrow"><span style="color:#fb923c" class="small">usage</span><span style="flex:1">6 h 12 m across 9 apps</span></div>

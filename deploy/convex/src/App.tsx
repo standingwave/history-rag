@@ -41,7 +41,11 @@ export function App() {
             } else location.reload();
           }}><img src="/icon.svg" alt="" />Oriel</button>
         <Authenticated>
-          <button className="lnk" onClick={() => void signOut()}>sign out</button>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button className="lnk" onClick={() => void signOut()}>sign out</button>
+            <button className="gear" aria-label="settings" title="settings"
+              onClick={() => { history.pushState(null, "", "#w=settings"); dispatchEvent(new PopStateEvent("popstate")); }}>⚙</button>
+          </span>
         </Authenticated>
       </header>
       {stale && <button className="wait" style={{ width: "100%", textAlign: "left", font: "inherit", cursor: "pointer" }}

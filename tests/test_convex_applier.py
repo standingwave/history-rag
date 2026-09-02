@@ -55,7 +55,7 @@ def test_drain_confirms_each_intent(tmp_path, monkeypatch):
     (v / "2026-08-28.md").write_text("\n".join(NOTE) + "\n")
     monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
     kicked = []
-    monkeypatch.setattr(ap, "_kick", lambda: kicked.append(1))
+    monkeypatch.setattr(ap, "_kick", lambda *a: kicked.append(a or (("tasks",),)))
     fake = FakeClient()
     n = ap.drain(fake, [
         {"id": "i1", "vault": "Documents", "day": "2026-08-28",
@@ -65,7 +65,47 @@ def test_drain_confirms_each_intent(tmp_path, monkeypatch):
     assert n == 1
     assert fake.calls == [("today:applyIntent", {"id": "i1"}),
                           ("today:applyIntent", {"id": "i2", "error": "task not found in that day's note"})]
-    assert kicked == [1]
+    assert kicked == [(("tasks",),)]
+
+
+def test_drain_kicks_obsidian_when_a_note_landed(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    (v / "2026-08-28.md").write_text("\n".join(NOTE) + "\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    kicked = []
+    monkeypatch.setattr(ap, "_kick", lambda srcs=("tasks",): kicked.append(srcs))
+    ap.drain(FakeClient(), [
+        {"id": "i1", "kind": "note", "vault": "Documents", "day": "2026-08-28",
+         "text": "an idea", "at": "14:32"}], kick=True)
+    assert kicked == [("tasks", "obsidian")]
+
+
+def test_note_appends_creates_section_and_starts_day(tmp_path, monkeypatch):
+    v = tmp_path / "Documents"; v.mkdir()
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    # no ## Notes yet: created at the end
+    (v / "2026-08-28.md").write_text("\n".join(NOTE) + "\n")
+    err = ap.apply_intent({"kind": "note", "vault": "Documents", "day": "2026-08-28",
+                           "text": "  check   the attic  quote ", "at": "14:32"})
+    assert err is None
+    body = (v / "2026-08-28.md").read_text()
+    assert body.endswith("## Notes\n- 14:32 check the attic quote\n")
+    # existing section with trailing blank + next heading: insert inside it
+    (v / "2026-08-29.md").write_text(
+        "- [ ] a task\n\n## Notes\n- 09:00 first\n\n## Log\nstuff\n")
+    err = ap.apply_intent({"kind": "note", "vault": "Documents", "day": "2026-08-29",
+                           "text": "second", "at": "10:15"})
+    assert err is None
+    assert ("## Notes\n- 09:00 first\n- 10:15 second\n\n## Log"
+            in (v / "2026-08-29.md").read_text())
+    # missing note: created via the start-day path first
+    err = ap.apply_intent({"kind": "note", "vault": "Documents", "day": "2026-08-30",
+                           "text": "early thought", "at": "06:12"})
+    assert err is None
+    body = (v / "2026-08-30.md").read_text()
+    assert "- 06:12 early thought" in body and "## Notes" in body
+    assert ap.apply_intent({"kind": "note", "vault": "Documents",
+                            "day": "2026-08-30", "text": "   ", "at": ""}) == "empty note"
 
 
 # ── add / edit / delete (need the daily-tasks skill for the note grammar) ──

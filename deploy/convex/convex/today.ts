@@ -210,6 +210,23 @@ export const startDay = mutation({
   },
 });
 
+/* Quick capture (wip/SPEC-quick-capture.md): a thought for today's note,
+   appended under "## Notes" by the Mac. No optimistic items row — the
+   capture sheet reads the intent queue itself. */
+export const capture = mutation({
+  args: { day: v.string(), text: v.string(), at: v.string() },
+  handler: async (ctx, { day, text, at }) => {
+    await requireUser(ctx);
+    const clean = text.trim().slice(0, 500);
+    if (!clean) throw new Error("empty note");
+    if (!/^\d{2}:\d{2}$/.test(at)) throw new Error("bad time");
+    const vault = await vaultFor(ctx, day);
+    return await ctx.db.insert("taskIntents", {
+      kind: "note", chunkId: "", day, vault, text: clean, at, requestedAt: Date.now(),
+    });
+  },
+});
+
 export const edit = mutation({
   args: { id: v.string(), newText: v.string() },
   handler: async (ctx, { id, newText }) => {
@@ -474,7 +491,7 @@ export const intents = query({
       id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", day: r.day, text: r.text, want: r.want ?? null,
       newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "")
         : r.kind === "routineEdit" && r.newText ? routineChunkId(r.vault, r.newText) : null,
-      parent: r.parent ?? null,
+      parent: r.parent ?? null, at: r.at ?? null,
       requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
     }));
   },
@@ -494,7 +511,7 @@ export const pendingIntents = internalQuery({
       fileUrl: urls[i],
       id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
       text: r.text, want: r.want ?? null, newText: r.newText ?? null, parent: r.parent ?? null,
-      days: r.days ?? null,
+      days: r.days ?? null, at: r.at ?? null,
       requestedAt: r.requestedAt, storageId: r.storageId ?? null,
     }));
   },

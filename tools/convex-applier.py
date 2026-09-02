@@ -354,6 +354,31 @@ def _write(path, lines):
     with open(path, "w", encoding="utf-8") as f:
         f.write(text if text.endswith("\n") else text + "\n")
 
+def apply_note(path: str, lines: list, intent: dict) -> str | None:
+    """Append '- HH:MM text' under '## Notes', creating the heading at the
+    end of the note when it's absent. Whitespace in the text collapses —
+    a capture is one line by contract."""
+    text = " ".join((intent.get("text") or "").split())
+    if not text:
+        return "empty note"
+    at = (intent.get("at") or "").strip()
+    entry = f"- {at} {text}" if at else f"- {text}"
+    for i, ln in enumerate(lines):
+        if ln.strip() == "## Notes":
+            j = i + 1
+            while j < len(lines) and not lines[j].startswith("## "):
+                j += 1
+            while j > i + 1 and not lines[j - 1].strip():
+                j -= 1
+            lines.insert(j, entry)
+            break
+    else:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ["", "## Notes", entry]
+    _write(path, lines)
+    return None
+
 def apply_intent(intent: dict) -> str | None:
     """Apply one intent to the vault. Returns an error string or None."""
     vault = vault_path(intent["vault"])
@@ -369,10 +394,13 @@ def apply_intent(intent: dict) -> str | None:
         return None
     if os.path.isfile(path):
         lines = _read(path)
-    elif kind == "add":
+    elif kind in ("add", "note"):
+        # A capture before the day exists starts the day (template + carry).
         lines = start_lines(path, intent["day"])
     else:
         return f"no note for {intent['day']}"
+    if kind == "note":
+        return apply_note(path, lines, intent)
     if kind == "attach" and intent.get("fileUrl"):
         tmp = None
         try:
@@ -435,16 +463,19 @@ def _client():
     c.set_admin_auth(key)
     return c
 
-def _kick():
+def _kick(sources=("tasks",)):
     py = sys.executable
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    subprocess.run([py, os.path.join(root, "index.py"), "--source", "tasks",
-                    "--no-run-record"], check=False)
-    subprocess.run([py, os.path.join(root, "tools", "sync-convex.py"),
-                    "--source", "tasks"], check=False)
+    for src in sources:
+        subprocess.run([py, os.path.join(root, "index.py"), "--source", src,
+                        "--no-run-record"], check=False)
+    for src in sources:
+        subprocess.run([py, os.path.join(root, "tools", "sync-convex.py"),
+                        "--source", src], check=False)
 
 def drain(client, intents: list, kick: bool) -> int:
     applied = 0
+    noted = False
     for it in intents:
         err = apply_intent(it)
         client.mutation("today:applyIntent",
@@ -455,8 +486,10 @@ def drain(client, intents: list, kick: bool) -> int:
         print(f"{stamp} {it['day']} {what:6} {it['text'][:50]!r}{where} "
               f"-> {err or 'ok'}", flush=True)
         applied += not err
+        noted = noted or (not err and it.get("kind") == "note")
     if applied and kick:
-        _kick()
+        # Captures live in the note's ## Notes section — obsidian territory.
+        _kick(("tasks", "obsidian") if noted else ("tasks",))
     return applied
 
 def main(argv=None):

@@ -148,9 +148,11 @@ export function Today() {
   if (sheet === "digest") return <DigestSheet brief={brief} agenda={agenda} tasks={tasks} latest={latest}
     onBack={close} onOpen={openId} />;
   if (sheet.startsWith("x:")) return <Detail id={decodeURIComponent(sheet.slice(2))} onBack={() => history.back()} />;
-  if (sheet === "search") return <SearchSheet onBack={close} onOpen={openId} />;
-  if (sheet === "ask") return <AskSheet onBack={close} onOpen={openId} />;
-  if (sheet === "browse") return <BrowseSheet onBack={close} onOpen={openId} />;
+  // search/ask/browse live as tabs of History; old hashes land on their tab.
+  if (["history", "search", "ask", "browse"].includes(sheet))
+    return <HistorySheet initial={sheet === "history" ? "search" : sheet} onBack={close} onOpen={openId} />;
+  if (sheet === "capture") return <CaptureSheet day={day} intents={intents} onBack={close} />;
+  if (sheet === "settings") return <SettingsSheet onBack={close} />;
 
   const tiles: Record<string, JSX.Element> = {
     tasks: <TasksTile key="tasks" tasks={tasks} waiting={waiting} starting={starting}
@@ -164,17 +166,13 @@ export function Today() {
       <div className="daterow">
         <span>{dayLabel(day)} · {period(hour)}</span>
         <span>
-          <button className="lnk" onClick={() => open("search")}>search</button>{" · "}
-          <button className="lnk" onClick={() => open("ask")}>ask</button>{" · "}
-          <button className="lnk" onClick={() => open("browse")}>browse</button>{" · "}
+          <button className="lnk" onClick={() => open("history")}>history</button>{" · "}
           <button className="lnk" onClick={() => open("timers")}>timers</button>
         </span>
       </div>
       <TimersBar timers={timers} onOpen={() => open("timers")} />
       <div className="grid">{ORDER.map((id) => tiles[id])}</div>
-      <p className="muted small" style={{ textAlign: "center", marginTop: 18 }}>
-        <a href="/guide.html">how to use Oriel ›</a>
-      </p>
+      <CaptureFab day={day} onSheet={() => open("capture")} />
     </section>
   );
 }
@@ -821,7 +819,6 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
   useEffect(() => ringCheck(list));
   const now = Date.now();
   useRingTitle(list.some((t) => derive(t, now).st === "done"));
-  const alerts = useAlerts();
   const go = (label: string, durationMs: number, repeat = false, up = false) => {
     unlockAudio();
     void start({ label, durationMs, repeat: repeat || undefined, up: up || undefined }).catch(fail);
@@ -878,14 +875,6 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
         <button className={`cancelv ${rep ? "ron" : ""}`} onClick={() => setRep(!rep)}>repeat</button>
         <button className="go" onClick={custom}>start</button>
       </div>
-      <p className="muted small">
-        {alerts.state === "on" && "lock-screen alerts are on for this device"}
-        {alerts.state === "off" && (alerts.configured
-          ? <button className="lnk" onClick={() => void alerts.enable().catch(fail)}>enable lock-screen alerts</button>
-          : "lock-screen alerts aren't configured on the server")}
-        {alerts.state === "denied" && "notifications are blocked — allow them in Settings to get lock-screen alerts"}
-        {alerts.state === "unsupported" && "for lock-screen alerts, add Oriel to your home screen first"}
-      </p>
     </section>
   );
 }
@@ -983,11 +972,6 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
   const [busy, setBusy] = useState(false);
   const [t0, setT0] = useState(0);
   useTick(1000, busy);
-  const rstat = useQuery(api.reminders.status, {});
-  const setPref = useMutation(api.reminders.setPref);
-  const mintApproval = useMutation(api.oauth.approvalCode);
-  const [approval, setApproval] = useState<{ code: string; expiresAt: number } | null>(null);
-  useTick(1000, !!approval);
   const { push: fail, view: errView } = useErrors();
   const run = () => { setBusy(true); setT0(Date.now()); refresh({}).catch(fail).finally(() => setBusy(false)); };
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
@@ -1009,23 +993,6 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
         {brief.model} · {ago(brief.generatedAt)} · {((brief.ms ?? 0) / 1000).toFixed(0)} s{brief.note ? ` · ${brief.note}` : ""}
         {brief.citations.length === 0 ? " · no sources cited" : ` · ${brief.citations.length} sources`}</p>}
       <div className="cbar slim"><button disabled={busy} className={busy ? "pulse" : ""} onClick={run}>{busy ? "refreshing…" : "refresh now"}</button></div>
-      {rstat && (
-        <p className="muted small" style={{ marginTop: 14 }}>
-          {!rstat.subscribed
-            ? "for the morning digest push, enable lock-screen alerts in timers"
-            : rstat.digestPush
-              ? <>morning digest at 06:00 · <button className="lnk"
-                  onClick={() => void setPref({ name: "digestPush", value: false })}>on</button></>
-              : <>morning digest off · <button className="lnk"
-                  onClick={() => void setPref({ name: "digestPush", value: true })}>turn on</button></>}
-        </p>
-      )}
-      <p className="muted small">
-        {approval && approval.expiresAt > Date.now()
-          ? <>claude.ai code: <span className="mono" style={{ color: "#e8e8eb", fontSize: "1rem" }}>{approval.code}</span>
-              {" · "}{Math.max(0, Math.ceil((approval.expiresAt - Date.now()) / 1000))} s — enter it on the connect page</>
-          : <button className="lnk" onClick={() => void mintApproval({}).then(setApproval).catch(fail)}>connect claude.ai…</button>}
-      </p>
     </section>
   );
 }
@@ -1034,6 +1001,181 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
    (overlaps share the width), all-day events as chips above, a line for
    now. Tap a block for the reading view. */
 const HOUR_PX = 52;
+/* ── quick capture (wip/SPEC-quick-capture.md): the dashboard's + and
+   the capture sheet. A note is an intent the Mac appends under
+   "## Notes"; the sheet reads the intent queue itself — your words are
+   visible the instant they're queued. ── */
+const hhmmNow = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
+function CaptureComposer({ day, onDone, onCancel, fail }:
+  { day: string; onDone?: () => void; onCancel?: () => void; fail: (e: unknown) => void }) {
+  const capture = useMutation(api.today.capture);
+  const add = useMutation(api.today.add);
+  const [mode, setMode] = useState<"note" | "task">("note");
+  const [draft, setDraft] = useState("");
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) { onCancel?.(); return; }
+    (mode === "note" ? capture({ day, text, at: hhmmNow() }) : add({ day, text })).catch(fail);
+    setDraft(""); setMode("note"); onDone?.();
+  };
+  return (
+    <>
+      <textarea className="capin" autoFocus rows={2}
+        placeholder={mode === "note" ? "capture a thought…" : "new task…"}
+        value={draft} onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+          if (e.key === "Escape") onCancel?.();
+        }} />
+      <div className="vrow">
+        <button className={`vpill ${mode === "note" ? "on" : ""}`} onClick={() => setMode("note")}>✎ note</button>
+        <button className={`vpill ${mode === "task" ? "on" : ""}`} onClick={() => setMode("task")}>○ task</button>
+        {onCancel && <button className="cancelv" onClick={onCancel}>cancel</button>}
+        <button className="go" style={{ marginLeft: "auto" }} onClick={submit}>add</button>
+      </div>
+    </>
+  );
+}
+
+function CaptureFab({ day, onSheet }: { day: string; onSheet: () => void }) {
+  const [openP, setOpenP] = useState(false);
+  const { push: fail, view: errView } = useErrors();
+  if (!openP) return <button className="fab" aria-label="capture" onClick={() => setOpenP(true)}>+</button>;
+  return (
+    <>
+      <div className="veil" onClick={() => setOpenP(false)} />
+      <div className="cappanel">
+        {errView}
+        <CaptureComposer day={day} fail={fail}
+          onDone={() => setOpenP(false)} onCancel={() => setOpenP(false)} />
+        <p className="muted small" style={{ margin: "10px 0 0" }}>
+          <button className="lnk" onClick={onSheet}>today's captures ›</button></p>
+      </div>
+    </>
+  );
+}
+
+function CaptureSheet({ day, intents, onBack }:
+  { day: string; intents?: any[]; onBack: () => void }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const { push: fail, view: errView } = useErrors();
+  const notes = (intents ?? [])
+    .filter((i) => i.kind === "note" && i.day === day)
+    .sort((a, b) => a.requestedAt - b.requestedAt);
+  useTick(5000, notes.some((i) => !i.appliedAt && !i.error));
+  return (
+    <section className="tasks-sheet">
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
+        <span>✎ Capture · {dayLabel(day)}</span></div>
+      {errView}
+      {notes.filter((i) => i.error && !dismissed.has(i.id)).map((i) => (
+        <ErrBox key={i.id} onClose={() => setDismissed((d) => new Set(d).add(i.id))}>
+          couldn't save "{i.text}": {i.error}</ErrBox>))}
+      <p className="sect">TODAY</p>
+      {!notes.length && <p className="muted small">nothing captured yet today</p>}
+      {notes.filter((i) => !i.error).map((i) => {
+        const pending = !i.appliedAt;
+        const young = Date.now() - i.requestedAt < YOUNG_MS;
+        return (
+          <div key={i.id} className={`crow ${pending ? "pend" : ""}`}>
+            <span className="ct">{i.at ?? ""}</span>
+            <span className="cx">{i.text}</span>
+            {pending && <span className={`st ${young ? "pulse" : ""}`}>{young ? "adding…" : "queued"}</span>}
+          </div>
+        );
+      })}
+      <div style={{ marginTop: 16 }}>
+        <CaptureComposer day={day} fail={fail} />
+      </div>
+      <p className="muted small" style={{ marginTop: 12 }}>
+        notes land in today's note under "Notes"; tasks join the task list</p>
+    </section>
+  );
+}
+
+/* ── settings: every pref in one place (they used to squat in the
+   agenda/digest/timers footers) ── */
+declare const __BUILD__: string;
+
+function SettingsSheet({ onBack }: { onBack: () => void }) {
+  const alerts = useAlerts();
+  const rstat = useQuery(api.reminders.status, {});
+  const setPref = useMutation(api.reminders.setPref);
+  const mint = useMutation(api.oauth.approvalCode);
+  const [approval, setApproval] = useState<{ code: string; expiresAt: number } | null>(null);
+  useTick(1000, !!approval);
+  const { push: fail, view: errView } = useErrors();
+  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const toggle = (on: boolean, onClick: () => void) =>
+    <button className={`tog ${on ? "on" : ""}`} role="switch" aria-checked={on} onClick={onClick} />;
+  return (
+    <section>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>⚙ Settings</span></div>
+      {errView}
+      <p className="sect">NOTIFICATIONS</p>
+      <div className="srow">
+        <span>lock-screen alerts<span className="sub">
+          {alerts.state === "on" ? "on for this device"
+            : alerts.state === "denied" ? "blocked — allow notifications in system Settings"
+            : alerts.state === "unsupported" ? "add Oriel to your home screen first"
+            : alerts.configured ? "off" : "not configured on the server"}</span></span>
+        {alerts.state === "off" && alerts.configured &&
+          <button className="lnk" style={{ marginLeft: "auto" }}
+            onClick={() => void alerts.enable().catch(fail)}>enable</button>}
+        {alerts.state === "on" && <span className="val">on</span>}
+      </div>
+      {rstat && <>
+        <div className="srow"><span>event reminders<span className="sub">10 min before</span></span>
+          {toggle(rstat.remindEvents, () => void setPref({ name: "remindEvents", value: !rstat.remindEvents }).catch(fail))}</div>
+        <div className="srow"><span>morning digest<span className="sub">06:00</span></span>
+          {toggle(rstat.digestPush, () => void setPref({ name: "digestPush", value: !rstat.digestPush }).catch(fail))}</div>
+        <div className="srow"><span>notification times</span>
+          <span className="val">{tzLabel(rstat.timezone)}</span></div>
+        {deviceTz && deviceTz !== rstat.timezone &&
+          <p className="muted small"><button className="lnk"
+            onClick={() => void setPref({ name: "timezone", value: deviceTz }).catch(fail)}>
+            use device timezone ({deviceTz})</button></p>}
+      </>}
+      <p className="sect">CONNECTIONS</p>
+      <div className="srow">
+        {approval && approval.expiresAt > Date.now()
+          ? <>
+              <span>claude.ai code<span className="sub">enter it on the connect page</span></span>
+              <span className="val"><span className="codebox">{approval.code}</span>
+                {" · "}{Math.max(0, Math.ceil((approval.expiresAt - Date.now()) / 1000))} s</span>
+            </>
+          : <button className="lnk" onClick={() => void mint({}).then(setApproval).catch(fail)}>connect claude.ai…</button>}
+      </div>
+      <p className="sect">APP</p>
+      <div className="srow"><a className="lnk" href="/guide.html">how to use Oriel ›</a></div>
+      <p className="muted small" style={{ marginTop: 12 }}>build {__BUILD__}</p>
+    </section>
+  );
+}
+
+/* ── history: Search / Ask / Browse as tabs of one sheet; all three stay
+   mounted so each keeps its state while the sheet is open ── */
+function HistorySheet({ initial, onBack, onOpen }:
+  { initial: string; onBack: () => void; onOpen: (id: string) => void }) {
+  const [tab, setTab] = useState(initial);
+  return (
+    <section>
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>History</span></div>
+      <div className="cbar sbar htabs">
+        {(["search", "ask", "browse"] as const).map((t) =>
+          <button key={t} className={tab === t ? "sel" : ""} onClick={() => setTab(t)}>{t}</button>)}
+      </div>
+      <div className={tab === "search" ? "" : "offstage"}><SearchSheet bare onBack={onBack} onOpen={onOpen} /></div>
+      <div className={tab === "ask" ? "" : "offstage"}><AskSheet bare onBack={onBack} onOpen={onOpen} /></div>
+      <div className={tab === "browse" ? "" : "offstage"}><BrowseSheet bare onBack={onBack} onOpen={onOpen} /></div>
+    </section>
+  );
+}
+
 /* "America/Los_Angeles" → "Pacific"; anything else shows its city. */
 const tzLabel = (tz: string) =>
   tz === "America/Los_Angeles" ? "Pacific" : (tz.split("/").pop() ?? tz).replace(/_/g, " ");
@@ -1041,9 +1183,6 @@ const tzLabel = (tz: string) =>
 function AgendaSheet({ day, agenda, onBack, onOpen }:
   { day: string; agenda?: Item[]; onBack: () => void; onOpen: (id: string) => void }) {
   useTick(60_000, day === localDay());
-  const rstat = useQuery(api.reminders.status, {});
-  const setPref = useMutation(api.reminders.setPref);
-  const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const evs = (agenda ?? []).map((e) => ({ e, ...evTimes(e) }));
   const allDay = evs.filter((x) => x.allDay);
   const timed = evs.filter((x) => !x.allDay).sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -1108,22 +1247,6 @@ function AgendaSheet({ day, agenda, onBack, onOpen }:
               );
             })}
           </div>
-        </div>
-      )}
-      {rstat && (
-        <div className="muted small" style={{ marginTop: 14 }}>
-          {!rstat.subscribed
-            ? <p>for event reminders, enable lock-screen alerts in timers</p>
-            : rstat.remindEvents
-              ? <p>event reminders: 10 min before · <button className="lnk"
-                  onClick={() => void setPref({ name: "remindEvents", value: false })}>on</button></p>
-              : <p>event reminders off · <button className="lnk"
-                  onClick={() => void setPref({ name: "remindEvents", value: true })}>turn on</button></p>}
-          <p>notification times: {tzLabel(rstat.timezone)}
-            {deviceTz && deviceTz !== rstat.timezone && <>{" · "}<button className="lnk"
-              onClick={() => void setPref({ name: "timezone", value: deviceTz })}>
-              use device timezone ({deviceTz})</button></>}
-          </p>
         </div>
       )}
     </section>

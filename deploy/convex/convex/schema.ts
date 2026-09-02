@@ -10,7 +10,7 @@ import { authTables } from "@convex-dev/auth/server";
 export const want = v.union(v.literal("done"), v.literal("open"));
 export const intentKind = v.union(
   v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"), v.literal("attach"),
-  v.literal("start"),
+  v.literal("start"), v.literal("note"),
   v.literal("routineAdd"), v.literal("routineEdit"), v.literal("routineDelete"));
 
 export default defineSchema({
@@ -43,6 +43,7 @@ export default defineSchema({
     want: v.optional(want),         // toggle only
     newText: v.optional(v.string()),  // edit only
     days: v.optional(v.array(v.string())),  // routineAdd/Edit: schedule tags; [] = daily
+    at: v.optional(v.string()),       // note: the phone's local HH:MM at capture
     parent: v.optional(v.string()),   // set = the intent is about a subtask of this task
     prior: v.optional(v.any()),       // {subtasks, notes, attachments} before the change (revert)
     storageId: v.optional(v.id("_storage")),  // attach: the uploaded file, deleted once applied
