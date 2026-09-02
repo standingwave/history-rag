@@ -7,11 +7,16 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
 
-export const want = v.union(v.literal("done"), v.literal("open"));
+export const want = v.union(
+  v.literal("done"), v.literal("open"),
+  // vault-list states (listSet)
+  v.literal("need"), v.literal("got"), v.literal("cat"));
 export const intentKind = v.union(
   v.literal("toggle"), v.literal("add"), v.literal("edit"), v.literal("delete"), v.literal("attach"),
   v.literal("start"), v.literal("note"),
-  v.literal("routineAdd"), v.literal("routineEdit"), v.literal("routineDelete"));
+  v.literal("routineAdd"), v.literal("routineEdit"), v.literal("routineDelete"),
+  v.literal("listSet"), v.literal("listAdd"), v.literal("listEdit"),
+  v.literal("listRemove"), v.literal("listReset"), v.literal("listCreate"));
 
 export default defineSchema({
   ...authTables,
@@ -44,6 +49,9 @@ export default defineSchema({
     newText: v.optional(v.string()),  // edit only
     days: v.optional(v.array(v.string())),  // routineAdd/Edit: schedule tags; [] = daily
     at: v.optional(v.string()),       // note: the phone's local HH:MM at capture
+    path: v.optional(v.string()),     // list*: the note inside Lists/
+    words: v.optional(v.object({      // listCreate: the generated wording
+      need: v.string(), got: v.string(), done: v.string() })),
     parent: v.optional(v.string()),   // set = the intent is about a subtask of this task
     prior: v.optional(v.any()),       // {subtasks, notes, attachments} before the change (revert)
     storageId: v.optional(v.id("_storage")),  // attach: the uploaded file, deleted once applied

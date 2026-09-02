@@ -125,6 +125,41 @@ def test_template_entries_become_routine_chunks(vault, monkeypatch):
     monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "false")
     assert cid not in {c[0] for c in tasks.iter_chunks()}
 
+def test_list_notes_become_list_chunks(vault, monkeypatch):
+    (vault / "Lists").mkdir()
+    (vault / "Lists" / "Groceries.md").write_text(
+        "---\nwords: to get / got / done shopping\n---\n"
+        "- [ ] milk\n- [x] butter\n\n## Catalog\n- rice\n- [ ] hot sauce\n")
+    (vault / "Lists" / "Empty.md").write_text("")
+    chunks = {c[0]: c for c in tasks.iter_chunks()}
+    # marker chunk carries the words; empty lists still exist
+    mid = tasks.list_note_id("Documents", "Lists/Groceries.md")
+    _, mtext, mrec = chunks[mid]
+    assert mtext == "List: Groceries"
+    assert mrec["meta"]["listNote"] is True
+    assert mrec["meta"]["words"] == {"need": "to get", "got": "got", "done": "done shopping"}
+    assert tasks.list_note_id("Documents", "Lists/Empty.md") in chunks
+    # items: state by section; catalog accepts stray checkboxes too
+    states = {}
+    for text in ("milk", "butter", "rice", "hot sauce"):
+        cid = tasks.list_chunk_id("Documents", "Lists/Groceries.md", text)
+        _, ctext, rec = chunks[cid]
+        assert ctext == f"Groceries list: {text}"
+        states[text] = rec["meta"]["state"]
+    assert states == {"milk": "need", "butter": "got", "rice": "cat", "hot sauce": "cat"}
+    # rides the routine gate
+    monkeypatch.setenv("CLAUDE_RAG_TASKS_ROUTINE", "false")
+    assert mid not in {c[0] for c in tasks.iter_chunks()}
+
+def test_list_words_fall_back_to_plain(vault):
+    (vault / "Lists").mkdir(exist_ok=True)
+    (vault / "Lists" / "Chores.md").write_text("- [ ] vacuum\n")
+    words, items = tasks.parse_list((vault / "Lists" / "Chores.md").read_text())
+    assert words == tasks.PLAIN_WORDS
+    assert items == [{"text": "vacuum", "state": "need", "line": 0}]
+    words, _ = tasks.parse_list("---\nwords: broken\n---\n")
+    assert words == tasks.PLAIN_WORDS
+
 def test_secret_bearing_task_dropped(vault):
     assert not any("API_KEY" in c[1] for c in tasks.iter_chunks())
 

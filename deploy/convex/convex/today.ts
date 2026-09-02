@@ -11,7 +11,7 @@ import {
 } from "./_generated/server";
 import { requireUser } from "./auth";
 import { want } from "./schema";
-import { taskChunkId, routineChunkId, normTask } from "./ids";
+import { taskChunkId, routineChunkId, listChunkId, normTask } from "./ids";
 import { bump } from "./sync";
 
 function pub(row: {
@@ -43,7 +43,7 @@ export const latestTaskDay = query({
     const row = await ctx.db
       .query("items")
       .withIndex("by_source_timestamp", (q) => q.eq("source", "tasks"))
-      .filter((q) => q.neq(q.field("day"), "routine"))
+      .filter((q) => q.and(q.neq(q.field("day"), "routine"), q.neq(q.field("day"), "list")))
       .order("desc")
       .first();
     return row?.day ?? null;
@@ -491,7 +491,7 @@ export const intents = query({
       id: r._id, chunkId: r.chunkId, kind: r.kind ?? "toggle", day: r.day, text: r.text, want: r.want ?? null,
       newId: r.kind === "edit" && !r.parent ? taskChunkId(r.vault, r.newText ?? "")
         : r.kind === "routineEdit" && r.newText ? routineChunkId(r.vault, r.newText) : null,
-      parent: r.parent ?? null, at: r.at ?? null,
+      parent: r.parent ?? null, at: r.at ?? null, path: r.path ?? null,
       requestedAt: r.requestedAt, appliedAt: r.appliedAt ?? null, error: r.error ?? null,
     }));
   },
@@ -511,7 +511,7 @@ export const pendingIntents = internalQuery({
       fileUrl: urls[i],
       id: r._id, kind: r.kind ?? "toggle", chunkId: r.chunkId, day: r.day, vault: r.vault,
       text: r.text, want: r.want ?? null, newText: r.newText ?? null, parent: r.parent ?? null,
-      days: r.days ?? null, at: r.at ?? null,
+      days: r.days ?? null, at: r.at ?? null, path: r.path ?? null, words: r.words ?? null,
       requestedAt: r.requestedAt, storageId: r.storageId ?? null,
     }));
   },
@@ -563,6 +563,32 @@ export const applyIntent = internalMutation({
       case "routineDelete":
         if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
         break;
+      case "listSet":
+        if (row) await ctx.db.patch(row._id,
+          { pending: false, meta: { ...row.meta, ...(intent.prior ?? {}) } });
+        break;
+      case "listAdd":
+      case "listCreate":
+        if (row?.pending) { await ctx.db.delete(row._id); await bump(ctx, "tasks", -1); }
+        break;
+      case "listEdit": {
+        const fresh = await byChunkId(ctx,
+          listChunkId(intent.vault, intent.path ?? "", intent.newText ?? ""));
+        if (fresh?.pending) { await ctx.db.delete(fresh._id); await bump(ctx, "tasks", -1); }
+        if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
+        break;
+      }
+      case "listRemove":
+        if (row) await ctx.db.patch(row._id, { pending: false, hidden: false });
+        break;
+      case "listReset": {
+        const ids: string[] = (intent.prior as { got?: string[] })?.got ?? [];
+        for (const cid of ids) {
+          const r = await byChunkId(ctx, cid);
+          if (r) await ctx.db.patch(r._id, { pending: false, meta: { ...r.meta, state: "got" } });
+        }
+        break;
+      }
     }
   },
 });

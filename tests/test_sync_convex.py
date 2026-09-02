@@ -39,6 +39,12 @@ def test_shape_row():
     assert it["chunkId"] == "tasks:abc" and it["day"] and it["month"] == it["day"][:7]
     assert it["embedding"] == [0.1, 0.2] and it["meta"] == {"done": False}
 
+def test_shape_list_gets_sentinel_day():
+    it = sc.shape(("tasks:l1", "tasks", "2026-09-02T19:00:00+00:00",
+                   "Lists/Groceries.md#1", "Groceries list: milk",
+                   json.dumps({"list": "Groceries", "state": "need"})), None)
+    assert it["day"] == "list" and it["month"] == ""
+
 def test_shape_routine_gets_sentinel_day():
     it = sc.shape(("tasks:r1", "tasks", "2026-08-31T19:00:00+00:00",
                    "Templates/Daily Tasks Template.md#0", "Routine: gym",

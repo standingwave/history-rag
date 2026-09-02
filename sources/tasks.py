@@ -43,6 +43,80 @@ def _index_routine() -> bool:
     v = config.get("tasks", "index_routine", "CLAUDE_RAG_TASKS_ROUTINE", True)
     return str(v).lower() in ("1", "true", "yes") if isinstance(v, str) else bool(v)
 
+# ── vault lists (wip/SPEC-vault-lists.md): notes in Lists/, three item
+# states — needed/got as checkboxes above "## Catalog", catalog as plain
+# bullets below it. Wording lives in one frontmatter line. ──
+LISTS_DIR = "Lists"
+PLAIN_WORDS = {"need": "to do", "got": "done", "done": "reset"}
+WORDS_RE = re.compile(r"^words:\s*(.+?)\s*/\s*(.+?)\s*/\s*(.+?)\s*$")
+LIST_ITEM_RE = re.compile(r"^[-*] +\[( |x|X)\] +(.*\S)\s*$")
+LIST_BULLET_RE = re.compile(r"^[-*] +(?!\[[ xX]\] )(.*\S)\s*$")
+
+def parse_list(body: str):
+    """(words, items) for a Lists/ note. Checkbox lines above `## Catalog`
+    are need/got; below it, bullets (checkbox or plain) are catalog.
+    Malformed/absent frontmatter words fall back to plain."""
+    lines = body.split("\n")
+    words = dict(PLAIN_WORDS)
+    start = 0
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                start = j + 1
+                break
+            m = WORDS_RE.match(lines[j].strip())
+            if m:
+                words = {"need": m.group(1), "got": m.group(2), "done": m.group(3)}
+    items, in_cat = [], False
+    for n in range(start, len(lines)):
+        ln = lines[n]
+        if ln.strip().lower() == "## catalog":
+            in_cat = True
+            continue
+        if in_cat:
+            m = LIST_ITEM_RE.match(ln) or LIST_BULLET_RE.match(ln)
+            if m:
+                items.append({"text": m.groups()[-1].strip(), "state": "cat", "line": n})
+        else:
+            m = LIST_ITEM_RE.match(ln)
+            if m:
+                items.append({"text": m.group(2).strip(),
+                              "state": "got" if m.group(1) in "xX" else "need",
+                              "line": n})
+    return words, items
+
+def iter_lists(vaults=None):
+    """(vault, rel, name, mtime_iso, words, items) per Lists/ note."""
+    for vault in (obsidian._vaults() if vaults is None else vaults):
+        d = os.path.join(vault, LISTS_DIR)
+        try:
+            names = sorted(os.listdir(d))
+        except OSError:
+            continue
+        vname = os.path.basename(vault.rstrip("/"))
+        for fn in names:
+            if not fn.endswith(".md"):
+                continue
+            path = os.path.join(d, fn)
+            try:
+                with open(path, errors="replace") as f:
+                    body = f.read()
+            except OSError:
+                continue
+            words, items = parse_list(body)
+            yield (vname, f"{LISTS_DIR}/{fn}", fn[:-3],
+                   obsidian._mtime_iso(path), words, items)
+
+def list_chunk_id(vname: str, rel: str, text: str) -> str:
+    """Per-item id, scoped to the list note (ids.ts mirrors)."""
+    return "tasks:" + hashlib.sha256(
+        f"{vname}\0list\0{rel}\0{_norm(text)}".encode()).hexdigest()[:26]
+
+def list_note_id(vname: str, rel: str) -> str:
+    """The list's marker chunk: empty lists still exist (ids.ts mirrors)."""
+    return "tasks:" + hashlib.sha256(
+        f"{vname}\0listnote\0{rel}".encode()).hexdigest()[:26]
+
 def _width(ws: str) -> int:
     return len(ws.expandtabs(4))
 
@@ -160,6 +234,28 @@ def iter_chunks(vaults=None):
                     "notes": t["notes"],
                 },
             }
+    if routine_ok:
+        for vname, rel, name, ts, words, litems in iter_lists(vaults):
+            if SECRET_RE.search(name):
+                continue
+            yield list_note_id(vname, rel), f"List: {name}"[:MAX_CHARS], {
+                "source": "tasks",
+                "timestamp": ts,
+                "location": f"{rel}#0",
+                "meta": {"vault": vname, "listNote": True, "list": name,
+                         "path": rel, "words": words},
+            }
+            for it in litems:
+                if not it["text"] or SECRET_RE.search(it["text"]):
+                    continue
+                yield (list_chunk_id(vname, rel, it["text"]),
+                       f"{name} list: {it['text']}"[:MAX_CHARS], {
+                    "source": "tasks",
+                    "timestamp": ts,
+                    "location": f"{rel}#{it['line']}",
+                    "meta": {"vault": vname, "list": name, "path": rel,
+                             "state": it["state"], "order": it["line"]},
+                })
     for (vname, norm), entry in sorted(life.items()):
         day, t = entry["latest"]
         if t["section"] == ROUTINE and not routine_ok:

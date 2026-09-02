@@ -302,3 +302,85 @@ def test_attach_file_copies_into_the_vault(tmp_path, monkeypatch):
     err = ap.attach_file(str(v), str(v / "2026-08-28.md"), "2026-08-28", "workout", "IMG 1.JPG", str(src))
     assert err is None and (v / "Attachments" / "2026-08-28 IMG-1-2.jpg").exists()
     assert "parent task not found" in ap.attach_file(str(v), str(v / "2026-08-28.md"), "2026-08-28", "nope", "a.png", str(src))
+
+
+# ── vault lists (wip/SPEC-vault-lists.md) ──
+
+GROC = ["---", "words: to get / got / done shopping", "---",
+        "- [ ] milk", "- [x] butter", "",
+        "## Catalog", "- rice", "- hot sauce"]
+
+def _mklist(tmp_path, monkeypatch, lines=GROC):
+    v = tmp_path / "Documents"; (v / "Lists").mkdir(parents=True)
+    (v / "Lists" / "Groceries.md").write_text("\n".join(lines) + "\n")
+    monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
+    return v
+
+def _lst(v):
+    return (v / "Lists" / "Groceries.md").read_text().split("\n")
+
+def _go(v, **kw):
+    return ap.apply_intent({"vault": "Documents", "day": "list",
+                            "path": "Lists/Groceries.md", **kw})
+
+def test_list_set_transitions(tmp_path, monkeypatch):
+    v = _mklist(tmp_path, monkeypatch)
+    assert _go(v, kind="listSet", text="milk", want="got") is None
+    assert "- [x] milk" in _lst(v)
+    assert _go(v, kind="listSet", text="rice", want="need") is None
+    body = _lst(v)
+    assert "- [ ] rice" in body and body.index("- [ ] rice") < body.index("## Catalog")
+    # got -> cat lands at the catalog head (frecency)
+    assert _go(v, kind="listSet", text="butter", want="cat") is None
+    body = _lst(v)
+    assert body[body.index("## Catalog") + 1] == "- butter"
+    # already in state is a quiet no-op; unknown item errors
+    assert _go(v, kind="listSet", text="hot sauce", want="cat") is None
+    assert "not found" in _go(v, kind="listSet", text="quinoa", want="need")
+
+def test_list_add_dedupes_and_reset_shelves(tmp_path, monkeypatch):
+    v = _mklist(tmp_path, monkeypatch)
+    assert _go(v, kind="listAdd", text="  frozen   peas ") is None
+    body = _lst(v)
+    assert "- [ ] frozen peas" in body
+    assert body.index("- [ ] frozen peas") < body.index("## Catalog")
+    assert _go(v, kind="listAdd", text="RICE") == "already on the list"
+    # reset: got items move to the catalog head, needed stay put
+    assert _go(v, kind="listSet", text="frozen peas", want="got") is None
+    assert _go(v, kind="listReset") is None
+    body = _lst(v)
+    cat = body.index("## Catalog")
+    assert body[cat + 1:cat + 3] == ["- butter", "- frozen peas"]
+    assert "- [ ] milk" in body[:cat] and not any(x.startswith("- [x]") for x in body[:cat])
+
+def test_list_edit_remove_and_create(tmp_path, monkeypatch):
+    v = _mklist(tmp_path, monkeypatch)
+    assert _go(v, kind="listEdit", text="milk", newText="oat milk") is None
+    assert "- [ ] oat milk" in _lst(v)
+    assert _go(v, kind="listEdit", text="oat milk", newText="rice") == \
+        "an item with that text already exists"
+    assert _go(v, kind="listRemove", text="hot sauce") is None
+    assert not any("hot sauce" in x for x in _lst(v))
+    err = ap.apply_intent({"vault": "Documents", "day": "list", "kind": "listCreate",
+                           "text": "Camping", "words": {"need": "to pack", "got": "packed",
+                                                        "done": "trip done"}})
+    assert err is None
+    body = (v / "Lists" / "Camping.md").read_text()
+    assert body.startswith("---\nwords: to pack / packed / trip done\n---")
+    assert "## Catalog" in body
+    assert "already exists" in ap.apply_intent(
+        {"vault": "Documents", "day": "list", "kind": "listCreate", "text": "Camping"})
+
+def test_list_path_traversal_refused(tmp_path, monkeypatch):
+    v = _mklist(tmp_path, monkeypatch)
+    for bad in ("Lists/../2026-08-28.md", "../outside.md", "Templates/x.md",
+                "Lists/sub/dir.md", ""):
+        err = _go(v, kind="listSet", text="milk", want="got", path=bad)
+        assert err and "bad list path" in err, bad
+    # creation sanitizes hostile names into Lists/ instead of escaping it
+    assert ap.apply_intent({"vault": "Documents", "day": "list",
+                            "kind": "listCreate", "text": "../evil"}) is None
+    assert not (tmp_path / "Documents" / "evil.md").exists()
+    assert (tmp_path / "Documents" / "Lists" / "-evil.md").exists()
+    assert "bad list name" in ap.apply_intent(
+        {"vault": "Documents", "day": "list", "kind": "listCreate", "text": "  "})

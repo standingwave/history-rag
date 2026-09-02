@@ -141,8 +141,12 @@ export function Today() {
   const openId = (id: string) => open(`x:${encodeURIComponent(id)}`);
 
   if (sheet === "tasks") return <TasksSheet day={day} tasks={tasks} latest={latest} onBack={close}
-    onRoutines={() => open("routines")} />;
+    onRoutines={() => open("routines")} onLists={() => open("lists")} />;
   if (sheet === "routines") return <RoutinesSheet onBack={() => history.back()} />;
+  if (sheet === "lists") return <ListsSheet onBack={() => history.back()}
+    onOpen={(p) => open(`list:${encodeURIComponent(p)}`)} />;
+  if (sheet.startsWith("list:"))
+    return <VaultListSheet path={decodeURIComponent(sheet.slice(5))} onBack={() => history.back()} />;
   if (sheet === "timers") return <TimersSheet timers={timers} onBack={close} />;
   if (sheet === "agenda") return <AgendaSheet day={day} agenda={agenda} onBack={close} onOpen={openId} />;
   if (sheet === "digest") return <DigestSheet brief={brief} agenda={agenda} tasks={tasks} latest={latest}
@@ -424,8 +428,9 @@ const KIND_VERB: Record<string, string> = {
   routineAdd: "add routine", routineEdit: "edit routine", routineDelete: "delete routine",
 };
 
-function TasksSheet({ day, tasks, latest, onBack, onRoutines }:
-  { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void; onRoutines: () => void }) {
+function TasksSheet({ day, tasks, latest, onBack, onRoutines, onLists }:
+  { day: string; tasks?: Item[]; latest?: string | null; onBack: () => void;
+    onRoutines: () => void; onLists: () => void }) {
   const toggle = useMutation(api.today.toggle);
   const startDay = useMutation(api.today.startDay);
   const routineAdd = useMutation(api.today.routineAdd);
@@ -544,7 +549,8 @@ function TasksSheet({ day, tasks, latest, onBack, onRoutines }:
       )}
       {routine.length > 0 && <p className="sect">ROUTINE</p>}
       {routine.map((t) => row(t, true))}
-      <p><button className="lnk" onClick={onRoutines}>routines ›</button></p>
+      <p><button className="lnk" onClick={onRoutines}>routines ›</button>{" · "}
+        <button className="lnk" onClick={onLists}>lists ›</button></p>
       {vault && <p><a href={`obsidian://open?vault=${encodeURIComponent(vault)}&file=${day}`}>open today's note in Obsidian ↗</a></p>}
       {!inputOpen && <button className="fab" aria-label="add a task" onClick={() => { setActive(null); setComposing(true); }}>+</button>}
     </section>
@@ -875,6 +881,205 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
         <button className={`cancelv ${rep ? "ron" : ""}`} onClick={() => setRep(!rep)}>repeat</button>
         <button className="go" onClick={custom}>start</button>
       </div>
+    </section>
+  );
+}
+
+/* ── vault lists (wip/SPEC-vault-lists.md): notes in Lists/, three item
+   states. The list you shop from shows only what you need; the catalog
+   waits below, filtered by the add box, most-recently-shelved first. ── */
+type ListWords = { need: string; got: string; done: string };
+const LIST_CAT_CAP = 12;
+
+function ListsSheet({ onBack, onOpen }: { onBack: () => void; onOpen: (path: string) => void }) {
+  const data = useQuery(api.lists.lists, {});
+  const create = useMutation(api.lists.create);
+  const vocab = useAction(api.lists.vocab);
+  const { push: fail, view: errView } = useErrors();
+  const [composing, setComposing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [words, setWords] = useState<ListWords | null>(null);
+  const [thinking, setThinking] = useState(false);
+  const genId = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Debounced wording generation as the name is typed; stale replies drop.
+  const gen = (name: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    genId.current++;
+    if (!name.trim()) { setWords(null); setThinking(false); return; }
+    timer.current = setTimeout(() => {
+      const id = ++genId.current;
+      setThinking(true);
+      vocab({ name: name.trim() })
+        .then((w) => { if (id === genId.current) { setThinking(false); setWords(w); } })
+        .catch(() => { if (id === genId.current) { setThinking(false); setWords(null); } });
+    }, 500);
+  };
+  const submit = () => {
+    const n = nameDraft.trim();
+    if (!n) { setComposing(false); return; }
+    create({ name: n, words: words ?? undefined }).catch(fail);
+    setNameDraft(""); setWords(null); setThinking(false); setComposing(false);
+  };
+  const list = data ?? [];
+  return (
+    <section className="tasks-sheet">
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button>
+        <span>☰ Lists · {list.length}</span></div>
+      {errView}
+      {!data && <Skeleton widths={[70, 55, 62]} style={{ margin: "8px 0" }} />}
+      {data && !list.length && <p className="muted">no lists yet — a list is a note in the vault's Lists folder</p>}
+      {list.map((l) => (
+        <button key={l.path} className="lirow" onClick={() => onOpen(l.path)}>
+          <span className="linm">{l.name}<span className="lisub">{l.path}</span></span>
+          <span className={`licnt ${l.pending ? "pulse" : ""}`}>
+            {l.pending ? "creating…"
+              : l.need ? `${l.need} ${l.words.need}`
+              : l.got ? `✓ all ${l.words.got}`
+              : l.cat ? `${l.cat} shelved` : "empty"}</span>
+          <span className="lichev">›</span>
+        </button>
+      ))}
+      {composing && (
+        <div style={{ marginTop: 14 }}>
+          <div className="trow composer">
+            <span className="glyph">☰</span>
+            <input autoFocus placeholder="list name…" value={nameDraft}
+              onChange={(e) => { setNameDraft(e.target.value); gen(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") setComposing(false); }} />
+            <button className="go" onClick={submit}>create</button>
+            <button className="cancelv" onClick={() => setComposing(false)}>cancel</button>
+          </div>
+          <p className="muted small" style={{ margin: "8px 0 0 26px" }}>
+            {thinking ? <span className="pulse" style={{ color: "#facc15" }}>naming the verbs…</span>
+              : words ? <>wording: <b style={{ color: "#e8e8eb" }}>{words.need}</b> · <b style={{ color: "#e8e8eb" }}>{words.got}</b> · <b style={{ color: "#e8e8eb" }}>{words.done}</b>
+                  {" "}<button className="lnk" onClick={() => gen(nameDraft)}>↻</button>{" "}
+                  <button className="lnk" style={{ color: "#a6a6af" }} onClick={() => setWords(null)}>plain</button></>
+              : "wording: plain (to do · done · reset) — generated from the name as you type"}
+          </p>
+        </div>
+      )}
+      {!composing && <button className="fab" aria-label="new list" onClick={() => setComposing(true)}>+</button>}
+    </section>
+  );
+}
+
+function VaultListSheet({ path, onBack }: { path: string; onBack: () => void }) {
+  const data = useQuery(api.lists.items, { path });
+  const setSt = useMutation(api.lists.setState);
+  const addIt = useMutation(api.lists.addItem);
+  const editIt = useMutation(api.lists.editItem);
+  const removeIt = useMutation(api.lists.removeItem);
+  const resetL = useMutation(api.lists.reset);
+  const { push: fail, view: errView } = useErrors();
+  const [draft, setDraft] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [active, setActive] = useState<{ id: string; mode: "acts" | "edit" | "delete" } | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const items = data?.items ?? [];
+  const words = data?.words ?? { need: "to do", got: "done", done: "reset" };
+  const need = items.filter((i) => i.state === "need");
+  const got = items.filter((i) => i.state === "got");
+  const q = draft.trim().toLowerCase();
+  const catAll = items.filter((i) => i.state === "cat");
+  let cat = q ? catAll.filter((i) => i.text.toLowerCase().includes(q)) : catAll;
+  const capped = !q && !showAll && cat.length > LIST_CAT_CAP;
+  if (capped) cat = cat.slice(0, LIST_CAT_CAP);
+  const submit = () => {
+    const t = draft.trim();
+    if (!t) return;
+    addIt({ path, text: t }).catch(fail);
+    setDraft("");
+  };
+  const row = (i: { id: string; text: string; state: string; pending: boolean }) => {
+    const open = active?.id === i.id;
+    if (open && active!.mode === "edit") return (
+      <div key={i.id} className="trow"><div className="tline">
+        <span className="glyph">{i.state === "got" ? "✓" : "○"}</span>
+        <input autoFocus value={editDraft} onChange={(e) => setEditDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { const t = editDraft.trim();
+              if (t && t !== i.text) editIt({ id: i.id, newText: t }).catch(fail); setActive(null); }
+            if (e.key === "Escape") setActive(null);
+          }} />
+        <button className="go" onClick={() => { const t = editDraft.trim();
+          if (t && t !== i.text) editIt({ id: i.id, newText: t }).catch(fail); setActive(null); }}>save</button>
+        <button className="cancelv" onClick={() => setActive(null)}>✕</button>
+      </div></div>
+    );
+    const tap = () => {
+      if (i.pending) return;
+      const want = i.state === "cat" ? "need" : i.state === "need" ? "got" : "need";
+      void setSt({ id: i.id, want }).catch(fail);
+    };
+    return (
+      <div key={i.id} className={`trow ${i.state === "got" ? "done" : ""} ${i.state === "cat" ? "catrow" : ""} ${i.pending ? "pending" : ""}`}>
+        <div className="tline">
+          <button className={`glyph ${i.pending ? "pulse" : ""}`} onClick={tap}>
+            {i.state === "got" ? "✓" : i.state === "cat" ? "+" : "○"}</button>
+          <span className="ttext" onClick={i.state === "cat" ? tap : undefined}
+            style={i.state === "cat" ? { cursor: "pointer" } : undefined}>{i.text}</span>
+          {i.pending && <span className="small pulse" style={{ color: "#facc15" }}>syncing…</span>}
+          {!i.pending && <button className={`more ${open ? "on" : ""}`} aria-label="actions"
+            onClick={() => setActive(open ? null : { id: i.id, mode: "acts" })}>…</button>}
+        </div>
+        {open && active!.mode === "acts" && (
+          <div className="cbar">
+            <button onClick={() => { setEditDraft(i.text); setActive({ id: i.id, mode: "edit" }); }}>edit</button>
+            {i.state !== "cat" && <button onClick={() => { void setSt({ id: i.id, want: "cat" }).catch(fail); setActive(null); }}>shelve</button>}
+            <button className="danger" onClick={() => setActive({ id: i.id, mode: "delete" })}>delete</button>
+            <button onClick={() => setActive(null)}>✕</button>
+          </div>
+        )}
+        {open && active!.mode === "delete" && (
+          <div className="confirm">delete "{i.text}" from the list:
+            <button className="yes" onClick={() => { void removeIt({ id: i.id }).catch(fail); setActive(null); }}>Yes</button>
+            <button className="no" onClick={() => setActive(null)}>No</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+  return (
+    <section className="tasks-sheet">
+      <div className="daterow"><button className="lnk" onClick={onBack}>‹ lists</button>
+        <span>{data?.name ?? "…"}</span></div>
+      {errView}
+      {!data && <Skeleton widths={[70, 55, 62]} style={{ margin: "8px 0" }} />}
+      {data && (
+        <>
+          <div className="lhdr">
+            <span className="lcount">{need.length ? `${need.length} ${words.need}`
+              : got.length ? `✓ all ${words.got}` : "nothing needed"}</span>
+            {got.length > 0 && !confirming &&
+              <button className="lnk" onClick={() => setConfirming(true)}>{words.done}</button>}
+          </div>
+          {confirming && (
+            <div className="confirm">{words.done} — shelve everything {words.got}?
+              <button className="yes" onClick={() => { void resetL({ path }).catch(fail); setConfirming(false); }}>Yes</button>
+              <button className="no" onClick={() => setConfirming(false)}>No</button>
+            </div>
+          )}
+          <p className="sect">{words.need.toUpperCase()}</p>
+          {need.length ? need.map(row)
+            : <p className="muted small">nothing {words.need} — tap the catalog below</p>}
+          {got.length > 0 && <p className="sect">{words.got.toUpperCase()}</p>}
+          {got.map(row)}
+          <div className="trow composer" style={{ marginTop: 10 }}>
+            <span className="glyph">+</span>
+            <input placeholder={`${words.need}… (filters the catalog)`} value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+            <button className="go" onClick={submit}>add</button>
+          </div>
+          <p className="sect">{q ? `CATALOG · matching "${q}"` : "CATALOG · tap to need · recent first"}</p>
+          {cat.map(row)}
+          {capped && <p><button className="lnk" onClick={() => setShowAll(true)}>show all {catAll.length} ›</button></p>}
+          {q && !cat.length && <p className="muted small">no catalog match — add creates "{draft.trim()}"</p>}
+          {!q && !catAll.length && <p className="muted small">the catalog fills as you {words.done.split(" ")[0]} — {words.got} items shelve here</p>}
+        </>
+      )}
     </section>
   );
 }

@@ -64,3 +64,11 @@ export function taskChunkId(vault: string, text: string): string {
 export function routineChunkId(vault: string, text: string): string {
   return "tasks:" + sha256Hex(`${vault}\0routine\0${normTask(text)}`).slice(0, 26);
 }
+
+/* Vault-list ids (sources/tasks.py list_chunk_id / list_note_id mirror). */
+export function listChunkId(vault: string, path: string, text: string): string {
+  return "tasks:" + sha256Hex(`${vault}\0list\0${path}\0${normTask(text)}`).slice(0, 26);
+}
+export function listNoteId(vault: string, path: string): string {
+  return "tasks:" + sha256Hex(`${vault}\0listnote\0${path}`).slice(0, 26);
+}

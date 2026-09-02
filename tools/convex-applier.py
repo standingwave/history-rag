@@ -23,7 +23,7 @@ Run:    ~/.claude/rag-venv/bin/python tools/convex-applier.py [--once] [--kick]
 Config: [convex] url, deploy_key_env, tasks_script
         [obsidian] vaults (to resolve the intent's vault name to a path)
 """
-import argparse, importlib.util, os, subprocess, sys, time
+import argparse, importlib.util, os, re, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -379,6 +379,138 @@ def apply_note(path: str, lines: list, intent: dict) -> str | None:
     _write(path, lines)
     return None
 
+# ── vault lists (wip/SPEC-vault-lists.md): one note, three states —
+# checkboxes above "## Catalog" (need/got), bullets under it (catalog).
+# Every edit matches items by normalized text within the one note. ──
+LIST_ITEM_RE = re.compile(r"^[-*] +\[( |x|X)\] +(.*\S)\s*$")
+LIST_BULLET_RE = re.compile(r"^[-*] +(?!\[[ xX]\] )(.*\S)\s*$")
+
+def _list_scan(lines):
+    """(fm_end, cat_head, items); items are (line_idx, state, text)."""
+    fm_end = 0
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                fm_end = j + 1
+                break
+    cat_head, items = None, []
+    for i in range(fm_end, len(lines)):
+        ln = lines[i]
+        if cat_head is None and ln.strip().lower() == "## catalog":
+            cat_head = i
+            continue
+        if cat_head is None:
+            m = LIST_ITEM_RE.match(ln)
+            if m:
+                items.append((i, "got" if m.group(1) in "xX" else "need",
+                              m.group(2).strip()))
+        else:
+            m = LIST_ITEM_RE.match(ln) or LIST_BULLET_RE.match(ln)
+            if m:
+                items.append((i, "cat", m.groups()[-1].strip()))
+    return fm_end, cat_head, items
+
+def _insert_top(lines, entry):
+    """Into the current-run section: after its last item, else just above
+    the catalog heading (skipping the blank that precedes it)."""
+    fm, cat, items = _list_scan(lines)
+    top = [i for i, s, _ in items if s != "cat"]
+    if top:
+        pos = top[-1] + 1
+    else:
+        pos = cat if cat is not None else len(lines)
+        while pos > fm and not lines[pos - 1].strip():
+            pos -= 1
+    lines.insert(pos, entry)
+
+def _insert_catalog_top(lines, entry):
+    """Catalog head = file-encoded frecency (recent buys stay near the
+    surface); creates the section when the note lacks one."""
+    _, cat, _ = _list_scan(lines)
+    if cat is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ["", "## Catalog"]
+        cat = len(lines) - 1
+    lines.insert(cat + 1, entry)
+
+def _list_path(vault: str, rel: str) -> str | None:
+    """Only files directly inside <vault>/Lists/ are editable here."""
+    if not rel or not rel.endswith(".md"):
+        return None
+    full = os.path.realpath(os.path.join(vault, rel))
+    if os.path.dirname(full) != os.path.realpath(os.path.join(vault, "Lists")):
+        return None
+    return full
+
+def apply_list(vault: str, intent: dict) -> str | None:
+    kind = intent["kind"]
+    if kind == "listCreate":
+        name = " ".join((intent.get("text") or "").split())
+        name = name.replace("/", "-").replace("\\", "-").strip(". ")
+        full = _list_path(vault, f"Lists/{name}.md") if name else None
+        if not full:
+            return "bad list name"
+        if os.path.isfile(full):
+            return f"a list named {name!r} already exists"
+        w = intent.get("words") or {}
+        head = (["---", f"words: {w['need']} / {w['got']} / {w['done']}", "---"]
+                if all(w.get(k) for k in ("need", "got", "done")) else [])
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        _write(full, head + ["", "## Catalog"])
+        return None
+    full = _list_path(vault, intent.get("path") or "")
+    if not full:
+        return f"bad list path {intent.get('path')!r}"
+    if not os.path.isfile(full):
+        return f"no list at {intent.get('path')}"
+    lines = _read(full)
+    text = " ".join((intent.get("text") or "").split())
+    fm, cat, items = _list_scan(lines)
+    if kind == "listAdd":
+        if any(_norm(t) == _norm(text) for _, _, t in items):
+            return "already on the list"
+        _insert_top(lines, f"- [ ] {text}")
+    elif kind == "listReset":
+        got = [(i, t) for i, s, t in items if s == "got"]
+        for i, _ in reversed(got):
+            del lines[i]
+        for _, t in reversed(got):        # preserve their order at the head
+            _insert_catalog_top(lines, f"- {t}")
+    else:
+        hits = [it for it in items if _norm(it[2]) == _norm(text)]
+        if not hits:
+            return "item not found in that list"
+        if len(hits) > 1:
+            return "item text is ambiguous in that list"
+        idx, state, cur = hits[0]
+        if kind == "listEdit":
+            new_text = " ".join((intent.get("newText") or "").split())
+            if not new_text:
+                return "empty item"
+            if any(_norm(t) == _norm(new_text) for j, _, t in items if j != idx):
+                return "an item with that text already exists"
+            mark = {"need": "- [ ] ", "got": "- [x] "}.get(state, "- ")
+            lines[idx] = mark + new_text
+        elif kind == "listRemove":
+            del lines[idx]
+        elif kind == "listSet":
+            want = intent.get("want") or "need"
+            if want == state:
+                return None
+            if want in ("need", "got") and state in ("need", "got"):
+                lines[idx] = ("- [x] " if want == "got" else "- [ ] ") + cur
+            else:
+                del lines[idx]
+                if want == "cat":
+                    _insert_catalog_top(lines, f"- {cur}")
+                else:
+                    _insert_top(lines, ("- [x] " if want == "got" else "- [ ] ") + cur)
+        else:
+            return f"unknown list intent {kind!r}"
+    _write(full, lines)
+    return None
+
 def apply_intent(intent: dict) -> str | None:
     """Apply one intent to the vault. Returns an error string or None."""
     vault = vault_path(intent["vault"])
@@ -388,6 +520,9 @@ def apply_intent(intent: dict) -> str | None:
     kind = intent.get("kind") or "toggle"
     if kind in ("routineAdd", "routineEdit", "routineDelete"):
         return apply_routine(vault, intent)
+    if kind in ("listSet", "listAdd", "listEdit", "listRemove",
+                "listReset", "listCreate"):
+        return apply_list(vault, intent)
     if kind == "start":
         if not os.path.isfile(path):
             _write(path, start_lines(path, intent["day"]))

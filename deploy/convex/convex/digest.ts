@@ -38,7 +38,7 @@ export const facts = internalQuery({
     if (!rows.length) {
       const latest = await ctx.db.query("items")
         .withIndex("by_source_timestamp", (q) => q.eq("source", "tasks"))
-        .filter((q) => q.neq(q.field("day"), "routine"))
+        .filter((q) => q.and(q.neq(q.field("day"), "routine"), q.neq(q.field("day"), "list")))
         .order("desc").first();
       if (latest && latest.day !== day) {
         tasksDay = latest.day;

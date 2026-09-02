@@ -76,7 +76,7 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
   <div class="wordmark">Oriel</div>
   <p class="tag">Your day, and everything behind it. Tasks, agenda, and a daily brief on the front; a searchable history of what you did, read, wrote, and planned behind it.</p>
   <nav class="toc">
-    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#capture">Capture</a><a href="#agenda">Agenda</a><a href="#brief">Digest</a>
+    <a href="#dash">Dashboard</a><a href="#tasks">Tasks</a><a href="#capture">Capture</a><a href="#lists">Lists</a><a href="#agenda">Agenda</a><a href="#brief">Digest</a>
     <a href="#timers">Timers</a><a href="#search">Search</a><a href="#ask">Ask</a><a href="#browse">Browse</a><a href="#pending">What yellow means</a>
   </nav>
 </div>
@@ -144,6 +144,31 @@ footer { margin-top: 60px; padding-top: 16px; border-top: 1px solid #1e1e23; col
     <p>The dashboard's <span class="glyphchip">+</span> opens a composer from anywhere on the home screen: type a thought and it lands in today's daily note under <b>Notes</b> as <span class="mono">- 14:31 call about the van</span>. One tap on <b>○ task</b> makes it a task instead.</p>
     <p>The capture sheet lists everything you've captured today with the usual <a href="#pending">yellow lifecycle</a> — and if today's note doesn't exist yet, capturing starts the day for you (template, carried tasks and all).</p>
     <p class="hint">Captured notes become searchable in History a few minutes after your Mac writes them.</p>
+    <p class="secnav"><a href="#lists">next: Lists ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
+  </div>
+</section>
+
+<section class="step" id="lists">
+  <div class="phone">
+    <div class="daterow"><span>‹ lists</span><span>Groceries</span></div>
+    <div class="thead" style="margin-bottom:2px"><span>4 to get</span><span style="color:#8ab4f8">done shopping</span></div>
+    <div class="sect">TO GET</div>
+    <div class="trow"><span class="glyph">○</span><span>milk</span></div>
+    <div class="trow"><span class="glyph">○</span><span>eggs</span></div>
+    <div class="sect">GOT</div>
+    <div class="trow done"><span class="glyph">✓</span><span>butter</span></div>
+    <div class="inputrow" style="margin-top:8px"><span class="inp">to get… (filters the catalog)</span><span class="go">add</span></div>
+    <div class="sect">CATALOG · TAP TO NEED · RECENT FIRST</div>
+    <div class="trow" style="color:#94949e"><span style="color:#55555e">+</span><span>rice</span></div>
+    <div class="trow" style="color:#94949e"><span style="color:#55555e">+</span><span>hot sauce</span></div>
+    <div class="trow" style="color:#94949e"><span style="color:#55555e">+</span><span>oat milk</span></div>
+  </div>
+  <div class="prose">
+    <h2>Lists</h2>
+    <p>Reusable checklists — groceries, packing, projects — as notes in the vault\'s <span class="mono">Lists/</span> folder, reached from Tasks → <b>lists ›</b>. An item is either <b>needed</b> (this run), <b>ticked</b>, or resting in the <b>catalog</b>; the view you shop from shows only what you need.</p>
+    <p>Tap a catalog item to need it; tick it when you grab it. The done button ("done shopping", "trip done") shelves everything ticked back to the top of the catalog — what you didn\'t get <i>stays needed</i>. The add box doubles as a catalog filter, so a two-hundred-item grocery catalog is two keystrokes deep.</p>
+    <p>Each list names its own verbs — a model generates them from the list\'s name when you create it (stored as one frontmatter line you can edit in Obsidian).</p>
+    <p class="hint">It\'s all plain Markdown: checkboxes on top, bullets under <span class="mono">## Catalog</span>. Edit the note in Obsidian and the phone follows, and vice versa.</p>
     <p class="secnav"><a href="#agenda">next: Agenda ›</a> <span class="sep">·</span> <a href="#top">↑ top</a></p>
   </div>
 </section>
