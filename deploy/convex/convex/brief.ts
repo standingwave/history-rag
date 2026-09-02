@@ -13,6 +13,7 @@ export const QUESTION = "What did I do over the previous 24 hours?";
 function phrased(now: Date) {
   const from = new Date(now.getTime() - 24 * 3600e3);
   return `${QUESTION} That is the window from ${from.toISOString()} to ${now.toISOString()} (UTC). ` +
+    "The tools' since/until take bare YYYY-MM-DD days — cover both days the window touches.\n" +
     "Summarise what happened in it: work, browsing, notes, tasks, calendar, app usage.\n" +
     "Format: no preamble; 3–6 short sections, each a `## heading` followed by `- ` bullets of one line; " +
     "bold (**…**) only for the key noun in a bullet; end every bullet with the [id:…] citation(s) it rests on; no closing summary.";

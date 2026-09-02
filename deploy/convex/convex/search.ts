@@ -6,6 +6,7 @@ import { v } from "convex/values";
 import { action, internalAction, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { rag, QUERY_PROMPT, embedQuery, EMBED_PROVIDER } from "./rag";
+import { dayArg } from "./dates";
 import { requireUserAction } from "./auth";
 import type { Doc } from "./_generated/dataModel";
 
@@ -61,8 +62,9 @@ export type SearchArgs = {
 export async function runSearch(ctx: ActionCtx, a: SearchArgs): Promise<SearchResult> {
     const sources = a.sources?.length ? a.sources : ALL_SOURCES;
     const limit = Math.min(a.limit ?? 10, 50);
-    const days = daysBetween(a.since, a.until);
-    const months = days.length ? [] : monthsBetween(a.since, a.until);
+    const since = dayArg(a.since), until = dayArg(a.until);
+    const days = daysBetween(since, until);
+    const months = days.length ? [] : monthsBetween(since, until);
     const filters = days.length
       ? days.map((d) => ({ name: "day" as const, value: d }))
       : months.map((m) => ({ name: "month" as const, value: m }));
@@ -107,7 +109,7 @@ export async function runSearch(ctx: ActionCtx, a: SearchArgs): Promise<SearchRe
     for (const f of found) {
       const it = byId.get(f.chunkId);
       if (!it) continue;
-      if ((a.since && it.day < a.since) || (a.until && it.day > a.until)) {
+      if ((since && it.day < since) || (until && it.day > until)) {
         dropped++;
         continue;
       }

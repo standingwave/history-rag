@@ -7,6 +7,7 @@
 import { v } from "convex/values";
 import { query, internalQuery, type QueryCtx } from "./_generated/server";
 import { requireUser } from "./auth";
+import { dayArg } from "./dates";
 import type { Doc } from "./_generated/dataModel";
 
 export function pub(row: Doc<"items">) {
@@ -42,10 +43,11 @@ export type WindowResult = {
 };
 
 export async function windowCore(ctx: QueryCtx, a: WindowArgs): Promise<WindowResult> {
-  if (!a.since && !a.until) throw new Error("window requires since and/or until");
-  const since = a.since ?? "0000-00-00", until = a.until ?? "9999-99-99";
+  const sinceDay = dayArg(a.since), untilDay = dayArg(a.until);
+  if (!sinceDay && !untilDay) throw new Error("window requires since and/or until");
+  const since = sinceDay ?? "0000-00-00", until = untilDay ?? "9999-99-99";
   const limit = Math.max(1, Math.min(a.limit ?? 50, 200));
-  const window = { since: a.since ?? null, until: a.until ?? null };
+  const window = { since: sinceDay ?? null, until: untilDay ?? null };
   if (a.summaries) {
     // The summary tier is a few rows per day; collect it whole.
     const rows: Doc<"items">[] = [];
