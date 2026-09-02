@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireUser } from "./auth";
 import { derive, MIN_MS, MAX_MS } from "./timerMath";
+import { attachNote } from "./today";
 
 async function arm(ctx: MutationCtx, id: Id<"timers">, endsAt: number) {
   return await ctx.scheduler.runAt(endsAt, internal.push.timerFired, { id, expected: endsAt });
@@ -26,6 +27,7 @@ export const list = query({
     return rows.map((r) => ({
       id: r._id, label: r.label, durationMs: r.durationMs, repeat: r.repeat,
       up: r.up, endsAt: r.endsAt, remainingMs: r.remainingMs, startedAt: r.startedAt,
+      taskChunkId: r.taskChunkId,
     }));
   },
 });
@@ -34,14 +36,16 @@ export const start = mutation({
   args: {
     label: v.string(), durationMs: v.number(),
     repeat: v.optional(v.boolean()), up: v.optional(v.boolean()),
+    taskChunkId: v.optional(v.string()),
   },
-  handler: async (ctx, { label, durationMs, repeat, up }) => {
+  handler: async (ctx, { label, durationMs, repeat, up, taskChunkId }) => {
     await requireUser(ctx);
     const now = Date.now();
     const clean = label.trim().slice(0, 40);
     if (up) {
       await ctx.db.insert("timers", {
         label: clean, durationMs: 0, up: true, endsAt: now, startedAt: now,
+        taskChunkId: taskChunkId || undefined,
       });
       return;
     }
@@ -91,6 +95,14 @@ export const dismiss = mutation({
     await requireUser(ctx);
     const t = await ctx.db.get(id);
     if (!t) return;
+    // A focus stopwatch logs its time to the task before it goes; a lost
+    // task or a still-pending row skips the log rather than blocking stop.
+    if (t.up && t.taskChunkId) {
+      const mins = Math.round(derive(t, Date.now()).left / 60_000);
+      if (mins >= 1) {
+        await attachNote(ctx, t.taskChunkId, `⏱ focused ${mins} min`).catch(() => {});
+      }
+    }
     await disarm(ctx, t);
     await ctx.db.delete(id);
   },

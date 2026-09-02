@@ -221,6 +221,7 @@ type Acts = {
   onAttach: (text: string) => void;
   onAttachFile: (file: File, onProgress: (loaded: number, total: number) => void) => Promise<void>;
   onMakeRoutine: (days: string[]) => void;
+  onFocus: () => void;
 };
 type Busy = { label: string; young: boolean };
 function busyLabel(b?: Busy) {
@@ -336,6 +337,7 @@ function TaskRow({ t, compact, acts, fixed, placeholder, busy, subBusy, mode, se
           <button onClick={startEdit}>edit</button>
           <button onClick={() => { setOpen(true); setAddingSub(true); setMode?.(null); }}>subtask</button>
           <button onClick={() => { setOpen(true); setAttaching("pick"); setMode?.(null); }}>attach</button>
+          <button onClick={() => { acts?.onFocus(); setMode?.(null); }}>focus</button>
           <button onClick={() => { setSched({ kind: "daily", days: [] }); setMode?.("routine"); }}>routine…</button>
           <button className="danger" onClick={() => setMode?.("delete")}>delete</button>
         </div>
@@ -444,6 +446,7 @@ function TasksSheet({ day, tasks, latest, onBack, onRoutines, onLists }:
   const attach = useMutation(api.today.attach);
   const uploadUrl = useMutation(api.today.uploadUrl);
   const attachFile = useMutation(api.today.attachFile);
+  const timerStart = useMutation(api.timers.start);
   const intents = useQuery(api.today.intents, {});
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -487,6 +490,10 @@ function TasksSheet({ day, tasks, latest, onBack, onRoutines, onLists }:
       await attachFile({ id: t.id, storageId: storageId as Id<"_storage">, name: file.name });
     },
     onMakeRoutine: (days) => void routineAdd({ day, text: title(t), days }).catch(fail),
+    onFocus: () => {
+      unlockAudio();
+      void timerStart({ label: title(t), durationMs: 0, up: true, taskChunkId: t.id }).catch(fail);
+    },
   });
   // chunk id → what's in flight for it, so placeholders read "adding…" and
   // can't be toggled before they exist in the note.
@@ -684,7 +691,7 @@ function RoutinesSheet({ onBack }: { onBack: () => void }) {
    device and dismiss anywhere clears everywhere. ── */
 type Timer = {
   id: string; label: string; durationMs: number; repeat?: boolean; up?: boolean;
-  endsAt?: number; remainingMs?: number; startedAt: number;
+  endsAt?: number; remainingMs?: number; startedAt: number; taskChunkId?: string;
 };
 const timerGlyph = (t: Timer) => (t.up ? "◷" : t.repeat ? "↻" : "⏱");
 const timerName = (t: Timer) => t.label || (t.up ? "stopwatch" : durLabel(t.durationMs));
@@ -844,7 +851,7 @@ function TimersSheet({ timers, onBack }: { timers?: Timer[]; onBack: () => void 
       {timers && !list.length && <p className="muted">no timers running</p>}
       {list.map((t) => {
         const s = derive(t, now);
-        const meta = t.up ? "stopwatch"
+        const meta = t.up ? (t.taskChunkId ? "focus — logs to the task on ✕" : "stopwatch")
           : t.repeat ? `↻ every ${durLabel(t.durationMs)}` : `${durLabel(t.durationMs)} timer`;
         const id = t.id as Id<"timers">;
         return (

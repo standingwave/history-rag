@@ -381,17 +381,23 @@ async function subIntent(ctx: { db: any }, row: any, kind: "toggle" | "add" | "e
 
 /* A link or a remark under the task: one plain line in its block. A bare
    URL is written as a markdown link; the Mac fills in the page title. */
+/* Append one note line to a task's block (also used by timers: a focus
+   stopwatch logs its elapsed time here on stop). */
+export async function attachNote(ctx: { db: any }, id: string, text: string) {
+  text = text.trim().replace(/\s+/g, " ");
+  if (!text) throw new Error("empty note");
+  const row = await taskRow(ctx, id);
+  const notes: string[] = [...(row.meta?.notes ?? [])];
+  const line = /^https?:\/\/\S+$/.test(text) ? `[${text}](${text})` : text;
+  notes.push(line);
+  return subIntent(ctx, row, "attach", { notes }, { text });
+}
+
 export const attach = mutation({
   args: { id: v.string(), text: v.string() },
   handler: async (ctx, { id, text }) => {
     await requireUser(ctx);
-    text = text.trim().replace(/\s+/g, " ");
-    if (!text) throw new Error("empty note");
-    const row = await taskRow(ctx, id);
-    const notes: string[] = [...(row.meta?.notes ?? [])];
-    const line = /^https?:\/\/\S+$/.test(text) ? `[${text}](${text})` : text;
-    notes.push(line);
-    return subIntent(ctx, row, "attach", { notes }, { text });
+    return attachNote(ctx, id, text);
   },
 });
 

@@ -83,6 +83,7 @@ export default defineSchema({
     remainingMs: v.optional(v.number()),
     startedAt: v.number(),
     alarmId: v.optional(v.id("_scheduled_functions")),
+    taskChunkId: v.optional(v.string()),  // focus stopwatch: logs here on stop
   }),
   /* Web Push subscriptions (timers' lock-screen alerts), one per
      browser/PWA install; dead endpoints are pruned on send failure. */
