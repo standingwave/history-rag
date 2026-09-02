@@ -236,6 +236,15 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .veil { position: fixed; inset: 0; background: #000a; z-index: 5; }
 .cappanel { position: fixed; left: 0; right: 0; bottom: 0; background: #17171b; border-top: 1px solid #2a2a30; border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); z-index: 6; max-width: 44rem; margin: 0 auto; }
 .capin { width: 100%; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; font: inherit; font-size: 16px; outline: 0; resize: none; padding: 4px 0 8px; }
+/* transient "queued" confirmation after the capture panel closes */
+.toast { position: fixed; bottom: calc(88px + env(safe-area-inset-bottom)); left: 50%;
+  transform: translateX(-50%); background: #26262c; color: #e8e8eb;
+  border: 1px solid #2a2a30; border-radius: 999px; padding: 8px 16px;
+  font-size: .85rem; white-space: nowrap; z-index: 6; pointer-events: none;
+  animation: toastin .18s ease-out; }
+@keyframes toastin { from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); } }
+
 /* ✨ smart capture's proposal chips */
 .props { margin: 4px 0 6px; }
 .props .prow { align-items: center; }

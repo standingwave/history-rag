@@ -1258,7 +1258,7 @@ function chipText(a: any, today: string): string {
 }
 
 function CaptureComposer({ day, onDone, onCancel, fail }:
-  { day: string; onDone?: () => void; onCancel?: () => void; fail: (e: unknown) => void }) {
+  { day: string; onDone?: (msg?: string) => void; onCancel?: () => void; fail: (e: unknown) => void }) {
   const capture = useMutation(api.today.capture);
   const add = useMutation(api.today.add);
   const toggleTask = useMutation(api.today.toggle);
@@ -1291,7 +1291,7 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
       return;
     }
     (mode === "note" ? capture({ day, text, at: hhmmNow() }) : add({ day, text })).catch(fail);
-    reset(); onDone?.();
+    reset(); onDone?.(mode === "note" ? "✎ note queued" : "○ task queued");
   };
   const run = (a: any): Promise<unknown> => {
     const tid = a.id as Id<"timers">;
@@ -1314,10 +1314,11 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
     }
   };
   const queueAll = () => {
+    let n = 0;
     for (const [i, a] of prop!.actions.entries()) {
-      if (!drop.has(i)) void run(a).catch(fail);
+      if (!drop.has(i)) { n++; void run(a).catch(fail); }
     }
-    reset(); onDone?.();
+    reset(); onDone?.(`✨ ${n} action${n === 1 ? "" : "s"} queued`);
   };
   const kept = prop ? prop.actions.filter((_, i) => !drop.has(i)) : [];
   return (
@@ -1360,15 +1361,29 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
 
 function CaptureFab({ day, onSheet }: { day: string; onSheet: () => void }) {
   const [openP, setOpenP] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { push: fail, view: errView } = useErrors();
-  if (!openP) return <button className="fab" aria-label="capture" onClick={() => setOpenP(true)}>+</button>;
+  const done = (msg?: string) => {
+    setOpenP(false);
+    if (!msg) return;
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  };
+  if (!openP) return (
+    <>
+      {toast && <div className="toast">{toast}</div>}
+      <button className="fab" aria-label="capture" onClick={() => setOpenP(true)}>+</button>
+    </>
+  );
   return (
     <>
       <div className="veil" onClick={() => setOpenP(false)} />
       <div className="cappanel">
         {errView}
         <CaptureComposer day={day} fail={fail}
-          onDone={() => setOpenP(false)} onCancel={() => setOpenP(false)} />
+          onDone={done} onCancel={() => setOpenP(false)} />
         <p className="muted small" style={{ margin: "10px 0 0" }}>
           <button className="lnk" onClick={onSheet}>today's captures ›</button></p>
       </div>
