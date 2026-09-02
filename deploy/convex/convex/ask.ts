@@ -99,6 +99,7 @@ class OpenAI implements Adapter {
     const data = await http(this.url, headers, {
       model: this.preset.model, messages: this.messages,
       max_tokens: Number(this.preset.max_tokens ?? 2048),
+      ...(this.preset.temperature !== undefined ? { temperature: this.preset.temperature } : {}),
       ...(this.tools.length ? { tools: this.tools.map((t) =>
         ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } })) } : {}),
     });
@@ -133,6 +134,7 @@ class Anthropic implements Adapter {
     const data = await http(this.url, { "x-api-key": this.preset._key, "anthropic-version": "2023-06-01" }, {
       model: this.preset.model, max_tokens: Number(this.preset.max_tokens ?? 2048),
       system: this.system, messages: this.messages,
+      ...(this.preset.temperature !== undefined ? { temperature: this.preset.temperature } : {}),
       ...(this.tools.length ? { tools: this.tools.map((t) =>
         ({ name: t.name, description: t.description, input_schema: t.schema })) } : {}),
     });
@@ -161,7 +163,9 @@ export async function chatOnce(
 ): Promise<{ text: string; usage: { in: number; out: number } }> {
   const Adapter = ADAPTERS[preset.backend ?? "openai-compatible"];
   if (!Adapter) throw new AskError(`unknown backend '${preset.backend}' in preset '${preset.name}'`);
-  const adapter = new Adapter({ ...preset, max_tokens: maxTokens }, []);
+  // Parsing wants determinism; presets that reject temperature overrides
+  // (some reasoning models) can pin their own in ASK_MODELS.
+  const adapter = new Adapter({ temperature: 0, ...preset, max_tokens: maxTokens }, []);
   adapter.start(system, user);
   const step = await adapter.step();
   return { text: step.text, usage: step.usage };

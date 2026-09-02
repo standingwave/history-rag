@@ -6,7 +6,7 @@
    authority: it returns a proposal, every id it emits must be one the
    prompt offered, and anything unusable degrades to a plain note so a
    thought is never lost. */
-import { checkDay } from "./mcpCore.ts";
+import { checkDay, stemName } from "./mcpCore.ts";
 import { MIN_MS, MAX_MS } from "./timerMath.ts";
 
 export type ParseCtx = {
@@ -26,6 +26,7 @@ export type ParsedAction =
   | { kind: "edit"; id: string; newText: string; label: string }
   | { kind: "delete"; id: string; label: string }
   | { kind: "listAdd"; path: string; items: string[]; label: string }
+  | { kind: "listCreate"; name: string; items?: string[] }
   | { kind: "listSet"; id: string; state: "need" | "got"; label: string }
   | { kind: "listEdit"; id: string; newText: string; label: string }
   | { kind: "listRemove"; id: string; label: string }
@@ -44,6 +45,7 @@ Reply with ONLY a JSON object {"actions":[...]}, no prose. Action shapes:
 {"kind":"edit","id":"...","newText":"..."} — rewrite an open task
 {"kind":"delete","id":"..."} — remove an open task
 {"kind":"listAdd","path":"...","items":["..."]} — add items to a LIST by its path
+{"kind":"listCreate","name":"...","items":["..."]} — make a NEW list (only when no listed one fits); items optional
 {"kind":"listSet","id":"...","state":"got"} — check a LIST ITEM off; "need" puts it back on the list
 {"kind":"listEdit","id":"...","newText":"..."} — rewrite a list item
 {"kind":"listRemove","id":"..."} — delete a list item outright
@@ -117,6 +119,20 @@ export function validateActions(raw: string, sentence: string, ctx: ParseCtx):
         const items = (Array.isArray(a.items) ? a.items : [])
           .map(trim500).filter(Boolean).slice(0, 20);
         if (l && items.length) out.push({ kind: "listAdd", path: l.path, items, label: l.name });
+        break;
+      }
+      case "listCreate": {
+        const name = trim500(a.name).slice(0, 60);
+        const items = (Array.isArray(a.items) ? a.items : [])
+          .map(trim500).filter(Boolean).slice(0, 20);
+        if (!name) break;
+        // "Create" a list that already exists = add to it (or nothing to do).
+        const existing = ctx.lists.find((l) => stemName(l.name) === stemName(name));
+        if (existing) {
+          if (items.length) out.push({ kind: "listAdd", path: existing.path, items, label: existing.name });
+          break;
+        }
+        out.push({ kind: "listCreate", name, ...(items.length ? { items } : {}) });
         break;
       }
       case "listSet": {

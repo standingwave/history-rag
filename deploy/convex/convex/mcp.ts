@@ -8,6 +8,7 @@ import type { Id } from "./_generated/dataModel";
 import { handleRpc, sha256b64url, WRITE_TOOLS, checkDay, resolveList } from "./mcpCore";
 import { localDayHour, DEFAULT_TZ } from "./reminderMath";
 import { derive } from "./timerMath";
+import { vocabWords } from "./lists";
 
 const asInt = (x: unknown, dflt: number) =>
   Number.isFinite(Number(x)) && Number(x) > 0 ? Math.floor(Number(x)) : dflt;
@@ -172,6 +173,23 @@ export const endpoint = httpAction(async (ctx, req) => {
           }
         }
         return { list: r.hit.name, results };
+      }
+      case "create_list": {
+        const name_ = s(a.name).trim();
+        if (!name_) throw new Error("name required");
+        const words = await vocabWords(name_);
+        const path = await ctx.runMutation(internal.lists.createInternal, { name: name_, words });
+        const items = Array.isArray(a.items) ? a.items.map((x) => String(x)) : [];
+        const results = [];
+        for (const text of items) {
+          try {
+            await ctx.runMutation(internal.lists.addItemInternal, { path, text });
+            results.push({ text, status: "queued" });
+          } catch (e) {
+            results.push({ text, status: String(e instanceof Error ? e.message : e) });
+          }
+        }
+        return { queued: true, path, words, ...(results.length ? { results } : {}) };
       }
       case "set_list_item": {
         const state = s(a.state);

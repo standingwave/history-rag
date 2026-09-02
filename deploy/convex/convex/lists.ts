@@ -225,10 +225,7 @@ export const reset = mutation({
   },
 });
 
-export const create = mutation({
-  args: { name: v.string(), words: v.optional(wordsArg) },
-  handler: async (ctx, { name, words }) => {
-    await requireUser(ctx);
+async function createH(ctx: MutationCtx, name: string, words?: typeof PLAIN_WORDS) {
     // Mirror the applier's sanitizer so the placeholder path matches.
     const clean = name.trim().split(/\s+/).join(" ")
       .replace(/[/\\]/g, "-").replace(/^[. ]+|[. ]+$/g, "");
@@ -256,15 +253,19 @@ export const create = mutation({
       ...(words ? { words } : {}), requestedAt: Date.now(),
     });
     return path;
-  },
+}
+export const create = mutation({
+  args: { name: v.string(), words: v.optional(wordsArg) },
+  handler: async (ctx, { name, words }) => { await requireUser(ctx); return createH(ctx, name, words); },
+});
+export const createInternal = internalMutation({
+  args: { name: v.string(), words: v.optional(wordsArg) },
+  handler: (ctx, { name, words }) => createH(ctx, name, words),
 });
 
 /* ── the wording generator (live LLM, creation-time only) ────────────── */
 
-export const vocab = action({
-  args: { name: v.string() },
-  handler: async (ctx, { name }): Promise<typeof PLAIN_WORDS> => {
-    await requireUserAction(ctx);
+export async function vocabWords(name: string): Promise<typeof PLAIN_WORDS> {
     const lat = (m: { latency?: string }) =>
       Number((m.latency ?? "").replace(/\D/g, "")) || 99;
     const pick = presets().sort((a, b) => lat(a) - lat(b))[0];
@@ -299,5 +300,11 @@ export const vocab = action({
     } catch {
       return PLAIN_WORDS;
     }
+}
+export const vocab = action({
+  args: { name: v.string() },
+  handler: async (ctx, { name }): Promise<typeof PLAIN_WORDS> => {
+    await requireUserAction(ctx);
+    return vocabWords(name);
   },
 });

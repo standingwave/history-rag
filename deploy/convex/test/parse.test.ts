@@ -66,6 +66,20 @@ test("timer starts: countdown needs sane ms, focus implies stopwatch", () => {
   ]);
 });
 
+test("listCreate: new name passes; an existing name becomes an add or nothing", () => {
+  const r = validateActions(wrap([
+    { kind: "listCreate", name: "Costco", items: ["milk", ""] },
+  ]), "x", CTX);
+  assert.deepEqual(r.actions, [{ kind: "listCreate", name: "Costco", items: ["milk"] }]);
+  const dup = validateActions(wrap([
+    { kind: "listCreate", name: "groceries", items: ["bread"] },
+  ]), "x", CTX);
+  assert.deepEqual(dup.actions,
+    [{ kind: "listAdd", path: "Lists/Grocery.md", items: ["bread"], label: "Grocery" }]);
+  const noop = validateActions(wrap([{ kind: "listCreate", name: "grocery" }]), "make a grocery list", CTX);
+  assert.deepEqual(noop, { actions: [{ kind: "note", text: "make a grocery list" }], fallback: true });
+});
+
 test("unparseable output and empty results fall back to a note", () => {
   assert.deepEqual(validateActions("Sure! I can help.", "buy milk", CTX),
     { actions: [{ kind: "note", text: "buy milk" }], fallback: true });

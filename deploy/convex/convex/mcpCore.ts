@@ -156,6 +156,16 @@ Returns JSON {query, count, results[]} ranked best-first; each result has rank (
     annotations: WRITE,
   },
   {
+    name: "create_list",
+    description: `Create a new reusable checklist (a note in the vault's Lists/), optionally seeded with items. Only when no existing list fits — check the names an add_list_items/list_items error reports first. The list's verbs ("to pack" / "packed" …) are generated from its name.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string" }, items: { type: "array", items: { type: "string" } } },
+      required: ["name"],
+    },
+    annotations: WRITE,
+  },
+  {
     name: "set_list_item",
     description: `Move a checklist item (id from list_items) between "need" and "got".` + QUEUED,
     inputSchema: {
