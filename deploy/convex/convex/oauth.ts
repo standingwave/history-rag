@@ -91,7 +91,7 @@ button{margin-top:14px;width:100%;background:#e8e8eb;color:#121215;border:0;bord
 padding:12px;font:600 1rem inherit;cursor:pointer}
 .err{color:#f87171;font-size:.88rem;margin:10px 0 0}</style></head><body>
 <div class="card"><h1>Connect to your history</h1>
-<p>Open <b>Oriel</b>, tap <i>connect claude.ai</i> in the Digest view, and enter the code it shows.</p>
+<p>Open <b>Oriel</b>, tap <i>connect claude.ai</i> in ⚙ Settings, and enter the code it shows.</p>
 <form method="POST">${hidden}
 <input class="code" name="approval" inputmode="numeric" autocomplete="one-time-code"
  placeholder="0000-0000" autofocus>
@@ -119,7 +119,8 @@ export const authorizeGet = httpAction(async (ctx, req) => {
   const bad = await checkAuthReq(ctx, p);
   if (bad) return html(`<!doctype html><p>${esc(bad)}</p>`, 400);
   const fields: Record<string, string> = {};
-  for (const k of ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method"]) {
+  for (const k of ["response_type", "client_id", "redirect_uri", "state",
+                   "code_challenge", "code_challenge_method"]) {
     fields[k] = p.get(k) ?? "";
   }
   return html(page(fields));
@@ -130,7 +131,8 @@ export const authorizePost = httpAction(async (ctx, req) => {
   const bad = await checkAuthReq(ctx, form);
   if (bad) return html(`<!doctype html><p>${esc(bad)}</p>`, 400);
   const fields: Record<string, string> = {};
-  for (const k of ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method"]) {
+  for (const k of ["response_type", "client_id", "redirect_uri", "state",
+                   "code_challenge", "code_challenge_method"]) {
     fields[k] = form.get(k) ?? "";
   }
   const approval = (form.get("approval") ?? "").replace(/\D/g, "");
