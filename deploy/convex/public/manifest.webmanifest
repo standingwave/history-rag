@@ -8,5 +8,13 @@
   "icons": [
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
     { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ],
+  "shortcuts": [
+    { "name": "Capture", "url": "/#w=capture",
+      "icons": [{ "src": "/icon-512.png", "sizes": "512x512" }] },
+    { "name": "Tasks", "url": "/#w=tasks",
+      "icons": [{ "src": "/icon-512.png", "sizes": "512x512" }] },
+    { "name": "Timers", "url": "/#w=timers",
+      "icons": [{ "src": "/icon-512.png", "sizes": "512x512" }] }
   ]
 }

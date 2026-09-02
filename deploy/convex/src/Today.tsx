@@ -975,6 +975,14 @@ function DigestSheet({ brief, agenda, tasks, latest, onBack, onOpen }:
   const { push: fail, view: errView } = useErrors();
   const run = () => { setBusy(true); setT0(Date.now()); refresh({}).catch(fail).finally(() => setBusy(false)); };
   const secs = busy ? Math.round((Date.now() - t0) / 1000) : 0;
+  // A brief older than the cron interval refreshes itself on open — the
+  // 3-hour cron stays as the backstop. Once per mount.
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (!brief || busy || autoRan.current) return;
+    autoRan.current = true;
+    if (!brief.generatedAt || Date.now() - brief.generatedAt > 3 * 3600e3) run();
+  }, [brief]);   // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <section>
       <div className="daterow"><button className="lnk" onClick={onBack}>‹ back</button><span>Digest</span></div>
