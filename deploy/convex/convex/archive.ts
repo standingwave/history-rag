@@ -178,6 +178,7 @@ export const expandInternal = internalQuery({
 export type Preset = {
   name: string; model: string; backend?: string; base_url?: string;
   key_env?: string; max_tokens?: number; latency?: string; est_cost?: string;
+  parse?: boolean;   // the command parser's preset (wip/SPEC-llm-actions.md)
 };
 
 /* ASK_MODELS is the same JSON the Lambda takes in CLAUDE_RAG_ASK_MODELS;

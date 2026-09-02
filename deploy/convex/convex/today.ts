@@ -8,6 +8,7 @@
 import { v } from "convex/values";
 import {
   query, mutation, internalQuery, internalMutation,
+  type QueryCtx, type MutationCtx,
 } from "./_generated/server";
 import { requireUser } from "./auth";
 import { want } from "./schema";
@@ -22,32 +23,39 @@ function pub(row: {
   return { id: chunkId, source, timestamp, day, location, text, meta, pending: !!pending };
 }
 
+async function tasksH(ctx: QueryCtx, day: string) {
+  const rows = await ctx.db
+    .query("items")
+    .withIndex("by_source_day", (q) => q.eq("source", "tasks").eq("day", day))
+    .collect();
+  rows.sort((a, b) => (a.meta?.order ?? 0) - (b.meta?.order ?? 0));
+  return rows.filter((r) => !r.hidden).map(pub);
+}
 export const tasks = query({
   args: { day: v.string() },
-  handler: async (ctx, { day }) => {
-    await requireUser(ctx);
-    const rows = await ctx.db
-      .query("items")
-      .withIndex("by_source_day", (q) => q.eq("source", "tasks").eq("day", day))
-      .collect();
-    rows.sort((a, b) => (a.meta?.order ?? 0) - (b.meta?.order ?? 0));
-    return rows.filter((r) => !r.hidden).map(pub);
-  },
+  handler: async (ctx, { day }) => { await requireUser(ctx); return tasksH(ctx, day); },
+});
+export const tasksInternal = internalQuery({
+  args: { day: v.string() },
+  handler: (ctx, { day }) => tasksH(ctx, day),
 });
 
 /* The latest day that has any task — the empty state's label. */
+async function latestTaskDayH(ctx: QueryCtx) {
+  const row = await ctx.db
+    .query("items")
+    .withIndex("by_source_timestamp", (q) => q.eq("source", "tasks"))
+    .filter((q) => q.and(q.neq(q.field("day"), "routine"), q.neq(q.field("day"), "list")))
+    .order("desc")
+    .first();
+  return row?.day ?? null;
+}
 export const latestTaskDay = query({
   args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    const row = await ctx.db
-      .query("items")
-      .withIndex("by_source_timestamp", (q) => q.eq("source", "tasks"))
-      .filter((q) => q.and(q.neq(q.field("day"), "routine"), q.neq(q.field("day"), "list")))
-      .order("desc")
-      .first();
-    return row?.day ?? null;
-  },
+  handler: async (ctx) => { await requireUser(ctx); return latestTaskDayH(ctx); },
+});
+export const latestTaskDayInternal = internalQuery({
+  args: {}, handler: (ctx) => latestTaskDayH(ctx),
 });
 
 export const agenda = query({
@@ -108,26 +116,34 @@ export const counts = query({
   },
 });
 
+/* Flips by default; a caller that knows the state it wants passes `want`
+   and an already-there row becomes a no-op instead of a double-flip. */
+async function toggleH(ctx: MutationCtx, id: string, wantState?: "done" | "open") {
+  const row = await ctx.db
+    .query("items")
+    .withIndex("by_chunkId", (q) => q.eq("chunkId", id))
+    .unique();
+  if (!row || row.source !== "tasks") throw new Error("not a task");
+  const done = !!row.meta?.done;
+  const target = wantState === undefined ? !done : wantState === "done";
+  if (target === done) return null;
+  await ctx.db.patch(row._id, {
+    meta: { ...row.meta, done: target },
+    pending: true,
+  });
+  const text = row.text.split("\n", 1)[0].replace(/^Task: /, "");
+  return await ctx.db.insert("taskIntents", {
+    kind: "toggle", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
+    text, want: target ? "done" : "open", requestedAt: Date.now(),
+  });
+}
 export const toggle = mutation({
   args: { id: v.string() },
-  handler: async (ctx, { id }) => {
-    await requireUser(ctx);
-    const row = await ctx.db
-      .query("items")
-      .withIndex("by_chunkId", (q) => q.eq("chunkId", id))
-      .unique();
-    if (!row || row.source !== "tasks") throw new Error("not a task");
-    const done = !!row.meta?.done;
-    await ctx.db.patch(row._id, {
-      meta: { ...row.meta, done: !done },
-      pending: true,
-    });
-    const text = row.text.split("\n", 1)[0].replace(/^Task: /, "");
-    return await ctx.db.insert("taskIntents", {
-      kind: "toggle", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
-      text, want: done ? "open" : "done", requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { id }) => { await requireUser(ctx); return toggleH(ctx, id); },
+});
+export const toggleInternal = internalMutation({
+  args: { id: v.string(), want: v.optional(v.union(v.literal("done"), v.literal("open"))) },
+  handler: (ctx, { id, want: w }) => toggleH(ctx, id, w),
 });
 
 function taskText(row: { text: string }) {
@@ -169,24 +185,28 @@ async function nextOrder(ctx: { db: any }, day: string) {
   return rows.reduce((m: number, r: any) => Math.max(m, r.meta?.order ?? 0), 0) + 1;
 }
 
+async function addH(ctx: MutationCtx, day: string, text: string) {
+  text = text.trim();
+  if (!text) throw new Error("empty task");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bad day");
+  const vault = await vaultFor(ctx, day);
+  const id = taskChunkId(vault, text);
+  const dup = await byChunkId(ctx, id);
+  if (dup && !dup.hidden) throw new Error("a task with that text already exists");
+  const row = placeholder(vault, day, text, {}, await nextOrder(ctx, day));
+  if (dup) await ctx.db.replace(dup._id, row);
+  else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1, day); }
+  return await ctx.db.insert("taskIntents", {
+    kind: "add", chunkId: id, day, vault, text, requestedAt: Date.now(),
+  });
+}
 export const add = mutation({
   args: { day: v.string(), text: v.string() },
-  handler: async (ctx, { day, text }) => {
-    await requireUser(ctx);
-    text = text.trim();
-    if (!text) throw new Error("empty task");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("bad day");
-    const vault = await vaultFor(ctx, day);
-    const id = taskChunkId(vault, text);
-    const dup = await byChunkId(ctx, id);
-    if (dup && !dup.hidden) throw new Error("a task with that text already exists");
-    const row = placeholder(vault, day, text, {}, await nextOrder(ctx, day));
-    if (dup) await ctx.db.replace(dup._id, row);
-    else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1, day); }
-    return await ctx.db.insert("taskIntents", {
-      kind: "add", chunkId: id, day, vault, text, requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { day, text }) => { await requireUser(ctx); return addH(ctx, day, text); },
+});
+export const addInternal = internalMutation({
+  args: { day: v.string(), text: v.string() },
+  handler: (ctx, { day, text }) => addH(ctx, day, text),
 });
 
 /* Begin the day's note without adding a task: the Mac carries open tasks
@@ -213,41 +233,49 @@ export const startDay = mutation({
 /* Quick capture (wip/SPEC-quick-capture.md): a thought for today's note,
    appended under "## Notes" by the Mac. No optimistic items row — the
    capture sheet reads the intent queue itself. */
+async function captureH(ctx: MutationCtx, day: string, text: string, at: string) {
+  const clean = text.trim().slice(0, 500);
+  if (!clean) throw new Error("empty note");
+  if (!/^\d{2}:\d{2}$/.test(at)) throw new Error("bad time");
+  const vault = await vaultFor(ctx, day);
+  return await ctx.db.insert("taskIntents", {
+    kind: "note", chunkId: "", day, vault, text: clean, at, requestedAt: Date.now(),
+  });
+}
 export const capture = mutation({
   args: { day: v.string(), text: v.string(), at: v.string() },
-  handler: async (ctx, { day, text, at }) => {
-    await requireUser(ctx);
-    const clean = text.trim().slice(0, 500);
-    if (!clean) throw new Error("empty note");
-    if (!/^\d{2}:\d{2}$/.test(at)) throw new Error("bad time");
-    const vault = await vaultFor(ctx, day);
-    return await ctx.db.insert("taskIntents", {
-      kind: "note", chunkId: "", day, vault, text: clean, at, requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { day, text, at }) => { await requireUser(ctx); return captureH(ctx, day, text, at); },
+});
+export const captureInternal = internalMutation({
+  args: { day: v.string(), text: v.string(), at: v.string() },
+  handler: (ctx, { day, text, at }) => captureH(ctx, day, text, at),
 });
 
+async function editH(ctx: MutationCtx, id: string, newText: string) {
+  newText = newText.trim();
+  const row = await taskRow(ctx, id);
+  const text = taskText(row);
+  if (!newText) throw new Error("empty task");
+  if (normTask(newText) === normTask(text)) return null;
+  const vault = String(row.meta?.vault ?? "");
+  const newId = taskChunkId(vault, newText);
+  const dup = await byChunkId(ctx, newId);
+  if (dup && !dup.hidden) throw new Error("a task with that text already exists");
+  const fresh = placeholder(vault, row.day, newText, { ...row.meta }, row.meta?.order ?? 0);
+  if (dup) await ctx.db.replace(dup._id, fresh);
+  else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1, row.day); }
+  await ctx.db.patch(row._id, { pending: true, hidden: true });
+  return await ctx.db.insert("taskIntents", {
+    kind: "edit", chunkId: id, day: row.day, vault, text, newText, requestedAt: Date.now(),
+  });
+}
 export const edit = mutation({
   args: { id: v.string(), newText: v.string() },
-  handler: async (ctx, { id, newText }) => {
-    await requireUser(ctx);
-    newText = newText.trim();
-    const row = await taskRow(ctx, id);
-    const text = taskText(row);
-    if (!newText) throw new Error("empty task");
-    if (normTask(newText) === normTask(text)) return null;
-    const vault = String(row.meta?.vault ?? "");
-    const newId = taskChunkId(vault, newText);
-    const dup = await byChunkId(ctx, newId);
-    if (dup && !dup.hidden) throw new Error("a task with that text already exists");
-    const fresh = placeholder(vault, row.day, newText, { ...row.meta }, row.meta?.order ?? 0);
-    if (dup) await ctx.db.replace(dup._id, fresh);
-    else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1, row.day); }
-    await ctx.db.patch(row._id, { pending: true, hidden: true });
-    return await ctx.db.insert("taskIntents", {
-      kind: "edit", chunkId: id, day: row.day, vault, text, newText, requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { id, newText }) => { await requireUser(ctx); return editH(ctx, id, newText); },
+});
+export const editInternal = internalMutation({
+  args: { id: v.string(), newText: v.string() },
+  handler: (ctx, { id, newText }) => editH(ctx, id, newText),
 });
 
 /* ── routines: entries in the vault's daily-tasks template
@@ -474,17 +502,21 @@ export const attachFile = mutation({
   },
 });
 
+async function removeH(ctx: MutationCtx, id: string) {
+  const row = await taskRow(ctx, id);
+  await ctx.db.patch(row._id, { pending: true, hidden: true });
+  return await ctx.db.insert("taskIntents", {
+    kind: "delete", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
+    text: taskText(row), requestedAt: Date.now(),
+  });
+}
 export const remove = mutation({
   args: { id: v.string() },
-  handler: async (ctx, { id }) => {
-    await requireUser(ctx);
-    const row = await taskRow(ctx, id);
-    await ctx.db.patch(row._id, { pending: true, hidden: true });
-    return await ctx.db.insert("taskIntents", {
-      kind: "delete", chunkId: id, day: row.day, vault: String(row.meta?.vault ?? ""),
-      text: taskText(row), requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { id }) => { await requireUser(ctx); return removeH(ctx, id); },
+});
+export const removeInternal = internalMutation({
+  args: { id: v.string() },
+  handler: (ctx, { id }) => removeH(ctx, id),
 });
 
 /* Recent intents for the UI: pending ones and errors worth showing. */

@@ -9,7 +9,16 @@ export type ToolDef = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
 };
+
+const RO = { readOnlyHint: true };
+const WRITE = { readOnlyHint: false, destructiveHint: false };
+const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true };
+/* Rides along in every write tool's description so the model can set the
+   user's expectation honestly. */
+const QUEUED = " The change queues as a pending intent; the user's Mac " +
+  "applies it to their vault within minutes and the app shows it immediately.";
 
 /* Descriptions follow server.py's (claude.ai's tool choice depends on
    them), adjusted where this backend honestly differs: similarity score
@@ -35,6 +44,7 @@ Returns JSON {query, count, results[]} ranked best-first; each result has rank (
       },
       required: ["query"],
     },
+    annotations: RO,
   },
   {
     name: "list_window",
@@ -50,6 +60,7 @@ Returns JSON {query, count, results[]} ranked best-first; each result has rank (
         summaries: { type: "boolean", default: false },
       },
     },
+    annotations: RO,
   },
   {
     name: "expand",
@@ -62,13 +73,191 @@ Returns JSON {query, count, results[]} ranked best-first; each result has rank (
       },
       required: ["id"],
     },
+    annotations: RO,
   },
   {
     name: "history_stats",
     description: `Show what search_history can search: per-source chunk counts and the date range each covers. Call this first to orient — e.g. to confirm a source is indexed, or how far back the record goes — before searching. Returns JSON {total_chunks, sources: {name: {chunks, earliest, latest}}, freshest_sync}. freshest_sync is when the Mac last pushed changes here — mention it in one line before answering if it's more than a few hours old (the remote copy may lag the Mac).`,
     inputSchema: { type: "object", properties: {} },
+    annotations: RO,
+  },
+
+  /* ── action tools (wip/SPEC-llm-actions.md): the user's task/list/timer
+     verbs, same mutations the app taps. All are gated by the app's
+     "claude.ai actions" setting. ── */
+  {
+    name: "list_tasks",
+    description: `The user's daily-note task list: {day, tasks: [{id, text, done, pending}]}. day is a local YYYY-MM-DD; default is the latest day that has tasks. The ids are what set_task / edit_task / delete_task / start_timer(task_id) take — read here before mutating a task.`,
+    inputSchema: { type: "object", properties: { day: { type: "string", default: "" } } },
+    annotations: RO,
+  },
+  {
+    name: "create_task",
+    description: `Add a task to a day's daily note. day is a local YYYY-MM-DD, default today, allowed from yesterday to a year ahead. A task for a future day appears in the app on that day, not before (undone tasks carry forward day to day). Duplicate of an existing task's text is rejected.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { text: { type: "string" }, day: { type: "string", default: "" } },
+      required: ["text"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "set_task",
+    description: `Mark a task done (done:true) or open again (done:false) by id from list_tasks. Already in that state = no-op.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, done: { type: "boolean" } },
+      required: ["id", "done"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "edit_task",
+    description: `Rewrite a task's text by id from list_tasks; its subtasks and notes stay.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, new_text: { type: "string" } },
+      required: ["id", "new_text"],
+    },
+    annotations: DESTRUCTIVE,
+  },
+  {
+    name: "delete_task",
+    description: `Remove a task line from its daily note, by id from list_tasks. Prefer set_task done:true unless the user clearly wants the line gone.` + QUEUED,
+    inputSchema: {
+      type: "object", properties: { id: { type: "string" } }, required: ["id"],
+    },
+    annotations: DESTRUCTIVE,
+  },
+  {
+    name: "capture_note",
+    description: `Append a timestamped thought under today's "## Notes" in the daily note — for things worth keeping that aren't tasks.` + QUEUED,
+    inputSchema: {
+      type: "object", properties: { text: { type: "string" } }, required: ["text"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "list_items",
+    description: `A reusable checklist's contents, addressed by name (e.g. "grocery"): {name, path, words, items: [{id, text, state}]}. state: "need" = actively on the list, "got" = checked off this run, "cat" = in the catalog (known item, not currently needed). An unknown or ambiguous name errors with the available list names.`,
+    inputSchema: {
+      type: "object", properties: { list: { type: "string" } }, required: ["list"],
+    },
+    annotations: RO,
+  },
+  {
+    name: "add_list_items",
+    description: `Add items to a named checklist. An item already in the list's catalog is moved to "need" instead of duplicated. Returns per-item status.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { list: { type: "string" }, items: { type: "array", items: { type: "string" } } },
+      required: ["list", "items"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "set_list_item",
+    description: `Move a checklist item (id from list_items) between "need" and "got".` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, state: { type: "string", enum: ["need", "got"] } },
+      required: ["id", "state"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "edit_list_item",
+    description: `Rewrite a checklist item's text by id from list_items.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, new_text: { type: "string" } },
+      required: ["id", "new_text"],
+    },
+    annotations: DESTRUCTIVE,
+  },
+  {
+    name: "remove_list_item",
+    description: `Delete an item from a checklist entirely, including its catalog, by id from list_items. Usually set_list_item state:"got" is what the user means.` + QUEUED,
+    inputSchema: {
+      type: "object", properties: { id: { type: "string" } }, required: ["id"],
+    },
+    annotations: DESTRUCTIVE,
+  },
+  {
+    name: "list_timers",
+    description: `The user's timers: [{id, label, state, remaining_ms, up, repeat}]. state is running/paused/done; up=true is a stopwatch (remaining_ms is elapsed). Ids feed control_timer.`,
+    inputSchema: { type: "object", properties: {} },
+    annotations: RO,
+  },
+  {
+    name: "start_timer",
+    description: `Start a timer, effective immediately (no queue). A countdown needs seconds (5–86400); up:true starts a stopwatch instead. task_id (an id from list_tasks) makes the stopwatch a focus session that logs "⏱ focused N min" to that task when dismissed. A finished countdown alerts the user's lock screen even if the app is closed; repeat:true re-alerts every cycle.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string" }, seconds: { type: "integer", default: 0 },
+        repeat: { type: "boolean", default: false }, up: { type: "boolean", default: false },
+        task_id: { type: "string", default: "" },
+      },
+      required: ["label"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "control_timer",
+    description: `pause / resume / dismiss a timer by id from list_timers. dismiss removes it (a focus stopwatch logs its minutes to its task first).`,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, op: { type: "string", enum: ["pause", "resume", "dismiss"] } },
+      required: ["id", "op"],
+    },
+    annotations: WRITE,
   },
 ];
+
+/* Names whose dispatch mutates; the endpoint gates these on the
+   mcpWrites pref. */
+export const WRITE_TOOLS = new Set(TOOLS.filter((t) => t.annotations?.readOnlyHint === false)
+  .map((t) => t.name));
+
+/* A local-day arg for a write: well-formed, a real date, and within
+   [today − 1, today + 366]. Returns the day or null. */
+export function checkDay(day: string, today: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const d = Date.parse(day + "T12:00:00Z"), t = Date.parse(today + "T12:00:00Z");
+  if (!Number.isFinite(d) || !Number.isFinite(t)) return null;
+  const diff = Math.round((d - t) / 864e5);
+  return diff >= -1 && diff <= 366 ? day : null;
+}
+
+/* Resolve a spoken list name against the lists index: exact normalized
+   match, else exact after light plural-stemming (groceries → grocery),
+   else prefix, else substring — a unique hit at the strongest tier wins;
+   anything else is an error naming the candidates. */
+const normName = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export const stemName = (s: string) => normName(s).split(" ")
+  .map((w) => w.replace(/ies$/, "y").replace(/([^su])s$/, "$1")).join(" ");
+export function resolveList<T extends { name: string }>(
+  want: string, lists: T[],
+): { hit: T } | { error: string } {
+  const avail = () => lists.map((l) => l.name).sort().join(", ") || "(no lists yet)";
+  const w = normName(want), ws = stemName(want);
+  if (!w) return { error: `which list? available: ${avail()}` };
+  const tiers: ((n: string, ns: string) => boolean)[] = [
+    (n) => n === w,
+    (_, ns) => ns === ws,
+    (n, ns) => n.startsWith(w) || w.startsWith(n) || ns.startsWith(ws) || ws.startsWith(ns),
+    (n, ns) => n.includes(w) || w.includes(n) || ns.includes(ws) || ws.includes(ns),
+  ];
+  for (const match of tiers) {
+    const hits = lists.filter((l) => match(normName(l.name), stemName(l.name)));
+    if (hits.length === 1) return { hit: hits[0] };
+    if (hits.length > 1) {
+      return { error: `"${want}" is ambiguous: ${hits.map((l) => l.name).sort().join(", ")}` };
+    }
+  }
+  return { error: `no list matches "${want}"; available: ${avail()}` };
+}
 
 type Rpc = { jsonrpc?: string; id?: unknown; method?: string; params?: Record<string, unknown> };
 export type RpcOut = { status: number; body: unknown | null };

@@ -5,7 +5,10 @@
    vocab() is the app's first live LLM call: one tiny completion naming a
    new list's verbs, plain on any failure, never in the read path. */
 import { v } from "convex/values";
-import { query, mutation, action } from "./_generated/server";
+import {
+  query, mutation, action, internalQuery, internalMutation,
+  type QueryCtx, type MutationCtx,
+} from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireUser, requireUserAction } from "./auth";
 import { listChunkId, listNoteId } from "./ids";
@@ -32,10 +35,7 @@ const itemText = (r: Doc<"items">) => {
 const goodWords = (w: any) =>
   w?.need && w?.got && w?.done ? (w as typeof PLAIN_WORDS) : null;
 
-export const lists = query({
-  args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
+async function listsH(ctx: QueryCtx) {
     const by: Record<string, { path: string; name: string; words: typeof PLAIN_WORDS;
       need: number; got: number; cat: number; pending: boolean }> = {};
     for (const r of await listRows(ctx)) {
@@ -53,13 +53,14 @@ export const lists = query({
       }
     }
     return Object.values(by).sort((a, b) => a.name.localeCompare(b.name));
-  },
+}
+export const lists = query({
+  args: {},
+  handler: async (ctx) => { await requireUser(ctx); return listsH(ctx); },
 });
+export const listsInternal = internalQuery({ args: {}, handler: (ctx) => listsH(ctx) });
 
-export const items = query({
-  args: { path: v.string() },
-  handler: async (ctx, { path }) => {
-    await requireUser(ctx);
+async function itemsH(ctx: QueryCtx, path: string) {
     const rows = (await listRows(ctx)).filter((r) => r.meta?.path === path);
     const marker = rows.find((r) => r.meta?.listNote);
     return {
@@ -73,7 +74,13 @@ export const items = query({
           state: String(r.meta?.state ?? "need") as "need" | "got" | "cat",
           pending: !!r.pending })),
     };
-  },
+}
+export const items = query({
+  args: { path: v.string() },
+  handler: async (ctx, { path }) => { await requireUser(ctx); return itemsH(ctx, path); },
+});
+export const itemsInternal = internalQuery({
+  args: { path: v.string() }, handler: (ctx, { path }) => itemsH(ctx, path),
 });
 
 /* ── writes ──────────────────────────────────────────────────────────── */
@@ -95,91 +102,108 @@ function itemRow(vault: string, path: string, name: string, text: string,
   };
 }
 
+const stateArg = v.union(v.literal("need"), v.literal("got"), v.literal("cat"));
+async function setStateH(ctx: MutationCtx, id: string, want: "need" | "got" | "cat") {
+  const row = await byChunkId(ctx, id);
+  if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
+  if (row.pending) throw new Error("that item is still syncing");
+  const prior = { state: row.meta.state };
+  await ctx.db.patch(row._id, { meta: { ...row.meta, state: want }, pending: true });
+  return await ctx.db.insert("taskIntents", {
+    kind: "listSet", chunkId: id, day: "list", vault: String(row.meta.vault ?? ""),
+    path: String(row.meta.path), text: itemText(row), want, prior,
+    requestedAt: Date.now(),
+  });
+}
 export const setState = mutation({
-  args: { id: v.string(), want: v.union(v.literal("need"), v.literal("got"), v.literal("cat")) },
-  handler: async (ctx, { id, want }) => {
-    await requireUser(ctx);
-    const row = await byChunkId(ctx, id);
-    if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
-    if (row.pending) throw new Error("that item is still syncing");
-    const prior = { state: row.meta.state };
-    await ctx.db.patch(row._id, { meta: { ...row.meta, state: want }, pending: true });
+  args: { id: v.string(), want: stateArg },
+  handler: async (ctx, { id, want }) => { await requireUser(ctx); return setStateH(ctx, id, want); },
+});
+export const setStateInternal = internalMutation({
+  args: { id: v.string(), want: stateArg },
+  handler: (ctx, { id, want }) => setStateH(ctx, id, want),
+});
+
+async function addItemH(ctx: MutationCtx, path: string, text: string) {
+  text = text.trim();
+  if (!text) throw new Error("empty item");
+  const { vault, name } = await anchor(ctx, path);
+  const id = listChunkId(vault, path, text);
+  const dup = await byChunkId(ctx, id);
+  if (dup && !dup.hidden) {
+    // exists in the catalog → this is "need it", not a duplicate
+    if (dup.meta?.state !== "cat") throw new Error("already on the list");
+    if (dup.pending) throw new Error("that item is still syncing");
+    await ctx.db.patch(dup._id, { meta: { ...dup.meta, state: "need" }, pending: true });
     return await ctx.db.insert("taskIntents", {
-      kind: "listSet", chunkId: id, day: "list", vault: String(row.meta.vault ?? ""),
-      path: String(row.meta.path), text: itemText(row), want, prior,
+      kind: "listSet", chunkId: id, day: "list", vault, path,
+      text: itemText(dup), want: "need", prior: { state: "cat" },
       requestedAt: Date.now(),
     });
-  },
-});
-
+  }
+  const rows = (await listRows(ctx)).filter((r) => r.meta?.path === path);
+  const order = rows.reduce((m, r) => Math.max(m, r.meta?.order ?? 0), 0) + 1;
+  const row = itemRow(vault, path, name, text, "need", order);
+  if (dup) await ctx.db.replace(dup._id, row);
+  else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1); }
+  return await ctx.db.insert("taskIntents", {
+    kind: "listAdd", chunkId: id, day: "list", vault, path, text, requestedAt: Date.now(),
+  });
+}
 export const addItem = mutation({
   args: { path: v.string(), text: v.string() },
-  handler: async (ctx, { path, text }) => {
-    await requireUser(ctx);
-    text = text.trim();
-    if (!text) throw new Error("empty item");
-    const { vault, name } = await anchor(ctx, path);
-    const id = listChunkId(vault, path, text);
-    const dup = await byChunkId(ctx, id);
-    if (dup && !dup.hidden) {
-      // exists in the catalog → this is "need it", not a duplicate
-      if (dup.meta?.state !== "cat") throw new Error("already on the list");
-      if (dup.pending) throw new Error("that item is still syncing");
-      await ctx.db.patch(dup._id, { meta: { ...dup.meta, state: "need" }, pending: true });
-      return await ctx.db.insert("taskIntents", {
-        kind: "listSet", chunkId: id, day: "list", vault, path,
-        text: itemText(dup), want: "need", prior: { state: "cat" },
-        requestedAt: Date.now(),
-      });
-    }
-    const rows = (await listRows(ctx)).filter((r) => r.meta?.path === path);
-    const order = rows.reduce((m, r) => Math.max(m, r.meta?.order ?? 0), 0) + 1;
-    const row = itemRow(vault, path, name, text, "need", order);
-    if (dup) await ctx.db.replace(dup._id, row);
-    else { await ctx.db.insert("items", row); await bump(ctx, "tasks", 1); }
-    return await ctx.db.insert("taskIntents", {
-      kind: "listAdd", chunkId: id, day: "list", vault, path, text, requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { path, text }) => { await requireUser(ctx); return addItemH(ctx, path, text); },
+});
+export const addItemInternal = internalMutation({
+  args: { path: v.string(), text: v.string() },
+  handler: (ctx, { path, text }) => addItemH(ctx, path, text),
 });
 
+async function editItemH(ctx: MutationCtx, id: string, newText: string) {
+  newText = newText.trim();
+  if (!newText) throw new Error("empty item");
+  const row = await byChunkId(ctx, id);
+  if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
+  if (row.pending) throw new Error("that item is still syncing");
+  const vault = String(row.meta.vault ?? ""), path = String(row.meta.path);
+  const freshId = listChunkId(vault, path, newText);
+  const clash = await byChunkId(ctx, freshId);
+  if (clash && !clash.hidden && clash.chunkId !== id) throw new Error("an item with that text already exists");
+  const fresh = itemRow(vault, path, String(row.meta.list ?? ""), newText,
+    String(row.meta.state ?? "need"), row.meta.order ?? 0);
+  if (clash) await ctx.db.replace(clash._id, fresh);
+  else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1); }
+  await ctx.db.patch(row._id, { hidden: true, pending: true });
+  return await ctx.db.insert("taskIntents", {
+    kind: "listEdit", chunkId: id, day: "list", vault, path,
+    text: itemText(row), newText, requestedAt: Date.now(),
+  });
+}
 export const editItem = mutation({
   args: { id: v.string(), newText: v.string() },
-  handler: async (ctx, { id, newText }) => {
-    await requireUser(ctx);
-    newText = newText.trim();
-    if (!newText) throw new Error("empty item");
-    const row = await byChunkId(ctx, id);
-    if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
-    if (row.pending) throw new Error("that item is still syncing");
-    const vault = String(row.meta.vault ?? ""), path = String(row.meta.path);
-    const freshId = listChunkId(vault, path, newText);
-    const clash = await byChunkId(ctx, freshId);
-    if (clash && !clash.hidden && clash.chunkId !== id) throw new Error("an item with that text already exists");
-    const fresh = itemRow(vault, path, String(row.meta.list ?? ""), newText,
-      String(row.meta.state ?? "need"), row.meta.order ?? 0);
-    if (clash) await ctx.db.replace(clash._id, fresh);
-    else { await ctx.db.insert("items", fresh); await bump(ctx, "tasks", 1); }
-    await ctx.db.patch(row._id, { hidden: true, pending: true });
-    return await ctx.db.insert("taskIntents", {
-      kind: "listEdit", chunkId: id, day: "list", vault, path,
-      text: itemText(row), newText, requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { id, newText }) => { await requireUser(ctx); return editItemH(ctx, id, newText); },
+});
+export const editItemInternal = internalMutation({
+  args: { id: v.string(), newText: v.string() },
+  handler: (ctx, { id, newText }) => editItemH(ctx, id, newText),
 });
 
+async function removeItemH(ctx: MutationCtx, id: string) {
+  const row = await byChunkId(ctx, id);
+  if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
+  await ctx.db.patch(row._id, { hidden: true, pending: true });
+  return await ctx.db.insert("taskIntents", {
+    kind: "listRemove", chunkId: id, day: "list", vault: String(row.meta.vault ?? ""),
+    path: String(row.meta.path), text: itemText(row), requestedAt: Date.now(),
+  });
+}
 export const removeItem = mutation({
   args: { id: v.string() },
-  handler: async (ctx, { id }) => {
-    await requireUser(ctx);
-    const row = await byChunkId(ctx, id);
-    if (!row || row.meta?.listNote || !row.meta?.path) throw new Error("not a list item");
-    await ctx.db.patch(row._id, { hidden: true, pending: true });
-    return await ctx.db.insert("taskIntents", {
-      kind: "listRemove", chunkId: id, day: "list", vault: String(row.meta.vault ?? ""),
-      path: String(row.meta.path), text: itemText(row), requestedAt: Date.now(),
-    });
-  },
+  handler: async (ctx, { id }) => { await requireUser(ctx); return removeItemH(ctx, id); },
+});
+export const removeItemInternal = internalMutation({
+  args: { id: v.string() },
+  handler: (ctx, { id }) => removeItemH(ctx, id),
 });
 
 /* The done verb: every got item shelves to the catalog head. */

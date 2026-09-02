@@ -4,11 +4,17 @@
    the Lambda's S3 snapshot ever was. */
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { handleRpc, sha256b64url } from "./mcpCore";
+import type { Id } from "./_generated/dataModel";
+import { handleRpc, sha256b64url, WRITE_TOOLS, checkDay, resolveList } from "./mcpCore";
+import { localDayHour, DEFAULT_TZ } from "./reminderMath";
+import { derive } from "./timerMath";
 
 const asInt = (x: unknown, dflt: number) =>
   Number.isFinite(Number(x)) && Number(x) > 0 ? Math.floor(Number(x)) : dflt;
 const s = (x: unknown) => (typeof x === "string" ? x : "");
+const firstLine = (t: string) => t.split("\n", 1)[0].replace(/^Task: /, "");
+const hhmm = (tz: string) => new Intl.DateTimeFormat("en-GB",
+  { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date());
 
 export const endpoint = httpAction(async (ctx, req) => {
   const auth = req.headers.get("Authorization") ?? "";
@@ -35,6 +41,16 @@ export const endpoint = httpAction(async (ctx, req) => {
   }
 
   const out = await handleRpc(rpc as never, async (name, a) => {
+    // The timezone pref, fetched at most once per call.
+    let tzP: Promise<string> | null = null;
+    const tz = () => (tzP ??= ctx.runQuery(internal.reminders.prefInternal, { name: "timezone" })
+      .then((v) => String(v ?? DEFAULT_TZ)));
+
+    if (WRITE_TOOLS.has(name)) {
+      const on = await ctx.runQuery(internal.reminders.prefInternal, { name: "mcpWrites" });
+      if (on === false) throw new Error("actions are switched off in Oriel's settings");
+    }
+
     switch (name) {
       case "search_history": {
         const k = Math.min(asInt(a.k, 5), 50);
@@ -93,6 +109,116 @@ export const endpoint = httpAction(async (ctx, req) => {
         }
         return { total_chunks: st.total, sources,
                  ...(freshest ? { freshest_sync: new Date(freshest).toISOString() } : {}) };
+      }
+      /* ── action tools (wip/SPEC-llm-actions.md) ── */
+      case "list_tasks": {
+        const day = s(a.day)
+          || (await ctx.runQuery(internal.today.latestTaskDayInternal, {}))
+          || localDayHour(Date.now(), await tz()).day;
+        const rows = await ctx.runQuery(internal.today.tasksInternal, { day });
+        return { day, tasks: rows.map((r) => ({
+          id: r.id, text: firstLine(r.text),
+          done: !!(r.meta as { done?: boolean } | null)?.done, pending: r.pending })) };
+      }
+      case "create_task": {
+        const today = localDayHour(Date.now(), await tz()).day;
+        const day = s(a.day) ? checkDay(s(a.day), today) : today;
+        if (!day) throw new Error(`bad day "${s(a.day)}" — local YYYY-MM-DD, yesterday to a year ahead`);
+        await ctx.runMutation(internal.today.addInternal, { day, text: s(a.text) });
+        return { queued: true, day, text: s(a.text).trim(),
+                 ...(day !== today ? { note: "appears in the app on that day" } : {}) };
+      }
+      case "set_task": {
+        if (typeof a.done !== "boolean") throw new Error("done must be true or false");
+        const r = await ctx.runMutation(internal.today.toggleInternal,
+          { id: s(a.id), want: a.done ? "done" : "open" });
+        return r === null ? { queued: false, note: "already in that state" } : { queued: true };
+      }
+      case "edit_task": {
+        const r = await ctx.runMutation(internal.today.editInternal,
+          { id: s(a.id), newText: s(a.new_text) });
+        return r === null ? { queued: false, note: "text unchanged" } : { queued: true };
+      }
+      case "delete_task":
+        await ctx.runMutation(internal.today.removeInternal, { id: s(a.id) });
+        return { queued: true };
+      case "capture_note": {
+        const zone = await tz();
+        await ctx.runMutation(internal.today.captureInternal, {
+          day: localDayHour(Date.now(), zone).day, text: s(a.text), at: hhmm(zone),
+        });
+        return { queued: true };
+      }
+      case "list_items": {
+        const all = await ctx.runQuery(internal.lists.listsInternal, {});
+        const r = resolveList(s(a.list), all);
+        if ("error" in r) throw new Error(r.error);
+        const got = await ctx.runQuery(internal.lists.itemsInternal, { path: r.hit.path });
+        return { name: got.name, path: r.hit.path, words: got.words, items: got.items };
+      }
+      case "add_list_items": {
+        const items = Array.isArray(a.items) ? a.items.map((x) => String(x)) : [];
+        if (!items.length) throw new Error("items required");
+        const all = await ctx.runQuery(internal.lists.listsInternal, {});
+        const r = resolveList(s(a.list), all);
+        if ("error" in r) throw new Error(r.error);
+        const results = [];
+        for (const text of items) {
+          try {
+            await ctx.runMutation(internal.lists.addItemInternal, { path: r.hit.path, text });
+            results.push({ text, status: "queued" });
+          } catch (e) {
+            results.push({ text, status: String(e instanceof Error ? e.message : e) });
+          }
+        }
+        return { list: r.hit.name, results };
+      }
+      case "set_list_item": {
+        const state = s(a.state);
+        if (state !== "need" && state !== "got") throw new Error('state must be "need" or "got"');
+        await ctx.runMutation(internal.lists.setStateInternal, { id: s(a.id), want: state });
+        return { queued: true };
+      }
+      case "edit_list_item":
+        await ctx.runMutation(internal.lists.editItemInternal,
+          { id: s(a.id), newText: s(a.new_text) });
+        return { queued: true };
+      case "remove_list_item":
+        await ctx.runMutation(internal.lists.removeItemInternal, { id: s(a.id) });
+        return { queued: true };
+      case "list_timers": {
+        const rows = await ctx.runQuery(internal.timers.listInternal, {});
+        const now = Date.now();
+        return { timers: rows.map((r) => {
+          const d = derive(r, now);
+          return { id: r.id, label: r.label, state: d.st, remaining_ms: d.left,
+                   up: !!r.up, repeat: !!r.repeat };
+        }) };
+      }
+      case "start_timer": {
+        const label = s(a.label).trim();
+        if (!label) throw new Error("label required");
+        const taskId = s(a.task_id);
+        const up = a.up === true || !!taskId;
+        const seconds = asInt(a.seconds, 0);
+        if (!up && (seconds < 5 || seconds > 86400)) {
+          throw new Error("a countdown needs seconds between 5 and 86400");
+        }
+        await ctx.runMutation(internal.timers.startInternal, {
+          label, durationMs: up ? 0 : seconds * 1000,
+          repeat: a.repeat === true || undefined, up: up || undefined,
+          taskChunkId: taskId || undefined,
+        });
+        return { started: true, label, ...(up ? { stopwatch: true } : { seconds }) };
+      }
+      case "control_timer": {
+        const op = s(a.op);
+        const id = s(a.id) as Id<"timers">;
+        if (op === "pause") await ctx.runMutation(internal.timers.pauseInternal, { id });
+        else if (op === "resume") await ctx.runMutation(internal.timers.resumeInternal, { id });
+        else if (op === "dismiss") await ctx.runMutation(internal.timers.dismissInternal, { id });
+        else throw new Error('op must be "pause", "resume" or "dismiss"');
+        return { ok: true, op };
       }
       default:
         throw new Error(`unhandled tool ${name}`);

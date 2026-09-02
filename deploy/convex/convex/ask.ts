@@ -88,7 +88,7 @@ interface Adapter {
 class OpenAI implements Adapter {
   private messages: any[] = [];
   private url: string;
-  constructor(private preset: Preset & { _key: string }) {
+  constructor(private preset: Preset & { _key: string }, private tools: Tool[] = TOOLS) {
     this.url = (preset.base_url ?? "https://api.openai.com/v1").replace(/\/$/, "") + "/chat/completions";
   }
   start(system: string, question: string) {
@@ -99,7 +99,8 @@ class OpenAI implements Adapter {
     const data = await http(this.url, headers, {
       model: this.preset.model, messages: this.messages,
       max_tokens: Number(this.preset.max_tokens ?? 2048),
-      tools: TOOLS.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } })),
+      ...(this.tools.length ? { tools: this.tools.map((t) =>
+        ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } })) } : {}),
     });
     const msg = data.choices[0].message;
     this.messages.push(msg);
@@ -121,7 +122,7 @@ class Anthropic implements Adapter {
   private messages: any[] = [];
   private system = "";
   private url: string;
-  constructor(private preset: Preset & { _key: string }) {
+  constructor(private preset: Preset & { _key: string }, private tools: Tool[] = TOOLS) {
     this.url = (preset.base_url ?? "https://api.anthropic.com").replace(/\/$/, "") + "/v1/messages";
   }
   start(system: string, question: string) {
@@ -132,7 +133,8 @@ class Anthropic implements Adapter {
     const data = await http(this.url, { "x-api-key": this.preset._key, "anthropic-version": "2023-06-01" }, {
       model: this.preset.model, max_tokens: Number(this.preset.max_tokens ?? 2048),
       system: this.system, messages: this.messages,
-      tools: TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema })),
+      ...(this.tools.length ? { tools: this.tools.map((t) =>
+        ({ name: t.name, description: t.description, input_schema: t.schema })) } : {}),
     });
     this.messages.push({ role: "assistant", content: data.content });
     let text = ""; const calls: Call[] = [];
@@ -148,9 +150,33 @@ class Anthropic implements Adapter {
   }
 }
 
-const ADAPTERS: Record<string, new (p: Preset & { _key: string }) => Adapter> = {
+const ADAPTERS: Record<string, new (p: Preset & { _key: string }, tools?: Tool[]) => Adapter> = {
   "openai-compatible": OpenAI, anthropic: Anthropic,
 };
+
+/* One completion, no tool loop — the command parser's and bench's path
+   (wip/SPEC-llm-actions.md). */
+export async function chatOnce(
+  preset: Preset & { _key: string }, system: string, user: string, maxTokens = 1000,
+): Promise<{ text: string; usage: { in: number; out: number } }> {
+  const Adapter = ADAPTERS[preset.backend ?? "openai-compatible"];
+  if (!Adapter) throw new AskError(`unknown backend '${preset.backend}' in preset '${preset.name}'`);
+  const adapter = new Adapter({ ...preset, max_tokens: maxTokens }, []);
+  adapter.start(system, user);
+  const step = await adapter.step();
+  return { text: step.text, usage: step.usage };
+}
+
+/* The parser's preset: the one flagged "parse" (set by the bench's
+   winner), else fastest by advertised latency. */
+export function parsePreset(): (Preset & { _key: string }) | null {
+  const ps = presets();
+  if (!ps.length) return null;
+  const flagged = ps.find((p) => p.parse);
+  if (flagged) return flagged;
+  const lat = (m: { latency?: string }) => Number((m.latency ?? "").replace(/\D/g, "")) || 99;
+  return [...ps].sort((a, b) => lat(a) - lat(b))[0];
+}
 
 export function citations(text: string): string[] {
   const seen = new Set<string>(); const out: string[] = [];

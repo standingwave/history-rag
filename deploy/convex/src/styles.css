@@ -236,6 +236,11 @@ pre.body { max-width: 100%; word-break: break-word; white-space: pre-wrap; overf
 .veil { position: fixed; inset: 0; background: #000a; z-index: 5; }
 .cappanel { position: fixed; left: 0; right: 0; bottom: 0; background: #17171b; border-top: 1px solid #2a2a30; border-radius: 18px 18px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); z-index: 6; max-width: 44rem; margin: 0 auto; }
 .capin { width: 100%; background: none; border: 0; border-bottom: 1px solid #8ab4f8; border-radius: 0; color: inherit; font: inherit; font-size: 16px; outline: 0; resize: none; padding: 4px 0 8px; }
+/* ✨ smart capture's proposal chips */
+.props { margin: 4px 0 6px; }
+.props .prow { align-items: center; }
+.props .prow .cancelv { padding: 4px 8px; }
+.props .prow.del .cx { color: #f87171; }
 .vrow { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
 .vpill { background: none; border: 1px solid #2a2a30; border-radius: 999px; padding: 7px 14px; font: inherit; font-size: .88rem; color: #a6a6af; cursor: pointer; }
 .vpill.on { border-color: #8ab4f8; color: #e8e8eb; background: #8ab4f81a; }

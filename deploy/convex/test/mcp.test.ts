@@ -3,7 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  handleRpc, TOOLS, PROTOCOL_VERSIONS, b64url, sha256b64url, pkceOk, randToken,
+  handleRpc, TOOLS, WRITE_TOOLS, PROTOCOL_VERSIONS, b64url, sha256b64url, pkceOk, randToken,
+  checkDay, resolveList,
 } from "../convex/mcpCore.ts";
 
 const noCall = async () => { throw new Error("no tool call expected"); };
@@ -18,16 +19,54 @@ test("initialize echoes a supported version, else offers the newest", async () =
   assert.deepEqual((out.body as any).result.capabilities, { tools: { listChanged: false } });
 });
 
-test("tools/list carries the four tools with schemas", async () => {
+test("tools/list carries the 4 read + 14 action tools with schemas", async () => {
   const out = await handleRpc(rpc("tools/list"), noCall);
   const tools = (out.body as any).result.tools;
-  assert.deepEqual(tools.map((t: any) => t.name).sort(),
-    ["expand", "history_stats", "list_window", "search_history"]);
+  assert.equal(tools.length, 18);
+  assert.deepEqual(tools.map((t: any) => t.name).sort(), [
+    "add_list_items", "capture_note", "control_timer", "create_task", "delete_task",
+    "edit_list_item", "edit_task", "expand", "history_stats", "list_items", "list_tasks",
+    "list_timers", "list_window", "remove_list_item", "search_history", "set_list_item",
+    "set_task", "start_timer",
+  ]);
   for (const t of tools) {
     assert.equal(t.inputSchema.type, "object");
-    assert.ok(t.description.length > 100);
+    assert.ok(t.description.length > 40);
+    assert.equal(typeof t.annotations.readOnlyHint, "boolean");
   }
   assert.deepEqual(TOOLS.find((t) => t.name === "search_history")!.inputSchema.required, ["query"]);
+});
+
+test("WRITE_TOOLS is exactly the non-read-only set", () => {
+  assert.deepEqual([...WRITE_TOOLS].sort(), [
+    "add_list_items", "capture_note", "control_timer", "create_task", "delete_task",
+    "edit_list_item", "edit_task", "remove_list_item", "set_list_item", "set_task",
+    "start_timer",
+  ]);
+  assert.ok(TOOLS.find((t) => t.name === "delete_task")!.annotations!.destructiveHint);
+  assert.ok(!TOOLS.find((t) => t.name === "create_task")!.annotations!.destructiveHint);
+});
+
+test("checkDay accepts a real nearby day, rejects the rest", () => {
+  assert.equal(checkDay("2026-09-03", "2026-09-02"), "2026-09-03");
+  assert.equal(checkDay("2026-09-01", "2026-09-02"), "2026-09-01");   // yesterday ok
+  assert.equal(checkDay("2026-08-31", "2026-09-02"), null);            // too far back
+  assert.equal(checkDay("2027-09-04", "2026-09-02"), null);            // beyond a year
+  assert.equal(checkDay("2026-02-31", "2026-09-02"), null);            // not a real date
+  assert.equal(checkDay("tomorrow", "2026-09-02"), null);
+  assert.equal(checkDay("2026-09-03T12:00:00Z", "2026-09-02"), null);
+});
+
+test("resolveList: exact beats prefix beats substring; ambiguity errors", () => {
+  const ls = [{ name: "Grocery" }, { name: "Camping" }, { name: "Camping food" }];
+  assert.deepEqual(resolveList("grocery", ls), { hit: { name: "Grocery" } });
+  assert.deepEqual(resolveList("groceries", ls), { hit: { name: "Grocery" } });  // prefix-of
+  assert.deepEqual(resolveList("camping", ls), { hit: { name: "Camping" } });    // exact wins
+  const amb = resolveList("camp", ls);
+  assert.ok("error" in amb && amb.error.includes("Camping food"));
+  const none = resolveList("hardware", ls);
+  assert.ok("error" in none && none.error.includes("Grocery"));
+  assert.ok("error" in resolveList("", ls));
 });
 
 test("notifications get 202 and no body; unknown methods -32601", async () => {

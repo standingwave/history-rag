@@ -5,7 +5,7 @@
    for events already synced. prefs gates the feature (D3) and holds the
    timezone the wall-clock text renders in (D4). */
 import { v } from "convex/values";
-import { query, mutation, internalMutation, type QueryCtx } from "./_generated/server";
+import { query, mutation, internalQuery, internalMutation, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireUser } from "./auth";
 import { due, eventTitle, LEAD_MS, SWEEP_MS, DEFAULT_TZ } from "./reminderMath";
@@ -16,6 +16,11 @@ export async function pref(ctx: QueryCtx, name: string) {
   return row?.value;
 }
 
+export const prefInternal = internalQuery({
+  args: { name: v.string() },
+  handler: (ctx, { name }) => pref(ctx, name),
+});
+
 export const status = query({
   args: {},
   handler: async (ctx) => {
@@ -23,6 +28,7 @@ export const status = query({
     return {
       remindEvents: (await pref(ctx, "remindEvents")) !== false,
       digestPush: (await pref(ctx, "digestPush")) !== false,
+      mcpWrites: (await pref(ctx, "mcpWrites")) !== false,
       timezone: (await pref(ctx, "timezone")) ?? DEFAULT_TZ,
       subscribed: !!(await ctx.db.query("pushSubs").first()),
     };
@@ -31,7 +37,8 @@ export const status = query({
 
 export const setPref = mutation({
   args: {
-    name: v.union(v.literal("remindEvents"), v.literal("timezone"), v.literal("digestPush")),
+    name: v.union(v.literal("remindEvents"), v.literal("timezone"), v.literal("digestPush"),
+      v.literal("mcpWrites")),
     value: v.any(),
   },
   handler: async (ctx, { name, value }) => {

@@ -1230,32 +1230,129 @@ const hhmmNow = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+/* Chip text for a proposed action; `label` is the target's current text,
+   attached server-side. */
+function chipText(a: any, today: string): string {
+  const q = (s: string) => `“${s.length > 60 ? s.slice(0, 57) + "…" : s}”`;
+  const dayHint = (d: string) => {
+    const diff = Math.round((Date.parse(d + "T12:00:00Z") - Date.parse(today + "T12:00:00Z")) / 864e5);
+    const wd = new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+    return diff === 1 ? `tomorrow (${wd})` : diff === -1 ? "yesterday" : `${wd} ${d.slice(5)}`;
+  };
+  switch (a.kind) {
+    case "task": return `＋ task ${q(a.text)}${a.day !== today ? ` · ${dayHint(a.day)}` : ""}`;
+    case "note": return `✎ note ${q(a.text)}`;
+    case "toggle": return a.done ? `✓ done ${q(a.label)}` : `○ reopen ${q(a.label)}`;
+    case "edit": return `✎ ${q(a.label)} → ${q(a.newText)}`;
+    case "delete": return `✕ delete ${q(a.label)}`;
+    case "listAdd": return `＋ ${a.items.length > 1 ? `${a.items.length} items` : q(a.items[0])} → ${a.label}`;
+    case "listSet": return a.state === "got" ? `✓ got ${q(a.label)}` : `＋ need ${q(a.label)}`;
+    case "listEdit": return `✎ ${q(a.label)} → ${q(a.newText)}`;
+    case "listRemove": return `✕ remove ${q(a.label)} from list`;
+    case "timerStart": return a.up
+      ? `⏱ ${a.taskId ? "focus" : "stopwatch"} ${q(a.label)}`
+      : `⏱ ${durLabel(a.ms)} ${q(a.label)}${a.repeat ? " ↻" : ""}`;
+    case "timerCtl": return `⏱ ${a.op} ${q(a.label)}`;
+    default: return JSON.stringify(a);
+  }
+}
+
 function CaptureComposer({ day, onDone, onCancel, fail }:
   { day: string; onDone?: () => void; onCancel?: () => void; fail: (e: unknown) => void }) {
   const capture = useMutation(api.today.capture);
   const add = useMutation(api.today.add);
-  const [mode, setMode] = useState<"note" | "task">("note");
+  const toggleTask = useMutation(api.today.toggle);
+  const editTask = useMutation(api.today.edit);
+  const removeTask = useMutation(api.today.remove);
+  const addListItem = useMutation(api.lists.addItem);
+  const setListState = useMutation(api.lists.setState);
+  const editListItem = useMutation(api.lists.editItem);
+  const removeListItem = useMutation(api.lists.removeItem);
+  const timerStart = useMutation(api.timers.start);
+  const timerPause = useMutation(api.timers.pause);
+  const timerResume = useMutation(api.timers.resume);
+  const timerDismiss = useMutation(api.timers.dismiss);
+  const parseCmd = useAction(api.command.parse);
+  const [mode, setMode] = useState<"note" | "task" | "smart">("note");
   const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [prop, setProp] = useState<{ actions: any[]; fallback: boolean;
+    model: string | null; ms: number } | null>(null);
+  const [drop, setDrop] = useState<Set<number>>(new Set());
+  const reset = () => { setDraft(""); setMode("note"); setProp(null); setDrop(new Set()); };
   const submit = () => {
     const text = draft.trim();
     if (!text) { onCancel?.(); return; }
+    if (mode === "smart") {
+      if (busy) return;
+      setBusy(true); setProp(null); setDrop(new Set());
+      parseCmd({ text, today: day })
+        .then(setProp).catch(fail).finally(() => setBusy(false));
+      return;
+    }
     (mode === "note" ? capture({ day, text, at: hhmmNow() }) : add({ day, text })).catch(fail);
-    setDraft(""); setMode("note"); onDone?.();
+    reset(); onDone?.();
   };
+  const run = (a: any): Promise<unknown> => {
+    const tid = a.id as Id<"timers">;
+    switch (a.kind) {
+      case "task": return add({ day: a.day, text: a.text });
+      case "note": return capture({ day, text: a.text, at: hhmmNow() });
+      case "toggle": return toggleTask({ id: a.id });
+      case "edit": return editTask({ id: a.id, newText: a.newText });
+      case "delete": return removeTask({ id: a.id });
+      case "listAdd": return Promise.all(
+        a.items.map((t: string) => addListItem({ path: a.path, text: t }).catch(fail)));
+      case "listSet": return setListState({ id: a.id, want: a.state });
+      case "listEdit": return editListItem({ id: a.id, newText: a.newText });
+      case "listRemove": return removeListItem({ id: a.id });
+      case "timerStart": unlockAudio(); return timerStart({
+        label: a.label, durationMs: a.ms, repeat: a.repeat, up: a.up, taskChunkId: a.taskId });
+      case "timerCtl": return (a.op === "pause" ? timerPause
+        : a.op === "resume" ? timerResume : timerDismiss)({ id: tid });
+      default: return Promise.resolve();
+    }
+  };
+  const queueAll = () => {
+    for (const [i, a] of prop!.actions.entries()) {
+      if (!drop.has(i)) void run(a).catch(fail);
+    }
+    reset(); onDone?.();
+  };
+  const kept = prop ? prop.actions.filter((_, i) => !drop.has(i)) : [];
   return (
     <>
       <textarea className="capin" autoFocus rows={2}
-        placeholder={mode === "note" ? "capture a thought…" : "new task…"}
-        value={draft} onChange={(e) => setDraft(e.target.value)}
+        placeholder={mode === "note" ? "capture a thought…"
+          : mode === "task" ? "new task…" : "tell Oriel what to do…"}
+        value={draft} onChange={(e) => { setDraft(e.target.value); setProp(null); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
           if (e.key === "Escape") onCancel?.();
         }} />
+      {prop && <div className="props">
+        {prop.fallback && <p className="muted small" style={{ margin: "2px 0" }}>
+          couldn't read that as a command — keeping it as a note:</p>}
+        {prop.actions.map((a, i) => drop.has(i) ? null : (
+          <div key={i} className={`crow prow${a.kind === "delete" || a.kind === "listRemove" ? " del" : ""}`}>
+            <span className="cx">{chipText(a, day)}</span>
+            <button className="cancelv" aria-label="drop" onClick={() =>
+              setDrop((d) => new Set(d).add(i))}>✕</button>
+          </div>))}
+        {!kept.length && <p className="muted small">nothing left to queue</p>}
+        <p className="muted small" style={{ margin: "4px 0 0" }}>
+          {prop.model} · {(prop.ms / 1000).toFixed(1)} s</p>
+      </div>}
       <div className="vrow">
         <button className={`vpill ${mode === "note" ? "on" : ""}`} onClick={() => setMode("note")}>✎ note</button>
         <button className={`vpill ${mode === "task" ? "on" : ""}`} onClick={() => setMode("task")}>○ task</button>
+        <button className={`vpill ${mode === "smart" ? "on" : ""}`} onClick={() => setMode("smart")}>✨ smart</button>
         {onCancel && <button className="cancelv" onClick={onCancel}>cancel</button>}
-        <button className="go" style={{ marginLeft: "auto" }} onClick={submit}>add</button>
+        {prop
+          ? <button className="go" style={{ marginLeft: "auto" }} disabled={!kept.length}
+              onClick={queueAll}>queue</button>
+          : <button className="go" style={{ marginLeft: "auto" }} disabled={busy}
+              onClick={submit}>{mode === "smart" ? (busy ? "…" : "✨ go") : "add"}</button>}
       </div>
     </>
   );
@@ -1370,6 +1467,9 @@ function SettingsSheet({ onBack }: { onBack: () => void }) {
             </>
           : <button className="lnk" onClick={() => void mint({}).then(setApproval).catch(fail)}>connect claude.ai…</button>}
       </div>
+      {rstat &&
+        <div className="srow"><span>claude.ai actions<span className="sub">let it create and change tasks, lists, timers</span></span>
+          {toggle(rstat.mcpWrites, () => void setPref({ name: "mcpWrites", value: !rstat.mcpWrites }).catch(fail))}</div>}
       <p className="sect">APP</p>
       <div className="srow"><a className="lnk" href="/guide.html">how to use Oriel ›</a></div>
       <p className="muted small" style={{ marginTop: 12 }}>build {__BUILD__}</p>
