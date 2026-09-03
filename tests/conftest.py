@@ -11,6 +11,9 @@ os.environ["CLAUDE_RAG_APPUSAGE_DB"] = os.path.join(_TMP, "appusage.db")
 os.environ["CLAUDE_RAG_ATUIN_DB"] = os.path.join(_TMP, "atuin.db")   # absent -> no atuin
 os.environ["CLAUDE_RAG_HISTFILES"] = ""
 os.environ["CLAUDE_RAG_NOTIFY"] = "false"   # no real macOS notifications
+# vendored daily-tasks skill so the applier tests run without the installed one
+os.environ["CLAUDE_RAG_CONVEX_TASKS_SCRIPT"] = str(
+    pathlib.Path(__file__).resolve().parent / "fixtures" / "daily_tasks.py")
 os.environ["TZ"] = "America/Los_Angeles"
 time.tzset()
 

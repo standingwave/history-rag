@@ -114,6 +114,18 @@ skill_present = pytest.mark.skipif(
     not __import__("os").path.isfile(__import__("config").CONVEX_TASKS_SCRIPT),
     reason="daily-tasks skill not installed")
 
+INSTALLED_SKILL = __import__("os").path.expanduser(
+    "~/.claude/skills/daily-tasks/tasks.py")
+
+@pytest.mark.skipif(not __import__("os").path.isfile(INSTALLED_SKILL),
+                    reason="daily-tasks skill not installed")
+def test_vendored_skill_matches_installed():
+    """tests/fixtures/daily_tasks.py is a copy of the installed skill with only
+    DEFAULT_VAULT sanitized. Re-vendor when the skill changes."""
+    import config, re
+    strip = lambda p: re.sub(r"(?m)^DEFAULT_VAULT = .*$", "", open(p).read())
+    assert strip(config.CONVEX_TASKS_SCRIPT) == strip(INSTALLED_SKILL)
+
 BLOCK = ["- [ ] treat hoya for mealybugs",
          "\t- [ ] isolate from other plants",
          "\t![[2026-08-28 hoya.jpeg]]",
