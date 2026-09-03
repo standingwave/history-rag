@@ -61,6 +61,10 @@ function systemPrompt(strict: boolean) {
   return p;
 }
 
+/* A user turn: plain text, or OpenAI-style content parts (the voice
+   path attaches input_audio — wip/SPEC-voice-capture.md). */
+export type UserContent = string | Record<string, unknown>[];
+
 type Call = { id: string; name: string; args: Record<string, unknown> };
 type Step = { text: string; calls: Call[]; usage: { in: number; out: number } };
 
@@ -80,7 +84,7 @@ async function http(url: string, headers: Record<string, string>, payload: unkno
 }
 
 interface Adapter {
-  start(system: string, question: string): void;
+  start(system: string, question: UserContent): void;
   step(): Promise<Step>;
   addResults(results: { id: string; result: string }[]): void;
 }
@@ -91,7 +95,7 @@ class OpenAI implements Adapter {
   constructor(private preset: Preset & { _key: string }, private tools: Tool[] = TOOLS) {
     this.url = (preset.base_url ?? "https://api.openai.com/v1").replace(/\/$/, "") + "/chat/completions";
   }
-  start(system: string, question: string) {
+  start(system: string, question: UserContent) {
     this.messages = [{ role: "system", content: system }, { role: "user", content: question }];
   }
   async step(): Promise<Step> {
@@ -126,7 +130,8 @@ class Anthropic implements Adapter {
   constructor(private preset: Preset & { _key: string }, private tools: Tool[] = TOOLS) {
     this.url = (preset.base_url ?? "https://api.anthropic.com").replace(/\/$/, "") + "/v1/messages";
   }
-  start(system: string, question: string) {
+  start(system: string, question: UserContent) {
+    if (typeof question !== "string") throw new AskError("content parts need an openai-compatible backend");
     this.system = system;
     this.messages = [{ role: "user", content: question }];
   }
@@ -159,7 +164,7 @@ const ADAPTERS: Record<string, new (p: Preset & { _key: string }, tools?: Tool[]
 /* One completion, no tool loop — the command parser's and bench's path
    (wip/SPEC-llm-actions.md). */
 export async function chatOnce(
-  preset: Preset & { _key: string }, system: string, user: string, maxTokens = 1000,
+  preset: Preset & { _key: string }, system: string, user: UserContent, maxTokens = 1000,
 ): Promise<{ text: string; usage: { in: number; out: number } }> {
   const Adapter = ADAPTERS[preset.backend ?? "openai-compatible"];
   if (!Adapter) throw new AskError(`unknown backend '${preset.backend}' in preset '${preset.name}'`);
