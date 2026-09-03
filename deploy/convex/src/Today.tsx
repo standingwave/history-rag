@@ -11,6 +11,7 @@ import { useAction } from "convex/react";
 import { shortDate, hhmm, Linkify, describe } from "./render";
 import { derive, fmt as fmtLeft, durLabel } from "../convex/timerMath";
 import { record, type Recorder } from "./wav";
+import { verbatim, autoApplies } from "./capture";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -1279,7 +1280,6 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
   const timerDismiss = useMutation(api.timers.dismiss);
   const parseCmd = useAction(api.command.parse);
   const voiceCmd = useAction(api.voice.command);
-  const [mode, setMode] = useState<"note" | "task" | "smart">("note");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [prop, setProp] = useState<{ actions: any[]; fallback: boolean;
@@ -1296,7 +1296,7 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
     if (!r) return;
     recRef.current = null; setRecSec(-1);
     setBusy(true); setProp(null); setDrop(new Set());
-    r.stop().then((audio) => audio ? voiceCmd({ audio, today: day }).then(setProp) : undefined)
+    r.stop().then((audio) => audio ? voiceCmd({ audio, today: day }).then(finish) : undefined)
       .catch(fail).finally(() => setBusy(false));
   };
   const micTap = () => {
@@ -1306,20 +1306,33 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
       .then((r) => { recRef.current = r; setRecSec(0); })
       .catch(fail);
   };
-  const pick = (m: "note" | "task" | "smart") => { micDrop(); setMode(m); };
-  const reset = () => { micDrop(); setDraft(""); setMode("note"); setProp(null); setDrop(new Set()); };
+  const reset = () => { micDrop(); setDraft(""); setProp(null); setDrop(new Set()); };
+  const toastFor = (p: { actions: any[]; heard?: string }) => {
+    const labels = p.actions.slice(0, 2).map((a) => chipText(a, day));
+    const what = labels.join(", ") + (p.actions.length > 2 ? ` +${p.actions.length - 2} more` : "");
+    return p.heard !== undefined
+      ? `🎤 “${p.heard.length > 40 ? p.heard.slice(0, 37) + "…" : p.heard}” → ${what}`
+      : p.actions.length === 1 ? `${what} · queued` : `✨ ${p.actions.length} queued: ${what}`;
+  };
+  // Unified capture (wip/SPEC-unified-capture.md): creations act,
+  // mutations ask via chips.
+  const finish = (p: NonNullable<typeof prop>) => {
+    if (!autoApplies(p.actions)) { setProp(p); return; }
+    for (const a of p.actions) void run(a).catch(fail);
+    reset(); onDone?.(toastFor(p));
+  };
   const submit = () => {
     const text = draft.trim();
     if (!text) { onCancel?.(); return; }
-    if (mode === "smart") {
-      if (busy) return;
-      setBusy(true); setProp(null); setDrop(new Set());
-      parseCmd({ text, today: day })
-        .then(setProp).catch(fail).finally(() => setBusy(false));
+    const lit = verbatim(text);
+    if (lit) {
+      capture({ day, text: lit, at: hhmmNow() }).catch(fail);
+      reset(); onDone?.("✎ note queued");
       return;
     }
-    (mode === "note" ? capture({ day, text, at: hhmmNow() }) : add({ day, text })).catch(fail);
-    reset(); onDone?.(mode === "note" ? "✎ note queued" : "○ task queued");
+    if (busy) return;
+    setBusy(true); setProp(null); setDrop(new Set());
+    parseCmd({ text, today: day }).then(finish).catch(fail).finally(() => setBusy(false));
   };
   const run = (a: any): Promise<unknown> => {
     const tid = a.id as Id<"timers">;
@@ -1356,8 +1369,7 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
   return (
     <>
       <textarea className="capin" autoFocus rows={2}
-        placeholder={mode === "note" ? "capture a thought…"
-          : mode === "task" ? "new task…" : "tell Oriel what to do…"}
+        placeholder="capture a thought or tell Oriel what to do…"
         value={draft} onChange={(e) => { setDraft(e.target.value); setProp(null); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
@@ -1366,8 +1378,6 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
       {prop && <div className="props">
         {prop.heard !== undefined && <p className="muted small" style={{ margin: "2px 0" }}>
           heard: “{prop.heard}”</p>}
-        {prop.fallback && <p className="muted small" style={{ margin: "2px 0" }}>
-          couldn't read that as a command — keeping it as a note:</p>}
         {prop.actions.map((a, i) => drop.has(i) ? null : (
           <div key={i} className={`crow prow${a.kind === "delete" || a.kind === "listRemove" ? " del" : ""}`}>
             <span className="cx">{chipText(a, day)}</span>
@@ -1379,19 +1389,16 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
           {prop.model} · {(prop.ms / 1000).toFixed(1)} s</p>
       </div>}
       <div className="vrow">
-        <button className={`vpill ${mode === "note" ? "on" : ""}`} onClick={() => pick("note")}>✎ note</button>
-        <button className={`vpill ${mode === "task" ? "on" : ""}`} onClick={() => pick("task")}>○ task</button>
-        <button className={`vpill ${mode === "smart" ? "on" : ""}`} onClick={() => pick("smart")}>✨ smart</button>
         {onCancel && <button className="cancelv" onClick={onCancel}>cancel</button>}
-        {mode === "smart" && !prop &&
+        {!prop &&
           <button className={`vpill${recSec >= 0 ? " on pulse" : ""}`} style={{ marginLeft: "auto" }}
             disabled={busy} onClick={micTap} aria-label="voice">
             {recSec >= 0 ? `◼ ${recSec}s` : "🎤"}</button>}
         {prop
           ? <button className="go" style={{ marginLeft: "auto" }} disabled={!kept.length}
               onClick={queueAll}>queue</button>
-          : <button className="go" style={{ marginLeft: mode === "smart" ? 0 : "auto" }} disabled={busy || recSec >= 0}
-              onClick={submit}>{mode === "smart" ? (busy ? "…" : "✨ go") : "add"}</button>}
+          : <button className="go" disabled={busy || recSec >= 0}
+              onClick={submit}>{busy ? "…" : "add"}</button>}
       </div>
     </>
   );
@@ -1432,6 +1439,14 @@ function CaptureFab({ day, onSheet }: { day: string; onSheet: () => void }) {
 function CaptureSheet({ day, intents, onBack }:
   { day: string; intents?: any[]; onBack: () => void }) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noted = (msg?: string) => {
+    if (!msg) return;
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 2600);
+  };
   const { push: fail, view: errView } = useErrors();
   const notes = (intents ?? [])
     .filter((i) => i.kind === "note" && i.day === day)
@@ -1459,10 +1474,12 @@ function CaptureSheet({ day, intents, onBack }:
         );
       })}
       <div style={{ marginTop: 16 }}>
-        <CaptureComposer day={day} fail={fail} />
+        {notice && <p className="muted small">{notice}</p>}
+        <CaptureComposer day={day} fail={fail} onDone={noted} />
       </div>
       <p className="muted small" style={{ marginTop: 12 }}>
-        notes land in today's note under "Notes"; tasks join the task list</p>
+        plain thoughts become notes, commands become tasks, lists and timers;
+        start with "note:" to keep the words exactly as written</p>
     </section>
   );
 }

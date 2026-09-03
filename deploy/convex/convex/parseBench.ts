@@ -79,7 +79,10 @@ const CASES: Case[] = [
   { text: "add a flashlight to the camping list",
     want: [[{ kind: "listAdd", path: "Lists/Camping.md", items: [/flashlight/] }]] },
   { text: "put milk eggs and bread on the shopping list",
-    want: [[{ kind: "listAdd", path: "Lists/Grocery.md", items: [/milk/, /eggs/, /bread/] }]] },
+    want: [[{ kind: "listAdd", path: "Lists/Grocery.md", items: [/milk/, /eggs/, /bread/] }],
+           // re-flagging the items already on the list is just as right
+           [{ kind: "listSet", id: "g1", state: "need" }, { kind: "listSet", id: "g2", state: "need" },
+            { kind: "listAdd", path: "Lists/Grocery.md", items: [/bread/] }]] },
   { text: "got the eggs", want: [[{ kind: "listSet", id: "g2", state: "got" }]] },
   { text: "we're out of hot sauce again",
     want: [[{ kind: "listSet", id: "g3", state: "need" }],
@@ -96,6 +99,9 @@ const CASES: Case[] = [
   // timers
   { text: "set a timer for 10 minutes", want: [[{ kind: "timerStart", ms: 600000 }]] },
   { text: "pizza timer, 12 minutes", want: [[{ kind: "timerStart", ms: 720000, label: /pizza/ }]] },
+  // prefix-style phrasing is plain language to the model, not syntax
+  { text: "timer: 5 minutes boiling water for tea", want: [[{ kind: "timerStart", ms: 300000, label: /tea|boil|water/ }]] },
+  { text: "task: renew passport friday", want: [[{ kind: "task", day: "2026-09-04", text: /passport/ }]] },
   { text: "start a stopwatch", want: [[{ kind: "timerStart", up: true }]] },
   { text: "start a focus timer on the dentist task", want: [[{ kind: "timerStart", up: true, taskId: "t2" }]] },
   { text: "pause the tea timer", want: [[{ kind: "timerCtl", id: "w1", op: "pause" }]] },
@@ -174,10 +180,15 @@ export const bench = internalAction({
             const got = await chatOnce(p, parseSystem(CTX.today), parseUser(c.text, CTX), 400);
             lat.push(Date.now() - t0);
             tokIn += got.usage.in; tokOut += got.usage.out;
+            // Strip the validator-attached display label — but timerStart's
+            // label is model-emitted content, part of what's being judged.
             const acts = validateActions(got.text, c.text, CTX)
-              .actions.map(({ ...a }) => { delete (a as { label?: string }).label; return a; });
+              .actions.map(({ ...a }) => {
+                if (a.kind !== "timerStart") delete (a as { label?: string }).label;
+                return a;
+              });
             if (c.want.some((alt) => matches(alt, acts))) pass++;
-            else if (r === 0) missed.push(c.text);
+            else if (r === 0) missed.push(`${c.text} → ${JSON.stringify(acts).slice(0, 160)}`);
             if (misfired(c, acts)) misfires++;
           } catch (e) {
             lat.push(Date.now() - t0);

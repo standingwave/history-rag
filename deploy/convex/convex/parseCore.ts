@@ -36,6 +36,14 @@ export type ParsedAction =
 const weekday = (day: string) => new Intl.DateTimeFormat("en-US",
   { weekday: "long", timeZone: "UTC" }).format(new Date(day + "T12:00:00Z"));
 
+/* The coming week spelled out, so "next tuesday" is a lookup rather
+   than arithmetic the model gets wrong. */
+const week = (today: string) => Array.from({ length: 7 }, (_, i) => {
+  const d = new Date(Date.parse(today + "T12:00:00Z") + (i + 1) * 864e5)
+    .toISOString().slice(0, 10);
+  return `${weekday(d).slice(0, 3)} ${d}`;
+}).join(", ");
+
 export function parseSystem(today: string): string {
   return `You turn one sentence from the user of a personal task app into JSON actions.
 Reply with ONLY a JSON object {"actions":[...]}, no prose. Action shapes:
@@ -51,8 +59,8 @@ Reply with ONLY a JSON object {"actions":[...]}, no prose. Action shapes:
 {"kind":"listRemove","id":"..."} — delete a list item outright
 {"kind":"timerStart","label":"...","ms":600000} — countdown; add "up":true for a stopwatch; "taskId" (an open task's id) makes the stopwatch a focus session
 {"kind":"timerCtl","id":"...","op":"pause"} — pause/resume/dismiss a TIMER
-Today is ${today} (${weekday(today)}); resolve relative days to real dates.
-Use only ids and paths listed in the message. If the sentence refers to a task, list or timer that is not listed, or is a question or musing rather than an instruction, reply {"actions":[{"kind":"note","text":"<the sentence>"}]}.
+Today is ${today} (${weekday(today)}); the coming week: ${week(today)}. Resolve relative days to real dates.
+Use only ids and paths listed in the message. If the sentence names a list that is not in LISTS, use listCreate — never add to a differently named list. If the sentence refers to a task or timer that is not listed, or is a question or musing rather than an instruction, reply {"actions":[{"kind":"note","text":"<the sentence>"}]}.
 At most 10 actions.`;
 }
 
