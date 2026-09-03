@@ -20,7 +20,7 @@ export type ParseResult = {
   actions: ParsedAction[]; fallback: boolean; model: string | null; ms: number;
 };
 
-async function gather(ctx: ActionCtx, today: string, sentence: string): Promise<ParseCtx> {
+export async function gather(ctx: ActionCtx, today: string, sentence: string): Promise<ParseCtx> {
   // Open tasks live on the latest task day (carry moves them forward).
   const day = (await ctx.runQuery(internal.today.latestTaskDayInternal, {})) ?? today;
   const rows = await ctx.runQuery(internal.today.tasksInternal, { day });
@@ -46,6 +46,27 @@ async function gather(ctx: ActionCtx, today: string, sentence: string): Promise<
   return { today, tasks, lists, timers };
 }
 
+/* Shared by the typed ✨ path and voice.command: a nonempty sentence in,
+   a validated proposal out; any failure degrades to a plain note. */
+export async function parseText(ctx: ActionCtx, sentence: string, today: string): Promise<ParseResult> {
+  const t0 = Date.now();
+  const asNote = (model: string | null): ParseResult => ({
+    actions: [{ kind: "note", text: sentence }], fallback: true, model, ms: Date.now() - t0 });
+  const preset = parsePreset();
+  if (!preset) return asNote(null);
+  const pctx = await gather(ctx, today, sentence);
+  try {
+    const got = await Promise.race([
+      chatOnce(preset, parseSystem(today), parseUser(sentence, pctx), 400),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("timeout")), TIMEOUT_MS)),
+    ]);
+    return { ...validateActions(got.text, sentence, pctx), model: preset.name, ms: Date.now() - t0 };
+  } catch {
+    return asNote(preset.name);
+  }
+}
+
 export const parse = action({
   args: { text: v.string(), today: v.string() },
   handler: async (ctx, { text, today }): Promise<ParseResult> => {
@@ -53,21 +74,6 @@ export const parse = action({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error("bad day");
     const sentence = text.trim().slice(0, 500);
     if (!sentence) throw new Error("empty");
-    const t0 = Date.now();
-    const asNote = (model: string | null): ParseResult => ({
-      actions: [{ kind: "note", text: sentence }], fallback: true, model, ms: Date.now() - t0 });
-    const preset = parsePreset();
-    if (!preset) return asNote(null);
-    const pctx = await gather(ctx, today, sentence);
-    try {
-      const got = await Promise.race([
-        chatOnce(preset, parseSystem(today), parseUser(sentence, pctx), 400),
-        new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error("timeout")), TIMEOUT_MS)),
-      ]);
-      return { ...validateActions(got.text, sentence, pctx), model: preset.name, ms: Date.now() - t0 };
-    } catch {
-      return asNote(preset.name);
-    }
+    return parseText(ctx, sentence, today);
   },
 });

@@ -10,6 +10,7 @@ import { SearchSheet, AskSheet, BrowseSheet, Detail, Row, Answer } from "./Archi
 import { useAction } from "convex/react";
 import { shortDate, hhmm, Linkify, describe } from "./render";
 import { derive, fmt as fmtLeft, durLabel } from "../convex/timerMath";
+import { record, type Recorder } from "./wav";
 
 type Item = {
   id: string; source: string; timestamp: string; day: string;
@@ -1277,13 +1278,36 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
   const timerResume = useMutation(api.timers.resume);
   const timerDismiss = useMutation(api.timers.dismiss);
   const parseCmd = useAction(api.command.parse);
+  const voiceCmd = useAction(api.voice.command);
   const [mode, setMode] = useState<"note" | "task" | "smart">("note");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [prop, setProp] = useState<{ actions: any[]; fallback: boolean;
-    model: string | null; ms: number } | null>(null);
+    model: string | null; ms: number; heard?: string } | null>(null);
   const [drop, setDrop] = useState<Set<number>>(new Set());
-  const reset = () => { setDraft(""); setMode("note"); setProp(null); setDrop(new Set()); };
+  // Voice (wip/SPEC-voice-capture.md): the recorder lives in a ref so
+  // the tick's auto-stop sees the live one; recSec < 0 = not recording.
+  const recRef = useRef<Recorder | null>(null);
+  const [recSec, setRecSec] = useState(-1);
+  const micDrop = () => { recRef.current?.cancel(); recRef.current = null; setRecSec(-1); };
+  useEffect(() => () => recRef.current?.cancel(), []);
+  const micStop = () => {
+    const r = recRef.current;
+    if (!r) return;
+    recRef.current = null; setRecSec(-1);
+    setBusy(true); setProp(null); setDrop(new Set());
+    r.stop().then((audio) => audio ? voiceCmd({ audio, today: day }).then(setProp) : undefined)
+      .catch(fail).finally(() => setBusy(false));
+  };
+  const micTap = () => {
+    if (busy) return;
+    if (recRef.current) { micStop(); return; }
+    record((s) => { setRecSec(s); if (s >= 30) micStop(); })
+      .then((r) => { recRef.current = r; setRecSec(0); })
+      .catch(fail);
+  };
+  const pick = (m: "note" | "task" | "smart") => { micDrop(); setMode(m); };
+  const reset = () => { micDrop(); setDraft(""); setMode("note"); setProp(null); setDrop(new Set()); };
   const submit = () => {
     const text = draft.trim();
     if (!text) { onCancel?.(); return; }
@@ -1340,6 +1364,8 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
           if (e.key === "Escape") onCancel?.();
         }} />
       {prop && <div className="props">
+        {prop.heard !== undefined && <p className="muted small" style={{ margin: "2px 0" }}>
+          heard: “{prop.heard}”</p>}
         {prop.fallback && <p className="muted small" style={{ margin: "2px 0" }}>
           couldn't read that as a command — keeping it as a note:</p>}
         {prop.actions.map((a, i) => drop.has(i) ? null : (
@@ -1353,14 +1379,18 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
           {prop.model} · {(prop.ms / 1000).toFixed(1)} s</p>
       </div>}
       <div className="vrow">
-        <button className={`vpill ${mode === "note" ? "on" : ""}`} onClick={() => setMode("note")}>✎ note</button>
-        <button className={`vpill ${mode === "task" ? "on" : ""}`} onClick={() => setMode("task")}>○ task</button>
-        <button className={`vpill ${mode === "smart" ? "on" : ""}`} onClick={() => setMode("smart")}>✨ smart</button>
+        <button className={`vpill ${mode === "note" ? "on" : ""}`} onClick={() => pick("note")}>✎ note</button>
+        <button className={`vpill ${mode === "task" ? "on" : ""}`} onClick={() => pick("task")}>○ task</button>
+        <button className={`vpill ${mode === "smart" ? "on" : ""}`} onClick={() => pick("smart")}>✨ smart</button>
         {onCancel && <button className="cancelv" onClick={onCancel}>cancel</button>}
+        {mode === "smart" && !prop &&
+          <button className={`vpill${recSec >= 0 ? " on pulse" : ""}`} style={{ marginLeft: "auto" }}
+            disabled={busy} onClick={micTap} aria-label="voice">
+            {recSec >= 0 ? `◼ ${recSec}s` : "🎤"}</button>}
         {prop
           ? <button className="go" style={{ marginLeft: "auto" }} disabled={!kept.length}
               onClick={queueAll}>queue</button>
-          : <button className="go" style={{ marginLeft: "auto" }} disabled={busy}
+          : <button className="go" style={{ marginLeft: mode === "smart" ? 0 : "auto" }} disabled={busy || recSec >= 0}
               onClick={submit}>{mode === "smart" ? (busy ? "…" : "✨ go") : "add"}</button>}
       </div>
     </>
