@@ -5,3 +5,6 @@ __pycache__/
 hash
 .claude/
 wip/
+
+# retired Lambda replica: vendored site-packages, never source
+deploy/lambda/build/
