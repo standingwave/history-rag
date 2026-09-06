@@ -441,18 +441,26 @@ export const subToggle = mutation({
   },
 });
 
+async function subAddH(ctx: MutationCtx, id: string, text: string) {
+  text = text.trim();
+  if (!text) throw new Error("empty subtask");
+  const row = await taskRow(ctx, id);
+  const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
+  if (subs.some((s) => normTask(s.text) === normTask(text))) throw new Error("a subtask with that text already exists");
+  subs.push({ text, done: false, depth: 4 });
+  return subIntent(ctx, row, "add", { subtasks: subs }, { text });
+}
 export const subAdd = mutation({
   args: { id: v.string(), text: v.string() },
-  handler: async (ctx, { id, text }) => {
-    await requireUser(ctx);
-    text = text.trim();
-    if (!text) throw new Error("empty subtask");
-    const row = await taskRow(ctx, id);
-    const subs: Sub[] = [...(row.meta?.subtasks ?? [])];
-    if (subs.some((s) => normTask(s.text) === normTask(text))) throw new Error("a subtask with that text already exists");
-    subs.push({ text, done: false, depth: 4 });
-    return subIntent(ctx, row, "add", { subtasks: subs }, { text });
-  },
+  handler: async (ctx, { id, text }) => { await requireUser(ctx); return subAddH(ctx, id, text); },
+});
+export const subAddInternal = internalMutation({
+  args: { id: v.string(), text: v.string() },
+  handler: (ctx, { id, text }) => subAddH(ctx, id, text),
+});
+export const attachInternal = internalMutation({
+  args: { id: v.string(), text: v.string() },
+  handler: (ctx, { id, text }) => attachNote(ctx, id, text),
 });
 
 export const subEdit = mutation({

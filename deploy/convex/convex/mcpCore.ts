@@ -122,6 +122,26 @@ Returns JSON {query, count, results[]} ranked best-first; each result has rank (
     annotations: DESTRUCTIVE,
   },
   {
+    name: "add_subtask",
+    description: `Add a subtask under a task by id from list_tasks.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, text: { type: "string" } },
+      required: ["id", "text"],
+    },
+    annotations: WRITE,
+  },
+  {
+    name: "attach_to_task",
+    description: `Add a note line under a task by id from list_tasks; a bare URL becomes a link.` + QUEUED,
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, text: { type: "string" } },
+      required: ["id", "text"],
+    },
+    annotations: WRITE,
+  },
+  {
     name: "delete_task",
     description: `Remove a task line from its daily note, by id from list_tasks. Prefer set_task done:true unless the user clearly wants the line gone.` + QUEUED,
     inputSchema: {

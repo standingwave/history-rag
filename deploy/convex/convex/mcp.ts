@@ -143,6 +143,12 @@ export const endpoint = httpAction(async (ctx, req) => {
       case "delete_task":
         await ctx.runMutation(internal.today.removeInternal, { id: s(a.id) });
         return { queued: true };
+      case "add_subtask":
+        await ctx.runMutation(internal.today.subAddInternal, { id: s(a.id), text: s(a.text) });
+        return { queued: true };
+      case "attach_to_task":
+        await ctx.runMutation(internal.today.attachInternal, { id: s(a.id), text: s(a.text) });
+        return { queued: true };
       case "capture_note": {
         const zone = await tz();
         await ctx.runMutation(internal.today.captureInternal, {

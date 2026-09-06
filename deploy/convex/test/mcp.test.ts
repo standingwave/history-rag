@@ -19,13 +19,13 @@ test("initialize echoes a supported version, else offers the newest", async () =
   assert.deepEqual((out.body as any).result.capabilities, { tools: { listChanged: false } });
 });
 
-test("tools/list carries the 4 read + 15 action tools with schemas", async () => {
+test("tools/list carries the 4 read + 17 action tools with schemas", async () => {
   const out = await handleRpc(rpc("tools/list"), noCall);
   const tools = (out.body as any).result.tools;
-  assert.equal(tools.length, 19);
+  assert.equal(tools.length, 21);
   assert.deepEqual(tools.map((t: any) => t.name).sort(), [
-    "add_list_items", "capture_note", "control_timer", "create_list", "create_task",
-    "delete_task", "edit_list_item", "edit_task", "expand", "history_stats", "list_items",
+    "add_list_items", "add_subtask", "attach_to_task", "capture_note", "control_timer", "create_list",
+    "create_task", "delete_task", "edit_list_item", "edit_task", "expand", "history_stats", "list_items",
     "list_tasks", "list_timers", "list_window", "remove_list_item", "search_history",
     "set_list_item", "set_task", "start_timer",
   ]);
@@ -39,8 +39,8 @@ test("tools/list carries the 4 read + 15 action tools with schemas", async () =>
 
 test("WRITE_TOOLS is exactly the non-read-only set", () => {
   assert.deepEqual([...WRITE_TOOLS].sort(), [
-    "add_list_items", "capture_note", "control_timer", "create_list", "create_task",
-    "delete_task", "edit_list_item", "edit_task", "remove_list_item", "set_list_item",
+    "add_list_items", "add_subtask", "attach_to_task", "capture_note", "control_timer", "create_list",
+    "create_task", "delete_task", "edit_list_item", "edit_task", "remove_list_item", "set_list_item",
     "set_task", "start_timer",
   ]);
   assert.ok(TOOLS.find((t) => t.name === "delete_task")!.annotations!.destructiveHint);
