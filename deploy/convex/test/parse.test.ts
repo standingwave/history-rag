@@ -97,3 +97,16 @@ test("caps: 10 actions, 20 list items, 500-char text", () => {
   const long = validateActions(wrap([{ kind: "note", text: "y".repeat(900) }]), "x", CTX);
   assert.equal((long.actions[0] as { text: string }).text.length, 500);
 });
+
+test("subtask and attach need a listed task and text", () => {
+  const r = validateActions(wrap([
+    { kind: "subtask", id: "t1", text: "ask about the hearing aid" },
+    { kind: "attach", id: "t1", text: "https://example.com/hearing" },
+    { kind: "subtask", id: "t9", text: "orphan" },
+    { kind: "attach", id: "t1", text: "  " },
+  ]), "x", CTX);
+  assert.deepEqual(r.actions, [
+    { kind: "subtask", id: "t1", text: "ask about the hearing aid", label: "Call mom" },
+    { kind: "attach", id: "t1", text: "https://example.com/hearing", label: "Call mom" },
+  ]);
+});

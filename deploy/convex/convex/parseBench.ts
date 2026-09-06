@@ -67,6 +67,10 @@ const CASES: Case[] = [
   { text: "i called mom", want: [[{ kind: "toggle", id: "t1", done: true }]] },
   { text: "change call mom to call mom about her hearing aid", want: [[{ kind: "edit", id: "t1", newText: /hearing aid/ }]] },
   { text: "get rid of the MGM task", want: [[{ kind: "delete", id: "t3" }]] },
+  { text: "add a subtask to the dentist one: bring the insurance card",
+    want: [[{ kind: "subtask", id: "t2", text: /insurance card/ }]] },
+  { text: "note on call mom: she's free after 3", want: [[{ kind: "attach", id: "t1", text: /free after 3/ }]] },
+  { text: "add a subtask to the gym task: pack shoes", want: [[{ kind: "note", text: /gym/ }]] },
   // references matching nothing must fall back to a note, never a guessed id
   { text: "delete the task about the gym", want: [[{ kind: "note", text: /gym/ }]] },
   { text: "mark the piano practice task as done", want: [[{ kind: "note", text: /piano/ }]] },
@@ -153,7 +157,7 @@ const matches = (alt: Pat[], acts: Record<string, unknown>[]) =>
 function misfired(c: Case, acts: Record<string, unknown>[]): boolean {
   const okIds = new Set(c.want.flat().map((p) => p.id).filter(Boolean));
   return acts.some((a) =>
-    ["toggle", "edit", "delete", "listSet", "listEdit", "listRemove", "timerCtl"]
+    ["toggle", "edit", "delete", "subtask", "attach", "listSet", "listEdit", "listRemove", "timerCtl"]
       .includes(String(a.kind)) && !okIds.has(a.id));
 }
 

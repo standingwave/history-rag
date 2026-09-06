@@ -24,7 +24,7 @@ test("all-creation proposals auto-apply", () => {
 });
 
 test("any mutation in the set asks via chips", () => {
-  for (const kind of ["toggle", "edit", "delete", "listSet", "listEdit", "listRemove", "timerCtl"]) {
+  for (const kind of ["toggle", "edit", "delete", "subtask", "attach", "listSet", "listEdit", "listRemove", "timerCtl"]) {
     assert.ok(!autoApplies([{ kind }]), kind);
     assert.ok(!autoApplies([{ kind: "task" }, { kind }]), `mixed ${kind}`);
   }

@@ -25,6 +25,8 @@ export type ParsedAction =
   | { kind: "toggle"; id: string; done: boolean; label: string }
   | { kind: "edit"; id: string; newText: string; label: string }
   | { kind: "delete"; id: string; label: string }
+  | { kind: "subtask"; id: string; text: string; label: string }
+  | { kind: "attach"; id: string; text: string; label: string }
   | { kind: "listAdd"; path: string; items: string[]; label: string }
   | { kind: "listCreate"; name: string; items?: string[] }
   | { kind: "listSet"; id: string; state: "need" | "got"; label: string }
@@ -52,6 +54,8 @@ Reply with ONLY a JSON object {"actions":[...]}, no prose. Action shapes:
 {"kind":"toggle","id":"...","done":true} — mark an OPEN TASK done (false reopens)
 {"kind":"edit","id":"...","newText":"..."} — rewrite an open task
 {"kind":"delete","id":"..."} — remove an open task
+{"kind":"subtask","id":"...","text":"..."} — add a subtask under an open task
+{"kind":"attach","id":"...","text":"..."} — add a note line or URL under an open task
 {"kind":"listAdd","path":"...","items":["..."]} — add items to a LIST by its path
 {"kind":"listCreate","name":"...","items":["..."]} — make a NEW list (only when no listed one fits); items optional
 {"kind":"listSet","id":"...","state":"got"} — check a LIST ITEM off; "need" puts it back on the list
@@ -120,6 +124,12 @@ export function validateActions(raw: string, sentence: string, ctx: ParseCtx):
       case "delete": {
         const t = task.get(id);
         if (t) out.push({ kind: "delete", id, label: t.text });
+        break;
+      }
+      case "subtask":
+      case "attach": {
+        const t = task.get(id), text = trim500(a.text);
+        if (t && text) out.push({ kind: a.kind, id, text, label: t.text });
         break;
       }
       case "listAdd": {

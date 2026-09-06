@@ -1247,6 +1247,8 @@ function chipText(a: any, today: string): string {
     case "toggle": return a.done ? `✓ done ${q(a.label)}` : `○ reopen ${q(a.label)}`;
     case "edit": return `✎ ${q(a.label)} → ${q(a.newText)}`;
     case "delete": return `✕ delete ${q(a.label)}`;
+    case "subtask": return `＋ subtask ${q(a.text)} under ${q(a.label)}`;
+    case "attach": return `📎 ${q(a.text)} under ${q(a.label)}`;
     case "listAdd": return `＋ ${a.items.length > 1 ? `${a.items.length} items` : q(a.items[0])} → ${a.label}`;
     case "listCreate": return `＋ list ${q(a.name)}${a.items?.length
       ? ` with ${a.items.length} item${a.items.length > 1 ? "s" : ""}` : ""}`;
@@ -1268,6 +1270,8 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
   const toggleTask = useMutation(api.today.toggle);
   const editTask = useMutation(api.today.edit);
   const removeTask = useMutation(api.today.remove);
+  const subAddTask = useMutation(api.today.subAdd);
+  const attachTask = useMutation(api.today.attach);
   const addListItem = useMutation(api.lists.addItem);
   const setListState = useMutation(api.lists.setState);
   const editListItem = useMutation(api.lists.editItem);
@@ -1342,6 +1346,8 @@ function CaptureComposer({ day, onDone, onCancel, fail }:
       case "toggle": return toggleTask({ id: a.id });
       case "edit": return editTask({ id: a.id, newText: a.newText });
       case "delete": return removeTask({ id: a.id });
+      case "subtask": return subAddTask({ id: a.id, text: a.text });
+      case "attach": return attachTask({ id: a.id, text: a.text });
       case "listAdd": return Promise.all(
         a.items.map((t: string) => addListItem({ path: a.path, text: t }).catch(fail)));
       case "listCreate": return vocabCmd({ name: a.name }).catch(() => undefined)

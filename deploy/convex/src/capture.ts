@@ -15,7 +15,8 @@ export function verbatim(text: string): string | null {
 /* Mutations aim at an existing object by id — the only place a
    misparse has teeth, so the only place that asks first. Everything
    else is a new object or disposable live state (a timer). */
-const MUTATES = new Set(["toggle", "edit", "delete", "listSet", "listEdit", "listRemove", "timerCtl"]);
+const MUTATES = new Set(["toggle", "edit", "delete", "subtask", "attach",
+  "listSet", "listEdit", "listRemove", "timerCtl"]);
 
 export function autoApplies(actions: { kind: string }[]): boolean {
   return actions.length > 0 && actions.every((a) => !MUTATES.has(a.kind));
