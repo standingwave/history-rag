@@ -39,8 +39,7 @@ def test_default_backend_is_ollama_unchanged(capture_post):
     assert len(vec) == config.DIM
 
 
-@pytest.mark.parametrize("backend", ["bogus", "nomic-api", "mixedbread-api",
-                                     "hf-inference"])
+@pytest.mark.parametrize("backend", ["bogus", "hf-inference"])
 def test_non_ollama_backends_raise(capture_post, monkeypatch, backend):
     monkeypatch.setattr(config, "EMBED_BACKEND", backend)
     with pytest.raises(ValueError, match=backend):

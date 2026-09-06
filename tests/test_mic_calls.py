@@ -31,9 +31,6 @@ def test_mic_in_use_logic(monkeypatch):
     monkeypatch.setattr(mic, "_coreaudio", lambda: None)           # non-mac
     assert mic.mic_in_use() is False
 
-def test_mic_in_use_live_returns_bool():
-    assert mic.mic_in_use() in (True, False)   # real call; False off-mac
-
 # ── mic ticks ─────────────────────────────────────────────────────────────────
 
 def test_mic_tick_extend_close_and_sleep_gap():

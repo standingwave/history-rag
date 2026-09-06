@@ -95,6 +95,7 @@ def test_iter_dated_runs_skips_imported_rows(monkeypatch):
         (T + 5, "pytest -q", "/u/dev/x", 0),
     ]))
     assert list(sh.iter_dated_runs(0)) == [(T + 5, "pytest -q", "/u/dev/x")]
+    assert list(sh.iter_dated_runs(T + 10)) == []      # epoch bound drops the rest
 
 def test_session_commands_reads_atuin_window(monkeypatch, tmp_path):
     import sqlite3

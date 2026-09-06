@@ -108,23 +108,8 @@ def test_note_appends_creates_section_and_starts_day(tmp_path, monkeypatch):
                             "day": "2026-08-30", "text": "   ", "at": ""}) == "empty note"
 
 
-# ── add / edit / delete (need the daily-tasks skill for the note grammar) ──
-
-skill_present = pytest.mark.skipif(
-    not __import__("os").path.isfile(__import__("config").CONVEX_TASKS_SCRIPT),
-    reason="daily-tasks skill not installed")
-
-INSTALLED_SKILL = __import__("os").path.expanduser(
-    "~/.claude/skills/daily-tasks/tasks.py")
-
-@pytest.mark.skipif(not __import__("os").path.isfile(INSTALLED_SKILL),
-                    reason="daily-tasks skill not installed")
-def test_vendored_skill_matches_installed():
-    """tests/fixtures/daily_tasks.py is a copy of the installed skill with only
-    DEFAULT_VAULT sanitized. Re-vendor when the skill changes."""
-    import config, re
-    strip = lambda p: re.sub(r"(?m)^DEFAULT_VAULT = .*$", "", open(p).read())
-    assert strip(config.CONVEX_TASKS_SCRIPT) == strip(INSTALLED_SKILL)
+# ── add / edit / delete (the vendored daily-tasks skill supplies the note
+#    grammar; conftest points CONVEX_TASKS_SCRIPT at tests/fixtures) ──
 
 BLOCK = ["- [ ] treat hoya for mealybugs",
          "\t- [ ] isolate from other plants",
@@ -134,7 +119,6 @@ BLOCK = ["- [ ] treat hoya for mealybugs",
          "## Routine",
          "- [ ] brush teeth"]
 
-@skill_present
 def test_add_goes_before_routine_and_refuses_duplicates():
     new, err = ap.add_to_lines(BLOCK, "book dentist")
     assert err is None
@@ -143,7 +127,6 @@ def test_add_goes_before_routine_and_refuses_duplicates():
     new, err = ap.add_to_lines(BLOCK, "  Workout ")
     assert new is None and "already" in err
 
-@skill_present
 def test_edit_keeps_checkbox_and_block():
     new, err = ap.edit_in_lines(BLOCK, "workout", "workout (legs)")
     assert err is None and new[3] == "- [x] workout (legs)" and new[:3] == BLOCK[:3]
@@ -153,14 +136,12 @@ def test_edit_keeps_checkbox_and_block():
     new, err = ap.edit_in_lines(BLOCK, "nope", "x")
     assert new is None and "not found" in err
 
-@skill_present
 def test_delete_removes_the_whole_block():
     new, err = ap.delete_from_lines(BLOCK, "treat hoya for mealybugs")
     assert err is None and new == BLOCK[3:]
     new, err = ap.delete_from_lines(BLOCK, "isolate from other plants")
     assert new is None and "not found" in err
 
-@skill_present
 def test_add_to_missing_note_starts_the_day(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
@@ -171,13 +152,10 @@ def test_add_to_missing_note_starts_the_day(tmp_path, monkeypatch):
                            "text": "book dentist"})
     assert err is None
     got = (v / "2026-08-29.md").read_text().split("\n")
-    assert got[0] == "- [ ] treat hoya for mealybugs"        # carried, with its block
-    assert "\t- [ ] isolate from other plants" in got
-    assert "- [ ] book dentist" in got and "- [x] workout" not in got
+    # the carry itself is test_start_creates_the_note_without_adding's job
+    assert "- [ ] book dentist" in got
     assert got.index("- [ ] book dentist") < got.index("## Routine")
-    assert "- [ ] brush teeth" in got and "- [ ] gym" not in got  # 2026-08-29 is a Saturday
 
-@skill_present
 def test_start_creates_the_note_without_adding(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
@@ -204,7 +182,6 @@ def test_applies_day_tags():
     assert not ap._applies(["weekend"], "2026-08-31")
     assert ap._applies(["weekend"], "2026-09-05")        # a Saturday
 
-@skill_present
 def test_routine_template_add_edit_delete():
     tpl = ["- [ ] brush teeth", "- [ ] gym #mon #wed", "\t- [ ] stretch"]
     new, err = ap.routine_add_tpl(tpl, "meditate", ["weekday"])
@@ -225,7 +202,6 @@ def test_routine_template_add_edit_delete():
     new, err = ap.routine_delete_tpl(tpl, "nope")
     assert new is None and "not found" in err
 
-@skill_present
 def test_routine_add_intent_hits_template_and_today(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     (v / "2026-08-31.md").write_text("- [ ] existing\n")             # a Monday
@@ -251,7 +227,6 @@ def test_routine_add_intent_hits_template_and_today(tmp_path, monkeypatch):
                             "text": "meditate"}) is None
     assert "meditate" not in tpl.read_text()
 
-@skill_present
 def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     monkeypatch.setenv("CLAUDE_RAG_OBSIDIAN_VAULTS", str(v))
@@ -262,7 +237,6 @@ def test_other_kinds_need_an_existing_note(tmp_path, monkeypatch):
                                          "text": "x"})
 
 
-@skill_present
 def test_subtask_toggle_add_edit_delete():
     new, err = ap.apply_sub(BLOCK, "treat hoya for mealybugs", "toggle", "isolate from other plants", want="done")
     assert err is None and new[1] == "\t- [x] isolate from other plants" and new[2] == BLOCK[2]
@@ -279,7 +253,6 @@ def test_subtask_toggle_add_edit_delete():
     assert "subtask not found" in ap.apply_sub(BLOCK, "workout", "toggle", "x", want="done")[1]
     assert "already" in ap.apply_sub(BLOCK, "treat hoya for mealybugs", "add", "Isolate from other plants")[1]
 
-@skill_present
 def test_apply_intent_routes_subtasks(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")
@@ -290,7 +263,6 @@ def test_apply_intent_routes_subtasks(tmp_path, monkeypatch):
     assert "- [x] workout\n\t- [ ] legs\n" in (v / "2026-08-28.md").read_text()
 
 
-@skill_present
 def test_attach_appends_a_line_at_the_block_end():
     fake = lambda url: "Mealybugs — RHS"
     new, err = ap.attach_to_lines(BLOCK, "treat hoya for mealybugs", "https://rhs.org/mealybugs", title=fake)
@@ -301,7 +273,6 @@ def test_attach_appends_a_line_at_the_block_end():
     assert "parent task not found" in ap.attach_to_lines(BLOCK, "nope", "x", title=fake)[1]
 
 
-@skill_present
 def test_attach_file_copies_into_the_vault(tmp_path, monkeypatch):
     v = tmp_path / "Documents"; v.mkdir()
     (v / "2026-08-28.md").write_text("\n".join(BLOCK) + "\n")

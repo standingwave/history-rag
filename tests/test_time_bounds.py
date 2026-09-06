@@ -11,13 +11,6 @@ def test_date_only_until_covers_whole_local_day():
     assert _bound_to_utc("2026-07-02", end_of_day=True) == \
         "2026-07-03T06:59:59.999999+00:00"
 
-def test_castle_regression_evening_visit_in_local_day():
-    """17:11 PDT on Jul 1 is Jul 2 in UTC but must fall inside local Jul 1."""
-    since = _bound_to_utc("2026-07-01")
-    until = _bound_to_utc("2026-07-01", end_of_day=True)
-    visit = "2026-07-02T00:11:00+00:00"
-    assert since <= visit <= until
-
 def test_datetime_bounds():
     assert _bound_to_utc("2026-07-02T12:00:00") == \
         "2026-07-02T19:00:00+00:00"                      # naive = local

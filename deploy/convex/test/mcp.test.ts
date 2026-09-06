@@ -37,12 +37,12 @@ test("tools/list carries the 4 read + 17 action tools with schemas", async () =>
   assert.deepEqual(TOOLS.find((t) => t.name === "search_history")!.inputSchema.required, ["query"]);
 });
 
-test("WRITE_TOOLS is exactly the non-read-only set", () => {
-  assert.deepEqual([...WRITE_TOOLS].sort(), [
-    "add_list_items", "add_subtask", "attach_to_task", "capture_note", "control_timer", "create_list",
-    "create_task", "delete_task", "edit_list_item", "edit_task", "remove_list_item", "set_list_item",
-    "set_task", "start_timer",
-  ]);
+test("WRITE_TOOLS is every tool except the reads", () => {
+  const reads = ["search_history", "list_window", "expand", "history_stats",
+                 "list_tasks", "list_items", "list_timers"];
+  assert.deepEqual([...WRITE_TOOLS].sort(),
+    TOOLS.map((t) => t.name).filter((n) => !reads.includes(n)).sort());
+  assert.equal(WRITE_TOOLS.size, TOOLS.length - reads.length);
   assert.ok(TOOLS.find((t) => t.name === "delete_task")!.annotations!.destructiveHint);
   assert.ok(!TOOLS.find((t) => t.name === "create_task")!.annotations!.destructiveHint);
 });

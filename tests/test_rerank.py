@@ -45,20 +45,16 @@ def test_scoped_search_reranks_within_source(scratch_db, fake_embed,
     assert {x["source"] for x in r["results"]} == {"alpha"}
     assert r["results"][0]["score"] == 2.0    # highest fake score wins
 
-def test_rerank_failure_falls_back_to_distance(scratch_db, fake_embed,
-                                               monkeypatch, rr_on):
+@pytest.mark.parametrize("cause", ["off", "fails"])
+def test_no_rerank_keeps_distance_order(scratch_db, fake_embed, monkeypatch, cause):
     _seed(monkeypatch)
-    monkeypatch.setattr(rerank, "rerank", lambda q, texts: None)
+    if cause == "fails":
+        monkeypatch.setattr(rerank, "available", lambda: True)
+        monkeypatch.setattr(rerank, "rerank", lambda q, texts: None)
     r = json.loads(server.search_history("alpha text 1", k=2))
     assert "reranked" not in r and r["count"] == 2
     assert all("score" not in x for x in r["results"])
     assert [x["rank"] for x in r["results"]] == [1, 2]
-
-def test_rerank_off_by_default(scratch_db, fake_embed, monkeypatch):
-    _seed(monkeypatch)
-    r = json.loads(server.search_history("alpha text 1", k=2))
-    assert "reranked" not in r
-    assert all("score" not in x for x in r["results"])
 
 def test_rerank_module_fails_open(monkeypatch):
     import sys, config

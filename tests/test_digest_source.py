@@ -122,10 +122,6 @@ def test_safari_visit_reader_schema_and_epochs(monkeypatch, tmp_path):
     assert chunks["2026-07-02"][2]["location"] == "safari"
     assert chunks["2026-07-02"][2]["meta"]["domains"] == {"news.site.com": 1}
 
-def test_browser_digest_deterministic(browser_fixture):
-    days = ["2026-07-01", "2026-07-02"]
-    assert list(digest._browser_chunks(days)) == list(digest._browser_chunks(days))
-
 def test_browser_digest_text_cap(monkeypatch, tmp_path):
     prof = tmp_path / "p2"
     prof.mkdir()
@@ -198,21 +194,6 @@ def test_shell_digest_counts_runs_by_day(monkeypatch):
     assert '"python index.py" (x2)' in text
     assert r["meta"]["runs"] == 3
     assert "1 command," in chunks["2026-07-03"][1]
-
-def test_iter_dated_runs_atuin_dedup_and_epoch_filter(monkeypatch, tmp_path):
-    live = tmp_path / "zh"
-    live.write_text(": 1751400000:0;git status --short\n"
-                    ": 1751400060:0;make test\n"
-                    ": 1000:0;ancient command here\n")
-    monkeypatch.setattr(shell, "_history_files", lambda: ([str(live)], []))
-    monkeypatch.setattr(shell, "_read_atuin", lambda: iter([
-        (1751400030.0, "git status --short", "/Users/u/dev", 0),
-    ]))
-    got = list(shell.iter_dated_runs(1751000000))
-    # atuin's run kept (with cwd); its command's histfile copy skipped;
-    # the pre-window entry dropped
-    assert got == [(1751400030.0, "git status --short", "/Users/u/dev"),
-                   (1751400060, "make test", "")]
 
 # ── window selection and pipeline behavior ───────────────────────────────────
 

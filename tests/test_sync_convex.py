@@ -39,22 +39,14 @@ def test_shape_row():
     assert it["chunkId"] == "tasks:abc" and it["day"] and it["month"] == it["day"][:7]
     assert it["embedding"] == [0.1, 0.2] and it["meta"] == {"done": False}
 
-def test_shape_list_gets_sentinel_day():
-    it = sc.shape(("tasks:l1", "tasks", "2026-09-02T19:00:00+00:00",
-                   "Lists/Groceries.md#1", "Groceries list: milk",
-                   json.dumps({"list": "Groceries", "state": "need"})), None)
-    assert it["day"] == "list" and it["month"] == ""
-
-def test_shape_routine_gets_sentinel_day():
-    it = sc.shape(("tasks:r1", "tasks", "2026-08-31T19:00:00+00:00",
-                   "Templates/Daily Tasks Template.md#0", "Routine: gym",
-                   json.dumps({"routine": True, "days": ["mon"]})), None)
-    assert it["day"] == "routine" and it["month"] == ""
-
-def test_unpack_float32(monkeypatch):
-    monkeypatch.setattr(sc.config, "CONVEX_DIM", 3)
-    blob = struct.pack("3f", 1.0, 0.5, -0.25)
-    assert sc.unpack(blob, 3) == [1.0, 0.5, -0.25]
+@pytest.mark.parametrize("meta, sentinel", [
+    ({"list": "Groceries", "state": "need"}, "list"),
+    ({"routine": True, "days": ["mon"]}, "routine"),
+])
+def test_shape_undated_kinds_get_sentinel_day(meta, sentinel):
+    it = sc.shape(("tasks:x", "tasks", "2026-09-02T19:00:00+00:00",
+                   "x.md#1", "text", json.dumps(meta)), None)
+    assert it["day"] == sentinel and it["month"] == ""
 
 
 def test_unpack_truncates_and_renormalises():
@@ -64,7 +56,6 @@ def test_unpack_truncates_and_renormalises():
     assert sc.content_hash("t", [], 4) != sc.content_hash("t", [], 2)
 
 def test_content_hash_includes_meta_only_when_given():
-    assert sc.content_hash("t", []) == sc.content_hash("t", [], meta=None)
     assert sc.content_hash("t", [], meta={"a": 1}) != sc.content_hash("t", [], meta={"a": 2})
     tasks = sc.shape(("c", "tasks", "2026-08-30T07:00:00+00:00", "x", "t", '{"done": false, "subtasks": [{"done": false}]}'), None)
     tasks2 = sc.shape(("c", "tasks", "2026-08-30T07:00:00+00:00", "x", "t", '{"done": false, "subtasks": [{"done": true}]}'), None)

@@ -81,26 +81,19 @@ def test_backup_failure_isolated(scratch_db, monkeypatch, capsys):
     assert "sync pushed 174MB" in summary
 
 
-def test_systemexit_isolated_and_rowless_tick_gets_a_row(
-        scratch_db, monkeypatch):
-    fake_index(monkeypatch, crash="systemexit")     # exits before its INSERT
+@pytest.mark.parametrize("crash, msg", [("systemexit", "stamp mismatch"),
+                                        ("hard", "hard crash")])
+def test_index_crash_isolated_and_rowless_tick_gets_a_row(
+        scratch_db, monkeypatch, crash, msg):
+    fake_index(monkeypatch, crash=crash)            # dies before its INSERT
     stub_steps(monkeypatch)
     refresh.main()
     r = rows(scratch_db)
     assert len(r) == 1 and r[0][1] == "aborted"     # minimal row created
     steps = json.loads(r[0][2])
     assert steps["index"]["ok"] is False
-    assert "stamp mismatch" in steps["index"]["error"]
+    assert msg in steps["index"]["error"]
     assert steps["backup"]["ok"] and steps["sync"]["ok"]   # chain continued
-
-
-def test_hard_crash_isolated(scratch_db, monkeypatch):
-    fake_index(monkeypatch, crash="hard")
-    stub_steps(monkeypatch)
-    refresh.main()
-    (rid, status, steps_json), = rows(scratch_db)
-    assert status == "aborted"
-    assert json.loads(steps_json)["sync"]["ok"]
 
 
 def test_prune_argv_and_one_row_per_tick(scratch_db, monkeypatch):

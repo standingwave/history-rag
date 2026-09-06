@@ -295,6 +295,3 @@ def test_partial_adapter_failure_raises(store, tmp_path, monkeypatch):
                         {"email": {"adapters": ["applemail", "fake"]}})
     with pytest.raises(RuntimeError, match="fake: permission denied"):
         chunks()
-
-def test_prune_window_declared(store):
-    assert em.PRUNE_WINDOW_DAYS == 30

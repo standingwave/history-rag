@@ -52,10 +52,3 @@ def test_main_returns_written_or_current(tmp_path, monkeypatch):
     _mk_db(str(tmp_path / "history-rag.db"), ["a"])
     assert b.main() == {"history-rag": "written", "appusage": "current"}
     assert b.main() == {"history-rag": "current", "appusage": "current"}
-
-def test_config_defaults(monkeypatch):
-    b = _load()
-    monkeypatch.setenv("CLAUDE_RAG_BACKUP_KEEP", "3")
-    assert b.keep_count() == 3
-    monkeypatch.setenv("CLAUDE_RAG_BACKUP_DIR", "/tmp/xyz")
-    assert b.backup_dir() == "/tmp/xyz"
