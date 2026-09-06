@@ -8,3 +8,4 @@ wip/
 
 # retired Lambda replica: vendored site-packages, never source
 deploy/lambda/build/
+deploy/lambda/history-rag-lambda.zip
